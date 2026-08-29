@@ -15,6 +15,7 @@ export function createSecurityProvider(options: SecurityProviderOptions): Securi
     return new WindowsSecurityProvider({
       runner: options.runner ?? nodeCommandRunner,
       systemRoot: options.systemRoot,
+      platform: options.platform,
     });
   }
   return new PosixSecurityProvider();
