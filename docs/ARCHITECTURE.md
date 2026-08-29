@@ -1,0 +1,1108 @@
+# Agent Orchestrator MCP — V1 Architecture (Revision 3)
+
+> **Status:** approved. This is the design of record; the implementation follows the phase plan in §21.
+> Implementation is at **Phase 0 (scaffold)**. Sections describing later phases are design intent, not
+> shipped behaviour. This document was written before any code existed, so present-tense descriptions
+> of components state what they must do, not what exists today.
+
+---
+
+## Revision Delta
+
+### Revision 3 (this revision — single hardening change)
+
+**`authoritative_statuses` is now frozen at runtime, exactly like `decision_grants`.**
+
+Revision 2 froze `decision_grants` but left `authoritative_statuses` writable. Trigger T3 (monotonicity and terminality) reads `rank` and `terminal` from that table, so a direct-SQL mutation of its rows would silently disarm T3 without ever touching a job row — for example `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status = 'JOB_COMPLETED';` would make a terminal outcome reopenable, and lowering `APPROVED`'s rank (or raising a terminal status's rank) would let milestones regress. Reference data that a security trigger reads is part of the security boundary and must be immutable at runtime.
+
+Revision 3 adds `INSERT`/`UPDATE`/`DELETE` triggers on `authoritative_statuses`, created **after** the migration seeds the rows, plus five raw-SQL bypass tests (§19, invariants 15a–15e) and a threat-model row (§15, threat 2b). Sections touched: §4, §15, §19, §21, §23. **Nothing else in Revision 2 is changed.**
+
+### Revision 2 (what changed from Revision 1)
+
+| # | Change | Sections touched |
+|---|---|---|
+| 1 | **Authority trigger strengthened.** The old trigger only proved the referenced decision belonged to the same job/cycle. It is replaced by an immutable `decision_grants` mapping table plus a `authoritative_statuses` rank/terminal table, and triggers that require the referenced decision to **semantically grant** the exact status being written, to have been authored by an **enabled principal**, and to target the same `state`. `RETEST`/`FIX`/`VERIFY_SELF`/`IGNORE_FALSE_POSITIVE` grant nothing and can never justify an authoritative write. Monotonicity and terminality are enforced in the DB. `decisions` and `audit_log` are now append-only at the DB level. | §4, §9, §19 |
+| 2 | **`final_status` renamed to `authoritative_status`** throughout. `state` remains the workflow position. `PACKAGING` reclassified as a *workflow* state that requires `job:decide` to enter but stamps no new milestone. | §4, §6, §9, §19 |
+| 3 | **Windows-native secret protection.** `chmod`/0600 is documented as a **no-op on Windows** and is now only the POSIX implementation. Windows uses inheritance-stripped, current-user-SID-only DACLs applied and **verified after creation**, failing closed. DPAPI evaluated explicitly and deferred, with rationale. Token material is **print-once** by default so the orchestrator holds no plaintext bearer token at rest. | §15, §18, §20, §21 |
+| 4 | **Single global state root** `%LOCALAPPDATA%\AgentOrchestratorMCP\` with `data\ artifacts\ secrets\ logs\`. **One database for all projects** — no per-workspace DB. Jobs still record their `workspace`, and `job_list` queries across projects. | §9, §13, §17, §18, §21 |
+| 5 | **Multiple concurrent Codex sessions supported from V1.** Still exactly one principal actor row. Tokens moved out of `actors` into a many-to-one `actor_tokens` table, so each Codex session can hold its own token that maps to the single principal — session identity becomes **verified, not claimed**. `session_token_id` and a server-generated `request_id` are recorded on decisions and audit rows. | §4, §5, §9, §14, §17, §19 |
+| 6 | **Workspace roots are an explicit config allowlist**, seeded with `C:\AgentProjects` and `C:\SallaProjects`. Additive without code changes. Artifact storage is separate, under the global root. | §9, §15, §18 |
+| 7 | **Browser/CDP worker stays external** for the first integration and is registered later as a generic process worker. No CDP dependency enters the V1 core. | §12, §20, §22 |
+| 8 | **Exactly-one-principal invariant.** The unique partial index still guarantees *at most* one; a startup invariant now requires *exactly one enabled* principal or the service refuses to serve. Bootstrap behaviour documented. | §4, §16, §19, §21 |
+| 9 | **`qa_dispatch` lifecycle disambiguated.** `QA_REQUESTED` is **removed from the observable state set**; request-and-dispatch is one `BEGIN IMMEDIATE` transaction ending in `QA_RUNNING`. `RETEST` now returns the job to `IN_PROGRESS` at `cycle+1` and requires a fresh explicit dispatch. The unused `work:claim` capability is dropped. | §6, §8, §17 |
+| 10 | **agy remains deferred**, and §11 now flags that the stdin/prompt contract is **unverified** against the installed CLI and must be re-verified empirically when that phase begins. | §11, §21, §22 |
+| 11 | Open Questions no longer ask about state location, concurrent Codex sessions, workspace roots, or the browser worker's location — those are decided. | §22 |
+
+Everything not listed above is unchanged from Revision 1.
+
+---
+
+## Context
+
+We are building a general-purpose, local multi-agent orchestration system exposed over MCP. The problem it solves: today an agent that does work is also the agent that judges whether the work is good, and an agent that reviews work can quietly promote its own opinion into a final verdict. That is unsafe and unauditable.
+
+This system makes **Codex the sole authority**. Codex accepts tasks, does the work, and decides. Everything else — Gemini via `agy`, a deterministic Chrome/CDP worker, future agents — are *workers and advisors* that produce **evidence**. The orchestrator is the control plane that dispatches them, persists what happened, and structurally prevents any worker from writing an authoritative status.
+
+Intended outcome of V1: a small, reliable, well-tested core (job state machine + authorization + persistence + evidence/artifacts + audit + one generic worker adapter) onto which Gemini, browser workers, and other agents can be added as *configuration*, not as core rewrites. Nothing in the design is coupled to any specific site, repo, or task domain.
+
+Environment verified read-only on this machine: Node **v22.22.0**, npm 11.6.4, git 2.53.0, `agy.exe` **1.1.22**, Python present but **3.7.9 (EOL)**.
+
+**Decisions already made and closed:** HTTP-first transport with stdio also supported · per-actor tokens plus single-use dispatch leases · V1 = core + one generic process-worker adapter · single global state root under `%LOCALAPPDATA%` · multiple concurrent Codex sessions with one principal · workspace allowlist `C:\AgentProjects`, `C:\SallaProjects` · browser worker stays external.
+
+---
+
+## 1. Executive Architecture Summary
+
+A single long-lived local service (`agent-orchestrator-mcp`) that is:
+
+- **An MCP server** — the control plane. Codex is its client. Ten tools, one of which (`codex_decide`) is the only door to authoritative status.
+- **A job store** — one SQLite database (WAL) at a global user-profile location, the single system of record across all projects: jobs, cycles, worker runs, evidence, artifacts, decisions, and an append-only hash-chained audit log.
+- **A worker runtime** — spawns deterministic or LLM-backed worker processes, talks NDJSON over stdout, enforces timeouts/cancellation/retries, and normalizes everything into `WorkerReport`.
+
+Four architectural commitments carry the whole design:
+
+1. **Authority is a capability, not a prompt.** `job:decide` is held by exactly one enabled actor row whose `role='principal'`. Tools requiring it are not registered on servers built for other actors, handlers re-check it, the domain layer re-checks it, and the database independently refuses an `authoritative_status` that is not *semantically granted* by a principal decision targeting that exact state.
+2. **Worker verdict ≠ authoritative status.** `worker_runs.worker_verdict` and `jobs.authoritative_status` are different columns in different tables with **no code path between them**. The only writer of `authoritative_status` is `domain/decide.ts`.
+3. **Deterministic execution is separated from intelligent analysis.** Browser navigation, DOM reads, screenshots, console capture are mechanical work with no model in the loop. Models are spent only on interpreting the artifacts that work produced.
+4. **The system never self-approves and never self-fails a job.** Timeouts, crashes, max-cycle exhaustion, and orphaned runs move a job to `STALLED` — a *non-authoritative* holding state — and wait for Codex. The `system` actor has no path to any authoritative status.
+
+The orchestrator is the control plane; MCP is not forced to be the internal worker protocol. Worker execution uses plain subprocess + NDJSON, which is simpler, faster, and testable without a protocol stack.
+
+---
+
+## 2. Recommended V1 Stack
+
+*(unchanged from Revision 1)*
+
+| Concern | Choice |
+|---|---|
+| Language | **TypeScript 5.x**, `strict`, ESM |
+| Runtime | **Node.js 22 LTS** (v22.22.0 present) |
+| MCP SDK | **`@modelcontextprotocol/server` v2** (+ `@modelcontextprotocol/node`) |
+| Validation | **Zod v4** (`zod/v4`) — the SDK's Standard Schema path |
+| Persistence | **SQLite via `better-sqlite3`**, WAL, hand-written SQL + numbered migrations. No ORM |
+| HTTP | **`node:http`** + `localhostHostValidation()` / `localhostOriginValidation()` + local bearer gate. **No Express** |
+| Testing | **Vitest** |
+| Process mgmt | `node:child_process.spawn` with argv arrays (never shell strings) |
+| IDs | `crypto.randomUUID()`, `crypto.randomBytes` |
+
+### TypeScript/Node vs Python
+
+| Criterion | TypeScript/Node | Python | Verdict |
+|---|---|---|---|
+| MCP ecosystem maturity | Reference implementation; v2 is stable, implements 2026-07-28, **and serves legacy 2025-era clients from the same factory** | Official SDK is good, but TS leads on spec revisions and on the dual-era serving we need for an unknown Codex client era | **TS** |
+| Subprocess management | `spawn` + streams is idiomatic, non-blocking | `asyncio.create_subprocess_exec` is fine; sync/async split is a footgun | TS (mild) |
+| NDJSON streaming | Native | Fine | TS (mild) |
+| SQLite | `better-sqlite3` prebuilds for Node 22/Windows; synchronous API is a *feature* for a transactional single-writer store | stdlib `sqlite3` is excellent | Python (mild) |
+| Windows support | First-class; already installed and working | **Local Python is 3.7.9, EOL since June 2023** — a fresh interpreter is step zero | **TS** |
+| Schema validation | Zod v4 → SDK derives the JSON Schema the model sees | Pydantic v2 is equally strong | Tie |
+| Future workers | The proven Chrome/CDP worker is already Node — same runtime, same NDJSON contract | Would need a second runtime or a Python CDP client | **TS** |
+| Packaging | `npm i -g` / `npx` | venv/uv adds a step | TS |
+
+**Selected: TypeScript on Node 22**, for the dual-era SDK serving, the existing Node CDP worker, and the EOL local Python.
+
+**`better-sqlite3` over `node:sqlite`:** `node:sqlite` is stability **1.1 "Active development"** on Node 22 and still warns. For the system of record for approval decisions, that is the wrong trade. All access goes through a thin `Store` interface, so moving to `node:sqlite` on Node 24+ later is a one-file change.
+
+**Explicitly avoided:** Express, an ORM, a DI container, a message broker, a plugin framework, monorepo tooling.
+
+---
+
+## 3. Component Diagram
+
+```
+   ┌──────────────────────────────────────────────────────────────────┐
+   │              CODEX  (PRINCIPAL — one actor, many sessions)        │
+   │      accepts task · does work · reviews evidence · DECIDES        │
+   └───────────────────────────┬──────────────────────────────────────┘
+                               │ MCP (Streamable HTTP, 127.0.0.1, bearer)
+                               │ per-session token → same principal actor
+   ┌───────────────────────────▼──────────────────────────────────────┐
+   │                    AGENT ORCHESTRATOR MCP                         │
+   │  mcp/        transport · per-actor server factory · tool schemas  │
+   │  auth/       actors · actor_tokens · capabilities · leases        │
+   │  domain/     job state machine · transition table · decide.ts     │
+   │  store/      one SQLite DB (WAL) · migrations · repositories      │
+   │  workers/    adapter registry · process runtime (NDJSON)          │
+   │  artifacts/  path jail · sha256 · metadata-only in DB             │
+   │  audit/      append-only hash-chained log · redaction             │
+   │                                                                   │
+   │  STATE ROOT: %LOCALAPPDATA%\AgentOrchestratorMCP\                 │
+   │    data\orchestrator.db · artifacts\ · secrets\ · logs\           │
+   └───┬───────────────────────────┬──────────────────────┬───────────┘
+       │ spawn + NDJSON            │ spawn + NDJSON       │ MCP ingress
+   ┌───▼──────────────┐   ┌────────▼─────────────┐   ┌────▼─────────────┐
+   │ GEMINI REVIEWER  │   │  BROWSER WORKER      │   │  FUTURE WORKERS  │
+   │ agy (LATER)      │   │  EXTERNAL repo, Node │   │  shell · QA ·    │
+   │ INTERPRETS       │   │  + CDP, NO MODEL     │   │  file · API      │
+   │ trust=untrusted  │   │  trust=deterministic │   │                  │
+   └───┬──────────────┘   └────────┬─────────────┘   └────┬─────────────┘
+       └────────── evidence + artifacts (labelled) ────────┘
+                               ▼
+                    Codex reads labelled evidence
+                    → APPROVE · FIX · RETEST · VERIFY_SELF
+                      · IGNORE_FALSE_POSITIVE · STOP · REJECT
+```
+
+---
+
+## 4. Codex Authority Model — exact enforcement mechanism
+
+Five independent layers. Removing any one still leaves the invariant enforced.
+
+**Layer 1 — Transport identity.** Every request carries a bearer token. `verifyAccessToken(token)` hashes it (SHA-256) and looks it up in **`actor_tokens`**, which is many-to-one onto `actors`. It returns `AuthInfo { clientId: actor_id, scopes: capabilities[], tokenId, sessionLabel }`. Several Codex sessions may each hold their own token; all resolve to the **single** principal actor. Tokens are never stored in plaintext, never logged, never returned by any tool. On stdio the same lookup happens once at startup from `ORCHESTRATOR_ACTOR_TOKEN`. Unknown, expired, or disabled token → 401, audited as `auth.rejected`.
+
+**Layer 2 — Tool visibility.** The SDK builds a fresh `McpServer` per request from a factory receiving `authInfo`. Tools the actor lacks capabilities for are **not registered** — `tools/list` for a worker does not contain `codex_decide` at all.
+
+**Layer 3 — Handler capability check.** Every handler begins with `requireCapability(ctx, '<cap>')`. Defence in depth against a registration bug, and it covers the stdio path.
+
+**Layer 4 — Domain choke point.** Exactly one function mutates `jobs.state` / `jobs.authoritative_status`:
+
+```
+applyTransition(tx, job, transition, actorCtx) -> Job
+```
+
+It consults a static `TRANSITIONS` table keyed by `(from_state, transition)` yielding `{ to, grantsStatus?, requiredCapability, allowedRoles, guards[] }`. Every transition that stamps an authoritative status requires `job:decide` and `role='principal'`. The repository layer exposes no raw state setter.
+
+**Layer 5 — Database.** The DB does not trust the application. Two immutable reference tables plus four triggers make an unjustified authoritative write impossible even from a `sqlite3` shell:
+
+```sql
+-- Which decision verb grants which authoritative status. Immutable after migration.
+CREATE TABLE decision_grants (
+  decision             TEXT NOT NULL,
+  authoritative_status TEXT NOT NULL,
+  PRIMARY KEY (decision, authoritative_status)
+);
+INSERT INTO decision_grants (decision, authoritative_status) VALUES
+  ('APPROVE',  'APPROVED'),
+  ('DELIVER',  'READY_FOR_DELIVERY'),
+  ('COMPLETE', 'JOB_COMPLETED'),
+  ('REJECT',   'REJECTED'),
+  ('CANCEL',   'JOB_CANCELLED');
+-- FIX, RETEST, VERIFY_SELF, IGNORE_FALSE_POSITIVE, STOP, PACKAGE grant NOTHING.
+-- They have no row here, so they can never satisfy the trigger below.
+
+-- Ranks and terminality that trigger T3 reads. Immutable after migration (T6).
+CREATE TABLE authoritative_statuses (
+  authoritative_status TEXT PRIMARY KEY,
+  rank                 INTEGER NOT NULL,
+  terminal             INTEGER NOT NULL
+);
+INSERT INTO authoritative_statuses VALUES
+  ('APPROVED', 10, 0), ('READY_FOR_DELIVERY', 20, 0),
+  ('JOB_COMPLETED', 30, 1), ('REJECTED', 90, 1), ('JOB_CANCELLED', 91, 1);
+```
+
+Both reference tables are **security-relevant data that triggers read**, not ordinary configuration: `decision_grants` is the allowlist T2 consults, and `authoritative_statuses` supplies the `rank`/`terminal` values T3 consults. Mutating either at runtime would disarm a trigger without touching a single job row. Both are therefore frozen by triggers created **after** the seed inserts, in the same migration (T5, T6 below).
+
+```sql
+-- (T1) Only an enabled principal may author a decision.
+CREATE TRIGGER trg_decisions_principal_only BEFORE INSERT ON decisions
+BEGIN
+  SELECT RAISE(ABORT, 'decisions require an enabled principal actor')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM actors a
+    WHERE a.actor_id = NEW.actor_id AND a.role = 'principal' AND a.disabled = 0);
+END;
+
+-- (T2) An authoritative_status write must be SEMANTICALLY GRANTED by the
+--      referenced decision, which must target this job, cycle, and state.
+CREATE TRIGGER trg_auth_status_requires_granting_decision
+BEFORE UPDATE OF authoritative_status ON jobs
+WHEN NEW.authoritative_status IS NOT OLD.authoritative_status
+BEGIN
+  SELECT RAISE(ABORT, 'authoritative_status requires a granting principal decision')
+  WHERE NEW.authoritative_status IS NULL              -- never cleared once set
+     OR NEW.deciding_decision_id IS NULL
+     OR NOT EXISTS (
+        SELECT 1
+        FROM decisions d
+        JOIN actors           a ON a.actor_id = d.actor_id
+        JOIN decision_grants  g ON g.decision = d.decision
+        WHERE d.decision_id = NEW.deciding_decision_id
+          AND d.job_id      = NEW.job_id
+          AND d.cycle       = NEW.cycle
+          AND d.to_state    = NEW.state          -- decision targeted THIS state
+          AND a.role        = 'principal'
+          AND a.disabled    = 0
+          AND g.authoritative_status = NEW.authoritative_status);  -- SEMANTIC MATCH
+END;
+
+-- (T3) Milestones are monotonic and terminality is absolute.
+CREATE TRIGGER trg_auth_status_monotonic
+BEFORE UPDATE OF authoritative_status ON jobs
+WHEN OLD.authoritative_status IS NOT NULL
+ AND NEW.authoritative_status IS NOT OLD.authoritative_status
+BEGIN
+  SELECT RAISE(ABORT, 'authoritative_status is terminal or would regress')
+  WHERE (SELECT terminal FROM authoritative_statuses
+          WHERE authoritative_status = OLD.authoritative_status) = 1
+     OR (SELECT rank FROM authoritative_statuses WHERE authoritative_status = NEW.authoritative_status)
+        <= (SELECT rank FROM authoritative_statuses WHERE authoritative_status = OLD.authoritative_status);
+END;
+
+-- (T4) state and authoritative_status may not disagree.
+CREATE TRIGGER trg_state_matches_auth_status BEFORE UPDATE OF state ON jobs
+WHEN NEW.state IN ('APPROVED','READY_FOR_DELIVERY','JOB_COMPLETED','REJECTED','JOB_CANCELLED')
+BEGIN
+  SELECT RAISE(ABORT, 'authoritative state requires the matching authoritative_status')
+  WHERE NEW.authoritative_status IS NOT NEW.state;
+END;
+
+-- (T5) The ledger is append-only, and the reference tables are frozen.
+CREATE TRIGGER trg_decisions_no_update BEFORE UPDATE ON decisions
+BEGIN SELECT RAISE(ABORT,'decisions are append-only'); END;
+CREATE TRIGGER trg_decisions_no_delete BEFORE DELETE ON decisions
+BEGIN SELECT RAISE(ABORT,'decisions are append-only'); END;
+CREATE TRIGGER trg_audit_no_update BEFORE UPDATE ON audit_log
+BEGIN SELECT RAISE(ABORT,'audit_log is append-only'); END;
+CREATE TRIGGER trg_audit_no_delete BEFORE DELETE ON audit_log
+BEGIN SELECT RAISE(ABORT,'audit_log is append-only'); END;
+CREATE TRIGGER trg_grants_frozen_i BEFORE INSERT ON decision_grants
+BEGIN SELECT RAISE(ABORT,'decision_grants is immutable'); END;
+CREATE TRIGGER trg_grants_frozen_u BEFORE UPDATE ON decision_grants
+BEGIN SELECT RAISE(ABORT,'decision_grants is immutable'); END;
+CREATE TRIGGER trg_grants_frozen_d BEFORE DELETE ON decision_grants
+BEGIN SELECT RAISE(ABORT,'decision_grants is immutable'); END;
+
+-- (T6) The rank/terminal reference data that T3 depends on is frozen too.
+--      Without this, `UPDATE authoritative_statuses SET terminal = 0 ...`
+--      would disarm T3 without touching any job row.
+CREATE TRIGGER trg_auth_statuses_frozen_i BEFORE INSERT ON authoritative_statuses
+BEGIN SELECT RAISE(ABORT,'authoritative_statuses is immutable'); END;
+CREATE TRIGGER trg_auth_statuses_frozen_u BEFORE UPDATE ON authoritative_statuses
+BEGIN SELECT RAISE(ABORT,'authoritative_statuses is immutable'); END;
+CREATE TRIGGER trg_auth_statuses_frozen_d BEFORE DELETE ON authoritative_statuses
+BEGIN SELECT RAISE(ABORT,'authoritative_statuses is immutable'); END;
+
+-- T5 and T6 are created in the same migration AFTER the seed INSERTs above.
+-- Consequence: changing the grant map or the rank/terminal map is a MIGRATION,
+-- reviewed and versioned, never a runtime statement.
+```
+
+What this blocks, at the SQL layer, with no application code involved:
+
+| Attempt | Blocked by |
+|---|---|
+| Reference a principal `RETEST` decision while setting `APPROVED` | T2 — `RETEST` has no `decision_grants` row |
+| Reference a valid `APPROVE` decision while setting `JOB_COMPLETED` | T2 — grant is `APPROVE→APPROVED`, not `JOB_COMPLETED` |
+| Reference a decision from another job, cycle, or `to_state` | T2 — join predicates |
+| Reference a decision authored by a worker or a disabled principal | T1 at insert, T2 at use |
+| Set `state='APPROVED'` without stamping the status | T4 |
+| Regress `JOB_COMPLETED` back to `APPROVED`, or move off a terminal status | T3 |
+| Clear `authoritative_status` to NULL | T2 |
+| Rewrite or delete a decision or an audit row | T5 |
+| Add a new grant row to widen authority | T5 |
+| `UPDATE authoritative_statuses SET terminal = 0 WHERE … = 'JOB_COMPLETED'` to reopen a terminal job | **T6** |
+| Lower `APPROVED`'s rank (or raise a terminal status's) to permit regression | **T6** |
+| Insert a new authoritative status, or delete an existing one, to bypass T3 | **T6** |
+
+**The structural separation.** `worker_runs.worker_verdict ∈ {PASS, FAIL, INCONCLUSIVE, NONE}` is advisory metadata on a worker row. `jobs.authoritative_status ∈ {APPROVED, READY_FOR_DELIVERY, JOB_COMPLETED, REJECTED, JOB_CANCELLED}` is authoritative. **No function reads the first and writes the second** — asserted by a source-scanning test.
+
+**Exactly one principal.** The unique partial index guarantees *at most* one. Startup adds the missing half: `serve` runs `SELECT count(*) FROM actors WHERE role='principal' AND disabled=0` and **refuses to serve unless the result is exactly 1**, exiting with an actionable message. Bootstrap: `init` is the only command that may run with zero principals; it creates the `codex` actor and issues its first token. Disabling the principal is therefore a deliberate kill switch — the service will not serve without one, by design (fail-closed, not fail-open).
+
+**What the `system` actor may do:** write audit rows, mark worker runs terminal, and move a job to `STALLED`. It has no token row in `actor_tokens`, so it is unreachable over any transport.
+
+---
+
+## 5. Worker Trust Model
+
+Three trust classes, stamped on every evidence row and surfaced to Codex:
+
+| Class | Source | How Codex should read it |
+|---|---|---|
+| `deterministic` | Mechanical workers: exit codes, HTTP statuses, DOM assertions, file hashes, test-runner output | High confidence, still not a decision |
+| `untrusted` | Any natural-language or model-generated output (Gemini findings, summaries, UX opinions) | Opinion. May be wrong, may be adversarial |
+| `principal` | Codex's own self-verification evidence | Codex's own observation |
+
+Rules:
+
+- **Fail-closed.** Absence of a parseable verdict is never `PASS`. Missing, malformed, truncated, or timed-out output yields `MALFORMED`/`TIMEOUT` with `worker_verdict = NONE`.
+- **A `PASS` is a claim, not a fact.** Codex can reject a `PASS`; `IGNORE_FALSE_POSITIVE` exists to record rejecting a `FAIL`.
+- **Prompt-injection containment.** Worker text is data: `trust='untrusted'`, bounded, returned inside a fixed envelope with an `origin` label. The orchestrator never interprets worker text as instructions — no worker output ever selects a tool, path, command, or transition.
+- **Capability grants are per-dispatch, narrow, and expiring.** Default worker capability set is read-and-report only. Anything broader is granted in the dispatch request, bounded to that run, audited, and dies with the lease.
+- **Workers never see other jobs.** A worker's `job:read` is row-scoped by its active lease.
+- **Session identity does not confer authority.** A Codex session token proves *which* session acted; authority comes from the actor row it maps to. A forged or absent session hint changes nothing about what is permitted.
+
+---
+
+## 6. Proposed Job State Machine
+
+### States
+
+**Workflow states** (non-authoritative)
+
+| State | Meaning |
+|---|---|
+| `CREATED` | Job accepted, not started |
+| `IN_PROGRESS` | Codex is doing the work (also where a cycle begins after `FIX`/`RETEST`) |
+| `QA_RUNNING` | QA dispatched; ≥1 worker run exists for this cycle |
+| `EVIDENCE_READY` | All runs for this cycle are terminal; awaiting Codex's decision |
+| `REPAIR` | Codex chose FIX; transient until `resume` |
+| `PACKAGING` | Codex authorized packaging. **Requires `job:decide` to enter, but stamps no new milestone** — `authoritative_status` stays `APPROVED` |
+| `STALLED` | Guard fired (timeout / max cycles / orphaned runs / crash recovery / `STOP`). Holding state; only Codex leaves it |
+
+`QA_REQUESTED` **no longer exists as an observable state** (see §9 of the delta and the `qa_dispatch` transaction in §17). It was the only place where two lifecycle interpretations could disagree.
+
+**Authoritative states** (require `job:decide` + `role='principal'` + a *granting* decision; `state` and `authoritative_status` are equal here)
+
+`APPROVED` · `READY_FOR_DELIVERY` · `JOB_COMPLETED` (terminal) · `REJECTED` (terminal) · `JOB_CANCELLED` (terminal)
+
+### Transitions
+
+| From | Transition | To | Actor | Capability | Stamps status | Guards |
+|---|---|---|---|---|---|---|
+| `CREATED` | `start` | `IN_PROGRESS` | codex | `job:create` | — | — |
+| `IN_PROGRESS` / `REPAIR` | `dispatch_qa` | `QA_RUNNING` | codex | `qa:request` | — | `cycle < max_cycles`; ≥1 run created **in the same transaction** |
+| `QA_RUNNING` | `runs_settled` | `EVIDENCE_READY` | system | — | — | all runs for the cycle terminal |
+| `IN_PROGRESS` / `QA_RUNNING` | `stall` | `STALLED` | system | — | — | timeout / orphan / stale / deadline |
+| `EVIDENCE_READY` | `decide:FIX` | `REPAIR` | **codex** | `job:decide` | — | `cycle+1 ≤ max_cycles` |
+| `REPAIR` | `resume` | `IN_PROGRESS` | codex | `job:create` | — | `cycle` incremented |
+| `EVIDENCE_READY` | `decide:RETEST` | `IN_PROGRESS` | **codex** | `job:decide` | — | `cycle+1 ≤ max_cycles`; `state_reason='retest'`; a fresh `qa_dispatch` is required |
+| `EVIDENCE_READY` | `decide:VERIFY_SELF` | `IN_PROGRESS` | **codex** | `job:decide` | — | — |
+| `EVIDENCE_READY` | `decide:IGNORE_FALSE_POSITIVE` | `EVIDENCE_READY` | **codex** | `job:decide` | — | records rationale; no state change |
+| `EVIDENCE_READY` / `IN_PROGRESS` / `STALLED` | `decide:APPROVE` | `APPROVED` | **codex** | `job:decide` | **APPROVED** | granting decision written first |
+| `APPROVED` | `decide:PACKAGE` | `PACKAGING` | **codex** | `job:decide` | — (stays APPROVED) | — |
+| `PACKAGING` | `decide:DELIVER` | `READY_FOR_DELIVERY` | **codex** | `job:decide` | **READY_FOR_DELIVERY** | manifest artifact registered |
+| `READY_FOR_DELIVERY` | `decide:COMPLETE` | `JOB_COMPLETED` | **codex** | `job:decide` | **JOB_COMPLETED** | terminal |
+| `EVIDENCE_READY` / `IN_PROGRESS` / `STALLED` | `decide:REJECT` | `REJECTED` | **codex** | `job:decide` | **REJECTED** | terminal |
+| any non-terminal | `decide:CANCEL` | `JOB_CANCELLED` | **codex** | `job:decide` | **JOB_CANCELLED** | terminal; kills live runs |
+| any non-terminal | `decide:STOP` | `STALLED` | **codex** | `job:decide` | — | halts dispatch, keeps job open |
+
+**Loop bounding.** `cycle` increments on `FIX`/`RETEST`. When `cycle == max_cycles`, `dispatch_qa`, `decide:FIX`, and `decide:RETEST` are refused by guard and the job moves to `STALLED(reason=max_cycles)`. From `STALLED` Codex may APPROVE, REJECT, CANCEL, or raise `max_cycles` via a `job:decide`-gated amendment — audited, and capped at a configured `hard_max_cycles` (default 10) it cannot exceed.
+
+**No worker appears in the Actor column anywhere.** Workers write `worker_runs`, `evidence`, and `artifacts`; they never call `applyTransition`.
+
+---
+
+## 7. MCP Transport Decision
+
+*(unchanged)* **Primary: Streamable HTTP on `127.0.0.1`, bearer-authenticated. Secondary: stdio, same core.**
+
+- Codex CLI supports both, and its HTTP config accepts `bearer_token_env_var`, so per-session tokens are natively supported without pasting secrets into `config.toml`.
+- Multiple processes must reach one job store: several Codex sessions, workers reporting in, later a status CLI. stdio is one-client-per-process; HTTP is not.
+- The 2026-07-28 revision removed protocol sessions, so a stateless endpoint is the natural shape — state lives in SQLite, not in the connection.
+- stdio is retained: one file (`serveStdio(factory)`), a zero-config Inspector path, better debugging.
+
+**Protocol era.** Keep SDK defaults — `serveStdio` → `legacy: 'serve'`, `createMcpHandler` → `legacy: 'stateless'` — so both the 2026-07-28 era and 2025-era `initialize` clients are served from one factory. Phase 1 records which era the installed Codex actually speaks; tightening to `legacy: 'reject'` is then a config flag.
+
+**Hardening (V1):** loopback bind only; `localhostHostValidation()` + `localhostOriginValidation()` (bad Origin → 403); bearer required on every request including `tools/list`; 1 MiB body cap; per-token rate limit; `X-Accel-Buffering: no`; fixed configured port whose bind doubles as the single-instance guard.
+
+**What MCP is not used for.** Worker execution. MCP is the **control plane**; NDJSON subprocess is the **execution plane**. An MCP ingress for workers that already speak MCP exists (`run_report` with a lease) but no worker is required to use it.
+
+---
+
+## 8. Proposed MCP Tool Surface
+
+Ten tools. Every authoritative act is one tool (`codex_decide`) so there is exactly one authorization gate and one audit shape. Request-and-dispatch is one tool because it is one atomic intent.
+
+Common: every mutating tool accepts `idempotency_key` and an optional `session_hint`. Every tool returns `{ ok, data | error: { code, message, details } }` and carries a server-generated `request_id`. Schemas are Zod v4; JSON Schema derived.
+
+**1. `job_create`** — Open a job.
+- Caller: codex · Capability: `job:create`
+- In: `{ title, spec: {objective, acceptance_criteria[], context?}, workspace, max_cycles?, deadline_at?, idempotency_key?, session_hint? }`
+- Out: `{ job_id, state: "CREATED", authoritative_status: null, cycle: 0, max_cycles }`
+- Authorization: `workspace` must realpath-resolve inside a configured **workspace root** (§15); `max_cycles` clamped to `hard_max_cycles`.
+
+**2. `job_get`** — Full picture of one job.
+- Caller: codex, observer; worker **only for its leased job** · Capability: `job:read`
+- In: `{ job_id, include?: ("evidence"|"runs"|"artifacts"|"decisions")[], cycle? }`
+- Out: job record (`state`, `authoritative_status`, `cycle`, `version`, `workspace`) + requested collections. Evidence carries `trust` and `origin`; untrusted text is enveloped. Worker responses are filtered to that run's own contributions.
+
+**3. `job_list`** — Find jobs **across all projects**.
+- Caller: codex, observer · Capability: `job:read`
+- In: `{ state?, authoritative_status?, workspace?, updated_since?, limit?, cursor? }` · Out: `{ jobs[], next_cursor? }`
+
+**4. `qa_dispatch`** — Request QA and dispatch workers as one atomic act.
+- Caller: codex · Capability: `qa:request`
+- In: `{ job_id, cycle, expected_version, requests: [{ worker_id, task, params, timeout_ms?, artifacts_expected? }], idempotency_key?, session_hint? }`
+- Out: `{ runs: [{ run_id, worker_id, status }], cycle, state: "QA_RUNNING", version }` — **leases are delivered to the worker process, never returned to Codex.**
+- Authorization: job in `IN_PROGRESS`/`REPAIR`, `cycle` matches, `cycle < max_cycles`, version CAS holds. `worker_id` must exist in the configured registry — **Codex names a registered worker; it never supplies a command line.** Transaction semantics in §17.
+
+**5. `run_report`** — A worker submits its result.
+- Caller: worker · Capability: `work:report` **plus a valid unconsumed lease**
+- In: `{ lease, verdict: "PASS"|"FAIL"|"INCONCLUSIVE", summary, findings[]?, evidence[]?, artifacts[]?, usage? }`
+- Out: `{ run_id, status, accepted: true, duplicate: boolean }`
+- Authorization: lease HMAC verified, unexpired, unconsumed, bound to `(job_id, cycle, run_id)`; consumed atomically with the write; replay returns the original response. **Writes nothing to `jobs.authoritative_status`, ever.**
+
+**6. `run_status`** — Poll worker runs.
+- Caller: codex (any job), worker (own run) · Capability: `job:read`
+- In: `{ job_id, cycle?, run_id? }` · Out: `{ runs: [{ run_id, worker_id, status, worker_verdict, failure_class?, started_at, ended_at, attempt }] }`
+
+**7. `evidence_add`** — Record an observation.
+- Caller: codex (self-verification), worker (with lease) · Capability: `evidence:add`
+- In: `{ job_id, cycle, kind, summary, detail?, artifact_id?, lease? }` · Out: `{ evidence_id, trust }`
+- Notes: `trust` is derived from the caller's role — **never accepted from input.**
+
+**8. `artifact_register`** — Record a produced file.
+- Caller: codex, worker (with lease) · Capability: `artifact:register`
+- In: `{ job_id, cycle, path, kind, mime?, label?, lease? }` · Out: `{ artifact_id, sha256, bytes, rel_path }`
+- Authorization: path must resolve inside `<state_root>\artifacts\<job_id>\`; size cap; **sha256 computed by the orchestrator, never accepted from the worker.**
+
+**9. `codex_decide`** — The only authoritative act in the system.
+- Caller: codex **only** · Capability: `job:decide` (role `principal`)
+- In: `{ job_id, cycle, decision: APPROVE|REJECT|FIX|RETEST|VERIFY_SELF|IGNORE_FALSE_POSITIVE|STOP|PACKAGE|DELIVER|COMPLETE|CANCEL, rationale, evidence_refs?: string[], expected_version, idempotency_key?, session_hint? }`
+- Out: `{ decision_id, job_id, state, authoritative_status, cycle, version }`
+- Authorization: capability + role + transition guard + CAS on `expected_version`. Writes the `decisions` row (carrying `session_token_id` and `request_id`) and the state/status change in one transaction; triggers T1–T4 independently verify the write. `rationale` is required.
+
+**10. `audit_query`** — Read the history.
+- Caller: codex, observer · Capability: `job:read`
+- In: `{ job_id?, actor_id?, session_token_id?, action?, since?, limit?, cursor?, verify_chain? }`
+- Out: `{ entries[], next_cursor?, chain_valid? }` — redacted; `verify_chain` recomputes the hash chain.
+
+*Deferred:* `actor_admin` (CLI-only in V1), MCP resources exposing artifacts read-only, `job_amend`.
+
+**Capability catalogue:** `job:create`, `job:read`, `job:decide`, `qa:request`, `work:report`, `evidence:add`, `artifact:register`. (`work:claim` and `job:cancel` removed — the former was unused, the latter is a `codex_decide` variant.)
+
+---
+
+## 9. Data Model / SQLite Schema Proposal
+
+**One database for all projects:** `%LOCALAPPDATA%\AgentOrchestratorMCP\data\orchestrator.db`.
+
+```sql
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
+PRAGMA synchronous = NORMAL;      -- FULL available via config
+
+CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+
+-- Identity: one row per ACTOR (authority), many rows per actor in actor_tokens (sessions).
+CREATE TABLE actors (
+  actor_id          TEXT PRIMARY KEY,          -- 'codex', 'gemini-reviewer', 'browser-worker'
+  role              TEXT NOT NULL CHECK (role IN ('principal','worker','observer','system')),
+  display_name      TEXT NOT NULL,
+  capabilities_json TEXT NOT NULL,
+  disabled          INTEGER NOT NULL DEFAULT 0,
+  created_at        TEXT NOT NULL
+);
+CREATE UNIQUE INDEX ux_actors_single_principal ON actors(role) WHERE role = 'principal';
+-- "At most one" is the index; "exactly one enabled" is the startup invariant (§4, §16).
+
+CREATE TABLE actor_tokens (
+  token_id     TEXT PRIMARY KEY,
+  actor_id     TEXT NOT NULL REFERENCES actors(actor_id),
+  token_sha256 TEXT NOT NULL UNIQUE,
+  label        TEXT NOT NULL,       -- e.g. 'codex-session-a', 'codex-laptop', 'browser-worker'
+  disabled     INTEGER NOT NULL DEFAULT 0,
+  expires_at   TEXT,
+  last_used_at TEXT,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX ix_actor_tokens_actor ON actor_tokens(actor_id);
+-- Several concurrent Codex sessions each hold their own token; all map to the ONE principal.
+
+CREATE TABLE decision_grants ( ... );        -- see §4, immutable
+CREATE TABLE authoritative_statuses ( ... ); -- see §4, immutable
+
+CREATE TABLE jobs (
+  job_id               TEXT PRIMARY KEY,
+  workspace            TEXT NOT NULL,        -- validated against the config allowlist
+  title                TEXT NOT NULL,
+  spec_json            TEXT NOT NULL,
+  state                TEXT NOT NULL,        -- workflow position
+  state_reason         TEXT,
+  authoritative_status TEXT REFERENCES authoritative_statuses(authoritative_status),
+  deciding_decision_id TEXT REFERENCES decisions(decision_id),
+  owner_actor_id       TEXT NOT NULL REFERENCES actors(actor_id),
+  cycle                INTEGER NOT NULL DEFAULT 0,
+  max_cycles           INTEGER NOT NULL,
+  version              INTEGER NOT NULL DEFAULT 1,   -- optimistic CAS
+  deadline_at          TEXT,
+  stale_after_s        INTEGER NOT NULL,
+  created_at           TEXT NOT NULL,
+  updated_at           TEXT NOT NULL
+);
+CREATE INDEX ix_jobs_state_updated ON jobs(state, updated_at);
+CREATE INDEX ix_jobs_workspace     ON jobs(workspace, updated_at);   -- cross-project queries
+CREATE INDEX ix_jobs_auth_status   ON jobs(authoritative_status);
+
+CREATE TABLE decisions (
+  decision_id      TEXT PRIMARY KEY,
+  job_id           TEXT NOT NULL REFERENCES jobs(job_id),
+  cycle            INTEGER NOT NULL,
+  actor_id         TEXT NOT NULL REFERENCES actors(actor_id),      -- principal-only (T1)
+  session_token_id TEXT REFERENCES actor_tokens(token_id),         -- WHICH Codex session
+  request_id       TEXT NOT NULL,                                  -- server-generated
+  session_hint     TEXT,                                           -- client-supplied, untrusted
+  decision         TEXT NOT NULL,
+  rationale        TEXT NOT NULL,
+  evidence_refs    TEXT,
+  from_state       TEXT NOT NULL,
+  to_state         TEXT NOT NULL,
+  created_at       TEXT NOT NULL
+);
+CREATE INDEX ix_decisions_job     ON decisions(job_id, cycle);
+CREATE INDEX ix_decisions_session ON decisions(session_token_id);
+
+CREATE TABLE worker_runs (
+  run_id         TEXT PRIMARY KEY,
+  job_id         TEXT NOT NULL REFERENCES jobs(job_id),
+  cycle          INTEGER NOT NULL,
+  worker_id      TEXT NOT NULL,
+  adapter        TEXT NOT NULL,
+  request_json   TEXT NOT NULL,
+  status         TEXT NOT NULL,   -- PENDING RUNNING SUCCEEDED FAILED TIMEOUT CANCELLED MALFORMED ORPHANED
+  worker_verdict TEXT,            -- PASS FAIL INCONCLUSIVE NONE  *** ADVISORY ONLY ***
+  failure_class  TEXT,            -- SPAWN_FAILED TRANSIENT AUTH_REQUIRED MALFORMED_OUTPUT TIMEOUT MODEL_ERROR
+  exit_code      INTEGER, pid INTEGER,
+  usage_json     TEXT, stderr_tail TEXT,          -- bounded, redacted
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  started_at     TEXT, ended_at TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX ix_runs_job_cycle ON worker_runs(job_id, cycle, status);
+
+CREATE TABLE evidence (
+  evidence_id  TEXT PRIMARY KEY,
+  job_id       TEXT NOT NULL REFERENCES jobs(job_id),
+  cycle        INTEGER NOT NULL,
+  run_id       TEXT REFERENCES worker_runs(run_id),
+  source_actor TEXT NOT NULL REFERENCES actors(actor_id),
+  trust        TEXT NOT NULL CHECK (trust IN ('deterministic','untrusted','principal')),
+  kind         TEXT NOT NULL, severity TEXT,
+  summary      TEXT NOT NULL,     -- ≤ 2 KiB
+  detail_json  TEXT,              -- ≤ 64 KiB; overflow -> artifact
+  artifact_id  TEXT REFERENCES artifacts(artifact_id),
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX ix_evidence_job_cycle ON evidence(job_id, cycle);
+
+CREATE TABLE artifacts (
+  artifact_id TEXT PRIMARY KEY,
+  job_id      TEXT NOT NULL REFERENCES jobs(job_id),
+  cycle       INTEGER NOT NULL,
+  run_id      TEXT REFERENCES worker_runs(run_id),
+  kind        TEXT NOT NULL, mime TEXT, label TEXT,
+  rel_path    TEXT NOT NULL,       -- relative to <state_root>\artifacts; NO BLOBS IN SQLITE
+  bytes       INTEGER NOT NULL,
+  sha256      TEXT NOT NULL,       -- computed by the orchestrator
+  created_by  TEXT NOT NULL REFERENCES actors(actor_id),
+  created_at  TEXT NOT NULL,
+  UNIQUE (job_id, rel_path)
+);
+
+CREATE TABLE leases (
+  lease_id    TEXT PRIMARY KEY,
+  run_id      TEXT NOT NULL UNIQUE REFERENCES worker_runs(run_id),
+  job_id      TEXT NOT NULL, cycle INTEGER NOT NULL,
+  actor_id    TEXT NOT NULL REFERENCES actors(actor_id),
+  nonce       TEXT NOT NULL, expires_at TEXT NOT NULL,
+  consumed_at TEXT, created_at TEXT NOT NULL
+);
+
+CREATE TABLE idempotency (
+  actor_id TEXT NOT NULL REFERENCES actors(actor_id),
+  key TEXT NOT NULL, request_hash TEXT NOT NULL,
+  response_json TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (actor_id, key)
+);
+
+CREATE TABLE audit_log (
+  seq              INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts               TEXT NOT NULL,
+  actor_id         TEXT NOT NULL, actor_role TEXT NOT NULL,
+  session_token_id TEXT, request_id TEXT NOT NULL, session_hint TEXT,
+  action           TEXT NOT NULL,
+  job_id           TEXT, cycle INTEGER, capability TEXT,
+  subject_type     TEXT, subject_id TEXT,
+  from_state       TEXT, to_state TEXT,
+  from_auth_status TEXT, to_auth_status TEXT,
+  result           TEXT NOT NULL,     -- ok | denied | error
+  detail_json      TEXT,              -- redacted, bounded
+  prev_hash        TEXT NOT NULL, hash TEXT NOT NULL
+);
+CREATE INDEX ix_audit_job     ON audit_log(job_id, seq);
+CREATE INDEX ix_audit_session ON audit_log(session_token_id, seq);
+```
+
+Plus triggers T1–T6 from §4. Migrations are numbered `.sql` files applied in a transaction at startup; the service refuses to start if the DB is newer than the binary.
+
+---
+
+## 10. Worker Adapter Architecture
+
+*(unchanged)*
+
+```ts
+interface WorkerAdapter {
+  readonly id: string;                                    // 'process'
+  describe(): AdapterInfo;
+  plan(req: DispatchRequest, cfg: WorkerConfig): ExecPlan; // pure — fully unit-testable
+}
+
+interface ExecPlan {
+  argv: string[];                    // argv array, never a shell string
+  cwd: string;                       // absolute, inside an allowed root
+  env: Record<string,string>;        // allowlist, not inherited
+  stdin?: string;                    // parameters go here, not on the command line
+  timeoutMs: number;
+  parse: 'ndjson';
+}
+```
+
+Adapters are **pure planners**; one shared `ProcessRuntime` owns spawn, streams, timers, cancellation, and normalization — every failure mode in one place.
+
+**`ProcessRuntime`:** spawn with argv array; write stdin then close; parse stdout line-by-line as NDJSON with a Zod discriminated union; bound line length and total lines; bounded redacted stderr ring buffer; timeout → `taskkill /T` (win32) or process-group kill, grace period, force kill; cancellation token; exit code + stream state → `failure_class`; emit exactly one normalized `WorkerReport`.
+
+**NDJSON contract (stdout):**
+
+```
+{"type":"ready","worker":"...","version":"..."}
+{"type":"progress","pct":40,"message":"..."}
+{"type":"evidence","kind":"assertion","severity":"error","summary":"...","detail":{...}}
+{"type":"artifact","path":"...","kind":"screenshot","mime":"image/png","label":"..."}
+{"type":"result","verdict":"FAIL","summary":"...","usage":{...}}
+{"type":"error","class":"AUTH_REQUIRED","message":"..."}
+```
+
+Unknown `type` values are ignored. Malformed lines increment a counter and become bounded `parse_error` evidence — a noisy worker degrades a run, never the orchestrator. No `result` line → `MALFORMED`, verdict `NONE`.
+
+**Two ingress paths, one persistence function.** Push (orchestrator spawns) and pull (worker calls `run_report` with its lease) both normalize to `WorkerReport` and go through `recordWorkerReport(tx, …)`.
+
+**Registry.** Workers are declared in config (id, adapter, argv template, env allowlist, cwd, default timeout, trust class, granted capabilities). Codex dispatches by `worker_id`; it never supplies a command line. This is the boundary that keeps `qa_dispatch` from being arbitrary code execution.
+
+---
+
+## 11. Gemini / `agy` Adapter Design *(design only — deferred, not in V1)*
+
+**⚠ Assumptions to re-verify empirically before implementing this phase.** `agy --help` (v1.1.22, read on this machine) documents `-p/--print`, `--output-format text|json|stream-json`, `--json-schema <schema string or path>`, `--print-timeout` (default 5m), `--model`, `--effort low|medium|high`, `--add-dir`, `--conversation`, `--sandbox`, `--disable-slash-commands`, and `--input-format text|stream-json` (which "reads one NDJSON message per line from stdin and requires `--output-format stream-json`"). It does **not** document plain-text prompt delivery on stdin with `-p`. So the exact prompt-delivery mechanism — argv vs. stdin text vs. `--input-format stream-json` NDJSON — **must be verified against the installed binary at the start of that phase**, not assumed here. The rest of this section is design intent conditional on that verification.
+
+**Invocation intent.** `agy.exe -p --output-format stream-json --json-schema <path> --print-timeout <t> --model <m> --effort <e> --add-dir <read-only root> --disable-slash-commands --sandbox`, with the prompt delivered off the command line (mechanism per the verification above) to avoid Windows argv length limits and all quoting/injection concerns. `--dangerously-skip-permissions` is never used by default and requires an explicit per-worker config opt-in that is recorded in the audit log.
+
+**Structured output is mandatory.** `--json-schema` pins the final result to a fixed reviewer schema (`{verdict, summary, findings[{severity, location, claim, confidence}], caveats[]}`). Pretty terminal text is never parsed. Only the final schema-validated result yields a `worker_verdict`.
+
+**Failure taxonomy:**
+
+| Symptom | `failure_class` | Retry? |
+|---|---|---|
+| Binary missing / spawn error | `SPAWN_FAILED` | yes (2, backoff) |
+| Non-zero exit with transient network signature | `TRANSIENT` | yes (2, backoff) |
+| Auth/session expired | `AUTH_REQUIRED` | **no** — surfaced to Codex; retrying cannot help |
+| Stream ended without a valid final result | `MALFORMED_OUTPUT` | no |
+| Wall-clock exceeded | `TIMEOUT` | no |
+| Model/service error event in stream | `MODEL_ERROR` | yes (1) |
+
+Each retry is **its own `worker_runs` row** (`attempt` incremented) — partial evidence is never silently overwritten.
+
+**Other:** `--print-timeout` set below the orchestrator's own timeout so the CLI self-terminates first; usage metadata into `worker_runs.usage_json`; `--conversation` deliberately unused so every run is stateless and reproducible; `--add-dir` scoped to a read-only path inside the job's workspace; all Gemini evidence stamped `trust='untrusted'`.
+
+---
+
+## 12. Browser Worker Design *(design only — EXTERNAL to this repo)*
+
+**Decision: the existing Node/CDP worker stays external for the first integration.** It will be registered as an ordinary entry in the worker registry (`adapter: 'process'`, an argv template pointing at its own installed location) and must satisfy the same NDJSON contract as any other worker. **No CDP dependency enters the V1 core**, and this is not blocking V1.
+
+**No model in the loop.** The worker executes a declarative, schema-validated step script:
+
+```jsonc
+{ "steps": [
+  { "op": "navigate", "url": "https://..." },
+  { "op": "wait_for", "selector": "#app", "timeout_ms": 5000 },
+  { "op": "set_viewport", "width": 1280, "height": 800 },
+  { "op": "read_dom", "selector": ".price", "as": "prices" },
+  { "op": "collect_console" },
+  { "op": "screenshot", "label": "checkout" },
+  { "op": "assert", "expr": { "kind": "count_gte", "of": "prices", "n": 1 } }
+]}
+```
+
+**No arbitrary JS evaluation from job input.** URL allowlist per worker config, so a poisoned job spec cannot drive the browser to an arbitrary host. Never enters credentials, never clicks irreversible controls.
+
+**Outputs:** screenshots and structured captures as artifacts; assertion outcomes as `trust='deterministic'` evidence; the step script and its sha256 recorded as evidence so a RETEST is provably the same test.
+
+**Division of labour:** the browser worker produces pixels and facts; Gemini interprets them; Codex decides. Tokens are never spent on navigation.
+
+---
+
+## 13. Artifact & Evidence Model
+
+**Layout:** `%LOCALAPPDATA%\AgentOrchestratorMCP\artifacts\<job_id>\<cycle>\<run_id>\<name>` — one global artifact root, isolated per job/cycle/run, **separate from workspace access**. A worker may read its workspace (per the allowlist) but may only write artifacts here.
+
+**DB stores metadata only** — id, job, cycle, run, kind, mime, label, rel_path, bytes, sha256, creator, timestamp. No blobs in SQLite: they would bloat the WAL, slow every backup, and buy nothing when every consumer reads files by path.
+
+**Path safety** (Windows-specific, enforced at register time): resolve to a realpath and require containment in the artifact root after normalization; reject symlinks and NTFS reparse points; reject `..`, absolute inputs, alternate data streams (`:`), reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`), trailing dots/spaces; case-insensitive containment comparison; bounded name/path length; per-artifact and per-job size caps.
+
+**Integrity:** sha256 computed by the orchestrator at register time, never accepted from the worker. A `PACKAGE` decision emits a `manifest` artifact — every artifact id, path, sha256, and the decision chain — which is what makes a handoff verifiable.
+
+**Evidence sizing:** `summary` ≤ 2 KiB, `detail_json` ≤ 64 KiB; anything larger becomes an artifact. Raw model transcripts are not persisted; bounded summaries plus artifact pointers answer "why", which is the actual requirement.
+
+**Retention:** nothing is deleted on completion or cancellation. Because one global root now accumulates artifacts from every project, a `prune` CLI (LATER) removes artifacts for terminal jobs older than N days and marks rows `pruned` rather than deleting metadata. V1 records `bytes` per artifact so total footprint is queryable from day one.
+
+---
+
+## 14. Audit Model
+
+Every entry answers **who / which session / what / when / which job / what result**: `actor_id`, `actor_role`, `session_token_id`, `request_id`, `session_hint`, `action`, `job_id`, `cycle`, `capability`, `subject_type`+`subject_id`, `from_state`/`to_state`, `from_auth_status`/`to_auth_status`, `result`, redacted `detail_json`, `ts`.
+
+**Audited actions:** `auth.rejected`, `job.create`, `job.start`, `qa.dispatch`, `run.start`, `run.report`, `run.duplicate_rejected`, `run.timeout`, `run.orphaned`, `evidence.add`, `artifact.register`, `codex.decide`, `system.stall`, `lease.issued`, `lease.consumed`, `lease.rejected`, `config.reload`, `startup.invariant_failed`.
+
+**Session attribution.** `session_token_id` is **verified** — it is the token row the request authenticated with, not a self-declared value — so "which Codex session made this decision?" is answered by joining `decisions.session_token_id → actor_tokens.label`. `session_hint` is an optional client-supplied string recorded alongside it and always treated as untrusted labelling. Neither field confers or restricts authority; both are attribution only, preserving the single-principal invariant.
+
+**Tamper evidence:** `hash = sha256(prev_hash || canonical_json(row))`, chained by `seq`. `audit_query { verify_chain: true }` recomputes and reports the first break. Append-only is enforced by trigger T5 as well as by the absence of any update/delete statement in the codebase (source-scanning test).
+
+**"Why did Codex approve this job?"** — one query: the `decisions` rows for the job (each with mandatory `rationale`, `evidence_refs`, and session attribution), joined to the evidence they cite and the worker runs that produced it, in audit order. No transcripts required.
+
+**Redaction:** a single `redact()` runs on everything before it reaches the log, the DB, or stderr — bearer tokens, `Authorization` values, lease HMACs, configured secret-name patterns, and any value from a non-allowlisted env var.
+
+---
+
+## 15. Security Threat Model
+
+| # | Threat | Mitigation |
+|---|---|---|
+| 1 | **Worker promotes its own verdict to APPROVED** | Five layers (§4): capability gate, tool non-registration, handler check, single domain choke point, and DB triggers T1–T4 that require a *semantically granting* principal decision |
+| 2 | **A non-granting decision is reused as justification** | `decision_grants` is an immutable allowlist; `RETEST`/`FIX`/`VERIFY_SELF`/`IGNORE_FALSE_POSITIVE`/`STOP`/`PACKAGE` have no grant row and can never satisfy T2 |
+| 2b | **Disarming a trigger by mutating the reference data it reads** — e.g. `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status='JOB_COMPLETED'` to reopen a completed job, or re-ranking statuses to permit regression, without touching a single job row | **T6** freezes `authoritative_statuses` against INSERT/UPDATE/DELETE, as **T5** does for `decision_grants`. Both trigger sets are created *after* the seed inserts in the same migration, so the seed succeeds once and the tables are read-only for the life of the database. Changing either map is a reviewed, versioned migration — never a runtime statement |
+| 3 | **Forged Codex identity** | Per-token SHA-256 with constant-time compare; `role='principal'` is a unique partial index; a second principal cannot exist, and a *session* token grants no more than its actor |
+| 4 | **Replayed / duplicated worker result** | Single-use lease consumed in the same transaction as the write; `(actor_id, key)` idempotency returns the original response |
+| 5 | **Stale authorization** | Leases carry `expires_at` and bind `(job_id, cycle, run_id)`; a report for cycle N is refused once the job is at N+1. `actor_tokens.expires_at` bounds session tokens |
+| 6 | **Privilege escalation via config** | Capability sets validated against a fixed catalogue at load; unknown capability → refuse to start; worker roles cannot be granted `job:decide` |
+| 7 | **DNS rebinding / remote access** | Bind `127.0.0.1` only; Host/Origin validation (403); bearer required on every request |
+| 8 | **Arbitrary command execution via job input** | Codex dispatches a registered `worker_id`; argv comes from server-side config templates; `spawn` with argv arrays, never `shell: true` |
+| 9 | **Workspace escape** | `job_create` validates `workspace` by realpath containment in the config allowlist (`C:\AgentProjects`, `C:\SallaProjects`), case-insensitive; UNC paths, device paths (`\\?\`), and the root itself rejected. **`C:\` is never allowed** |
+| 10 | **Artifact path traversal** | Realpath containment in the global artifact root, symlink/reparse rejection, reserved-name and ADS rejection, size caps (§13) |
+| 11 | **Prompt injection from worker output** | Worker text is data: `trust='untrusted'`, bounded, enveloped, never interpreted; never selects a tool/path/command/transition |
+| 12 | **Malicious worker floods the store** | Per-run caps on evidence count, artifact count, total bytes, NDJSON lines and line length; per-token rate limits; 1 MiB request cap |
+| 13 | **Secret leakage into logs/DB/evidence** | Central `redact()` on every sink; per-worker env allowlist (workers do **not** inherit the parent environment, including `NODE_OPTIONS`, proxy vars, and `*_TOKEN`/`*_KEY`); bounded redacted stderr tail |
+| 14 | **Secret file readable by other local accounts** | **Windows security model, §15.1** — not `chmod` |
+| 15 | **Audit tampering** | Hash chain + verification query + trigger T5 + no update/delete path in code |
+| 16 | **Infinite repair loops** | `max_cycles` guard, `hard_max_cycles` ceiling Codex cannot exceed, per-run timeouts, per-job deadline, bounded retries |
+| 17 | **Concurrent Codex sessions corrupting a job** | `version` CAS on every mutating tool; loser gets `STATE_CONFLICT` with the current job |
+| 18 | **DoS by another local process** | Port-bind single-instance guard, rate limits, body caps, bounded concurrency |
+
+### 15.1 Windows secret protection (replaces "chmod 0600")
+
+**`fs.chmod` is effectively a no-op on Windows** — it maps only to the read-only attribute and grants no access control whatsoever. POSIX `0600`/`0700` remains the POSIX implementation; it is **not** the Windows mechanism.
+
+**What actually needs to persist.** The orchestrator stores only `token_sha256`, so it **never needs a plaintext bearer token at rest**. The only genuine at-rest secret it must read is the **lease HMAC key**. Bearer tokens are therefore **print-once**: `token issue` writes the value to stdout for the operator to place in the environment variable Codex reads, and does not persist a plaintext copy unless `--write-file` is passed.
+
+**Windows mechanism (V1).** For `%LOCALAPPDATA%\AgentOrchestratorMCP\secrets\` and every file in it:
+
+1. Resolve the **current user's SID** (`whoami /user /fo csv /nh`, or the identity API) — SIDs avoid locale and domain-name pitfalls.
+2. Create the directory, then apply a DACL with inheritance **stripped** and exactly one ACE:
+   `icacls "<dir>" /inheritance:r /grant:r "*<SID>":(OI)(CI)F` — invoked via `spawnSync` with an **argv array**, never a shell string, on a path the orchestrator itself computed.
+3. Apply the same to each secret file (`/inheritance:r /grant:r "*<SID>":F`).
+4. **Verify after creation**: read the ACL back and assert the ACE set contains *only* the current user's SID. Reject if `Everyone`, `BUILTIN\Users`, `Authenticated Users`, `INTERACTIVE`, or any inherited ACE is present.
+5. **Fail closed**: if `icacls` is missing, returns non-zero, or verification does not match, the orchestrator **refuses to write the secret and exits** with an actionable message. It never falls back to an unprotected file.
+6. Re-verify the ACL on **every startup**, not just at creation — an operator or an installer can loosen it later. A failed check refuses service.
+7. Refuse a state root under a known cloud-sync path (OneDrive/Dropbox). `%LOCALAPPDATA%` is not sync-redirected by default, unlike `Documents`; the check catches redirected setups.
+
+The same verification is applied to `data\orchestrator.db` — the database contains no plaintext secrets, but it contains the decision ledger, and a world-readable ledger is its own problem.
+
+**DPAPI — evaluated, deferred, with rationale.** Windows DPAPI (`CryptProtectData`, user scope) would encrypt the lease HMAC key at rest. Assessment:
+
+- **What it does not defend against:** the primary local threat. DPAPI user-scope keys are unwrapped automatically for *any* process running as that user — precisely the attacker we care about. Against a same-user attacker, DPAPI adds no barrier over an ACL.
+- **What it does defend against:** offline copy — a backup, a disk image, a sync folder, or a copied profile.
+- **Cost:** Node has no built-in DPAPI binding. Options are a native addon (adds a compiled dependency and a Windows-only build path to a project that is otherwise prebuild-only) or shelling to PowerShell `ProtectedData` per read (slow and adds a shell surface).
+- **Mitigating factor:** the lease HMAC key is **regenerable**. Rotating it invalidates in-flight leases only — an acceptable, recoverable event. It is not a long-lived credential whose disclosure is catastrophic.
+
+**V1 decision: ACL hardening with fail-closed verification, plus print-once tokens. DPAPI is listed under SHOULD HAVE LATER**, to be adopted when a native dependency is otherwise justified or if the state root ever has to live somewhere backed up off-machine. The rationale is that DPAPI's marginal benefit here is offline-theft resistance for a regenerable key, which does not justify a compiled dependency in V1.
+
+---
+
+## 16. Failure & Recovery Strategy
+
+**Startup invariants**, checked before serving a single request; any failure exits non-zero with an actionable message and an `startup.invariant_failed` audit row:
+
+1. State root exists and its ACL verifies (§15.1).
+2. Migrations applied; `PRAGMA quick_check` clean; DB not newer than the binary.
+3. **Exactly one enabled principal actor exists.** Zero → "run `init`"; more than one is impossible by index, but the check reports it rather than assuming.
+4. Every configured worker's capability set is in the catalogue; every configured workspace root exists and is not a drive root.
+5. Lease HMAC key present and readable, or generated and hardened on first run.
+
+**Bootstrap.** `init` is the only command permitted to run with zero principals. It creates the state root, hardens `secrets\`, applies migrations, creates the `codex` principal, issues its first token (printed once), and exits. `serve` never bootstraps.
+
+**Crash recovery at boot.** `worker_runs` in `PENDING`/`RUNNING` are marked `ORPHANED` with an audit entry; a job in `QA_RUNNING` with no live runs → `STALLED(reason=orphaned_runs)`. **Recovery never approves and never fails a job.**
+
+**Reaper loop** (single timer): run timeout → kill + `TIMEOUT`; lease expiry → expired; `updated_at` older than `stale_after_s` → `STALLED(stale)`; past `deadline_at` → `STALLED(deadline)`. All under `system`, all audited, none authoritative.
+
+**Worker failure classes** map to run status only. A job never changes authoritative status because a worker failed; it lands in `EVIDENCE_READY` (with failure evidence) or `STALLED`.
+
+**Poison runs:** after the retry budget, `FAILED` with `failure_class` preserved and every attempt visible as its own row.
+
+**Partial output:** evidence and artifacts emitted before a crash are kept and marked incomplete. No `result` line → `MALFORMED`, verdict `NONE`, never `PASS`.
+
+**Durability:** WAL + `synchronous=NORMAL` survives process crash (`FULL` via config). Every state change is one `IMMEDIATE` transaction — no half-transitioned job exists.
+
+**Graceful shutdown:** stop accepting requests, cancel live runs (`CANCELLED`, not `FAILED`), checkpoint WAL, close.
+
+---
+
+## 17. Concurrency / Locking / Idempotency
+
+**Single-writer service.** One orchestrator process owns the DB; the port bind is the single-instance guard. Multiple Codex sessions are multiple *clients*, not multiple writers.
+
+**Transactions.** Every mutation is a `BEGIN IMMEDIATE` transaction. `better-sqlite3` is synchronous, so a transaction cannot interleave with another request's statements — atomicity is structural.
+
+**The `qa_dispatch` transaction — one atomic act, stated explicitly:**
+
+```
+BEGIN IMMEDIATE
+  load job FOR UPDATE semantics (IMMEDIATE holds the write lock)
+  assert job.state ∈ {IN_PROGRESS, REPAIR}
+  assert job.cycle == request.cycle
+  assert job.version == request.expected_version         -- CAS
+  assert job.cycle  <  job.max_cycles
+  for each request:  INSERT worker_runs (status='PENDING')
+  for each run:      INSERT leases (single-use, bound to job/cycle/run, expiring)
+  applyTransition(dispatch_qa) → state='QA_RUNNING', version += 1
+  INSERT audit rows (qa.dispatch, lease.issued × n)
+COMMIT
+-- processes are spawned AFTER commit, outside the transaction
+```
+
+Either the runs, the leases, and `QA_RUNNING` all exist, or none of them do. There is no observable intermediate "requested but not dispatched" state, and therefore no second lifecycle interpretation. If spawning fails after commit, the run is marked `SPAWN_FAILED` by the runtime — the job stays `QA_RUNNING` until `runs_settled` fires, exactly as for any other failure.
+
+`RETEST` deliberately does **not** auto-dispatch: it returns the job to `IN_PROGRESS` at `cycle+1` with `state_reason='retest'`, and Codex must issue a fresh `qa_dispatch`. Implicit re-dispatch would hide which worker set actually ran in the new cycle.
+
+**Optimistic concurrency across Codex sessions.** `jobs.version` increments on every state change; `codex_decide` and `qa_dispatch` require `expected_version` and fail with `STATE_CONFLICT` (returning the current job) if it moved. Two concurrent sessions cannot both decide the same cycle; the loser re-reads and retries. Session identity is recorded on both the winning and the losing attempt.
+
+**Idempotency.** Optional `idempotency_key` on every mutating tool → unique `(actor_id, key)`. Same key + same request hash returns the stored response; different hash → `IDEMPOTENCY_CONFLICT`. Note the key is scoped to the *actor*, so two Codex sessions sharing the principal share a key namespace — keys must be UUIDs, which the schema enforces by format.
+
+**Duplicate worker results.** Lease consumption is `UPDATE … WHERE consumed_at IS NULL` inside the write transaction. Zero rows updated → replay → return the original response with `duplicate: true`. A duplicate can never double-count evidence or re-trigger a transition.
+
+**Concurrency limits.** Global and per-worker caps on simultaneous runs with a small FIFO queue. `runs_settled` is evaluated inside the transaction that settles the last run, so it cannot fire twice.
+
+---
+
+## 18. Proposed Repository Structure & Runtime Paths
+
+### Runtime state root (not in the repository)
+
+```
+%LOCALAPPDATA%\AgentOrchestratorMCP\
+├── data\
+│   └── orchestrator.db            # ONE database for all projects
+├── artifacts\
+│   └── <job_id>\<cycle>\<run_id>\ # isolated per job/cycle/run
+├── secrets\                       # inheritance stripped, current-user SID only, verified
+│   └── lease.key
+└── logs\
+    └── orchestrator-YYYYMMDD.log  # rotated service stderr
+```
+
+POSIX equivalent: `$XDG_STATE_HOME/agent-orchestrator-mcp` (default `~/.local/state/agent-orchestrator-mcp`), directories `0700`, files `0600`.
+
+### Repository
+
+```
+agent-orchestrator-mcp/
+├── package.json  tsconfig.json  vitest.config.ts  .editorconfig
+├── README.md  LICENSE
+├── config/
+│   └── orchestrator.example.jsonc     # actors, workers, workspace_roots, port, limits
+├── docs/
+│   ├── ARCHITECTURE.md                # this report, maintained
+│   ├── WORKER_PROTOCOL.md             # the NDJSON contract
+│   └── SECURITY.md                    # threat model, Windows ACL model, bootstrap
+├── src/
+│   ├── index.ts                       # CLI: serve --http|--stdio, init, token, migrate, doctor
+│   ├── config/                        # zod-validated config, state root resolution, workspace roots
+│   ├── mcp/
+│   │   ├── server.ts                  # buildServer(authInfo) — per-actor factory
+│   │   ├── http.ts   stdio.ts         # entry points + localhost guards + bearer gate
+│   │   └── tools/                     # one file per tool: schema + thin handler
+│   ├── auth/
+│   │   ├── actors.ts  actorTokens.ts  capabilities.ts  leases.ts
+│   │   └── secrets/  paths.ts  acl.win.ts  acl.posix.ts  verify.ts
+│   ├── domain/
+│   │   ├── states.ts  transitions.ts  # the state machine, as data
+│   │   ├── decide.ts                  # THE ONLY writer of authoritative_status
+│   │   ├── jobs.ts  cycles.ts  errors.ts
+│   ├── store/
+│   │   ├── db.ts  migrations/*.sql  repositories/*.ts
+│   ├── workers/
+│   │   ├── registry.ts  adapter.ts  runtime.ts  ndjson.ts  report.ts
+│   │   └── adapters/process.ts
+│   ├── artifacts/  store.ts  paths.ts  hash.ts
+│   ├── audit/      log.ts  redact.ts
+│   └── util/       ids.ts  clock.ts  json.ts  result.ts
+└── test/
+    ├── fixtures/workers/              # echo, slow, crashing, malformed, chatty, secret-echoing
+    ├── unit/  contract/  authz/  state/  sql/  workers/  store/  mcp/  integration/
+```
+
+`src/workers/adapters/agy.ts` and any browser adapter are **not created in V1**. Adding them must not require touching `domain/` or `store/` — that is the test of whether this structure is right.
+
+---
+
+## 19. Testing Strategy
+
+Vitest, coverage, CI-ready. A fake clock and injectable ids make everything deterministic. A `sql/` test layer connects to a throwaway DB and issues **raw SQL that bypasses the application entirely** — this is how the DB-level authority claims are proven rather than asserted.
+
+**Layers:** unit · contract/schema (JSON Schema snapshots) · authorization · state machine (property-based) · **raw-SQL bypass** · worker adapter · subprocess failure · store/migrations/crash · Windows ACL · MCP protocol (in-memory client, plus stdio smoke and an Inspector run) · integration.
+
+### Critical invariants — each an explicit named test
+
+**Authority (application layer)**
+
+1. **Gemini cannot mark a job authoritative.** A worker-role actor calling `codex_decide` gets `AUTHORIZATION_DENIED`, and the tool is absent from its `tools/list`.
+2. **A worker cannot impersonate Codex.** A worker token with a forged `actor_id` or `session_hint` in arguments is ignored; identity comes only from the verified token.
+3. **`worker_verdict: PASS` never changes `authoritative_status`.** After a PASS report, `authoritative_status` is NULL and `state` is `EVIDENCE_READY`.
+4. **Codex can reject a PASS**, recorded with rationale and cited evidence.
+5. **Codex can approve over a FAIL** via `IGNORE_FALSE_POSITIVE` + `APPROVE`, both in the audit chain.
+6. **`authoritative_status` has exactly one writer** — source-scanning test: no assignment outside `domain/decide.ts`.
+
+**Authority (raw SQL bypass — the DB must refuse on its own)**
+
+7. **A principal `RETEST` decision referenced while setting `APPROVED` is ABORTed** (T2, no grant row).
+8. **A valid `APPROVE` decision referenced while setting `JOB_COMPLETED` is ABORTed** (T2, grant mismatch).
+9. **A decision belonging to another job, another cycle, or another `to_state` is ABORTed** (T2, join predicates).
+10. **A decision authored by a worker actor cannot be inserted** (T1), and a decision by a *disabled* principal cannot justify a status (T2).
+11. **`state='APPROVED'` without the matching `authoritative_status` is ABORTed** (T4).
+12. **`JOB_COMPLETED → APPROVED` and any move off a terminal status are ABORTed** (T3).
+13. **Clearing `authoritative_status` to NULL is ABORTed** (T2).
+14. **`decisions` and `audit_log` reject UPDATE and DELETE; `decision_grants` rejects INSERT/UPDATE/DELETE** (T5).
+15. **A hand-written `INSERT` into `decision_grants` cannot widen authority**, and after it fails, invariant 7 still holds.
+
+**Frozen reference data (T6) — raw SQL, application bypassed**
+
+Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-for-byte unchanged afterwards, **and** that the invariant the row protects still holds (15e), proving the trigger was not merely cosmetic:
+
+- **15a. Terminality cannot be relaxed.** `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status = 'JOB_COMPLETED'` is ABORTed.
+- **15b. Ranks cannot be re-ordered.** `UPDATE authoritative_statuses SET rank = 99 WHERE authoritative_status = 'APPROVED'` is ABORTed (and so is lowering a terminal status's rank).
+- **15c. New statuses cannot be added.** `INSERT INTO authoritative_statuses VALUES ('UNAPPROVED', 5, 0)` is ABORTed.
+- **15d. Statuses cannot be deleted.** `DELETE FROM authoritative_statuses WHERE authoritative_status = 'REJECTED'` is ABORTed.
+- **15e. Invariants survive every attempt.** After each of 15a–15d, re-run the T3 checks against a live job: a `JOB_COMPLETED` job still cannot be moved to any other status, and an `APPROVED` job still cannot regress. The protected behaviour is verified, not just the ABORT.
+
+**Identity, sessions, bootstrap**
+
+16. **Only one principal actor can exist** (unique partial index).
+17. **The service refuses to serve with zero enabled principals**, and `init` is the only path that creates one.
+18. **Two Codex session tokens map to the same principal**, both may act, and each decision records the correct `session_token_id` — answering "which session decided this?"
+19. **Session identity confers no extra authority**: a session token cannot do anything the actor cannot.
+20. **Concurrent sessions cannot both decide a cycle** — the second gets `STATE_CONFLICT` and the loss is audited.
+
+**Lifecycle**
+
+21. **Max QA cycles are enforced** — the `max_cycles+1`-th dispatch is refused and the job lands in `STALLED(max_cycles)`.
+22. **`hard_max_cycles` cannot be exceeded**, even by the principal.
+23. **`qa_dispatch` is atomic** — a forced failure while inserting the second run leaves no runs, no leases, and `state` unchanged.
+24. **`RETEST` does not auto-dispatch** — the job is `IN_PROGRESS` at `cycle+1` with no runs until an explicit dispatch.
+25. **Duplicate worker result does not corrupt state** — two identical `run_report` calls → one evidence set, one settle, second returns `duplicate: true`.
+26. **A stale lease is refused** — a report for cycle N after the job advanced is rejected and audited.
+27. **Process restart preserves jobs** — kill mid-run, restart: jobs intact, runs `ORPHANED`, job `STALLED`, nothing auto-approved.
+28. **The `system` actor cannot reach any authoritative status** — property test over every `(state, transition)` pair with `actor=system`.
+
+**Boundaries and secrets**
+
+29. **Workspace allowlist holds** — a job in `C:\Windows`, `C:\`, a UNC path, a `\\?\` device path, or `C:\AgentProjects\..\Other` is rejected; `C:\AgentProjects\foo` is accepted.
+30. **Artifact path jail holds** — `..`, absolute paths, symlinks, `CON`/`NUL`, ADS, and trailing-dot names are all rejected.
+31. **Secrets directory ACL is created and verified** — on Windows, an ACL containing `BUILTIN\Users` causes startup to **fail closed**; on POSIX, mode `0700`/`0600` is asserted. (Runs only on the matching platform.)
+32. **Bearer tokens are print-once** — no plaintext token is written to the state root by default.
+33. **Timeout kills the process tree** and produces `TIMEOUT`/`NONE`, never `PASS`.
+34. **Malformed NDJSON does not crash a run** and never yields `PASS`.
+35. **Secrets never appear** in audit rows, tool responses, stderr tails, or error messages (fixture worker that deliberately echoes a token).
+36. **Audit chain verifies**, and a manually mutated row is detected.
+37. **Non-localhost Origin → 403; unauthenticated → 401.**
+
+### Verification (how a human confirms it end to end)
+
+1. `npm test` — all layers green, including the raw-SQL bypass suite.
+2. `node dist/index.js init` — creates `%LOCALAPPDATA%\AgentOrchestratorMCP\`, hardens `secrets\`, applies migrations, creates the `codex` principal, prints its token once.
+3. `node dist/index.js doctor` — reports state-root ACL status, principal count, migration version, configured workspace roots.
+4. `npx @modelcontextprotocol/inspector node dist/index.js --stdio` — `tools/list` shows the ten tools; call `job_create` and `job_get` by hand.
+5. Start HTTP mode; `curl` with no token → 401; bad `Origin` → 403; worker token → `tools/list` **does not contain `codex_decide`**.
+6. Issue a *second* Codex token (`token issue --label codex-session-b`); register both in two Codex sessions via `bearer_token_env_var`; confirm both can act and that `audit_query` distinguishes them.
+7. Scripted job against the fixture worker: create (in `C:\AgentProjects\...`) → dispatch → report(PASS) → confirm `authoritative_status` is NULL → `codex_decide(REJECT)` → `audit_query` explains the chain.
+8. Open the DB with `sqlite3` and attempt by hand: the three decision bypasses (invariants 7–9), then `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status='JOB_COMPLETED'` and `UPDATE authoritative_statuses SET rank = 99 WHERE authoritative_status='APPROVED'` (invariants 15a–15b). Every one must ABORT, and `SELECT * FROM authoritative_statuses` must be unchanged afterwards.
+9. Kill the service mid-run and restart; confirm `STALLED` with orphaned runs and no authoritative status set.
+
+---
+
+## 20. V1 Scope
+
+### MUST HAVE (V1)
+
+- Config loading and validation, including the **workspace-root allowlist**
+- `init` / `migrate` / `token` / `doctor` / `serve` CLI, with documented bootstrap
+- Global state root under `%LOCALAPPDATA%\AgentOrchestratorMCP\`, **Windows ACL hardening with fail-closed verification** (§15.1), POSIX modes on POSIX
+- One SQLite store, migrations, all tables and **triggers T1–T6** (including the frozen `decision_grants` and `authoritative_statuses` reference tables)
+- Actors, `actor_tokens` (multi-session), capabilities, dispatch leases, print-once tokens
+- Job state machine and transition table exactly as §6, including the atomic `qa_dispatch` transaction
+- The ten MCP tools of §8
+- HTTP (loopback + bearer + Origin/Host guards) **and** stdio over one core
+- Generic NDJSON process-worker adapter + shared `ProcessRuntime` + fixture workers
+- Both worker ingress paths (spawned NDJSON, and `run_report` with a lease)
+- Artifacts (path jail, sha256, metadata-only) and evidence with trust classes
+- Hash-chained audit log with session attribution, redaction, `audit_query`
+- Reaper, crash recovery to `STALLED`, startup invariants
+- Idempotency and optimistic concurrency
+- The full test suite of §19, including the raw-SQL bypass layer
+
+### SHOULD HAVE LATER
+
+- `agy`/Gemini adapter (§11), beginning with empirical re-verification of the CLI contract
+- Registration of the **external** browser/CDP worker as a process worker (§12)
+- **DPAPI encryption of the lease key** (§15.1 rationale)
+- MCP resources exposing artifacts read-only
+- Worker capability grants beyond read-and-report
+- `prune` CLI and artifact retention policy for the shared global root
+- Status CLI / read-only local dashboard
+- Reusable QA recipes (job templates)
+- Automatic DB backup rotation
+
+### NOT NOW
+
+- Remote/networked operation, TLS, multi-machine
+- OAuth authorization server (the local token verifier is sufficient and correct)
+- A plugin system, dynamic worker loading, in-process worker sandboxes
+- Web UI
+- Queueing beyond a small in-process FIFO
+- Cost accounting/budgeting across agents
+- Any NASQ-, Salla-, site-, or repo-specific tool, schema, or default
+
+---
+
+## 21. Implementation Phases
+
+Each phase is independently verifiable and leaves the repo green.
+
+| # | Phase | Deliverable | Verified by |
+|---|---|---|---|
+| **0** | Skeleton | package.json, tsconfig, vitest, lint, empty CLI, CI script | `npm test` runs; `--help` works |
+| **1** | State root & secrets | State-root resolution, directory creation, **Windows ACL apply + verify + fail-closed**, POSIX modes, lease-key generation, `doctor` | Invariants 31, 32; manual ACL tamper drill |
+| **2** | MCP spine | Both entry points, one trivial `ping` tool, localhost guards, bearer gate, `actor_tokens` resolution | Inspector connects; invariant 37; **observed Codex protocol era recorded** |
+| **3** | Store & DB authority | Migrations, all tables, seeds, **triggers T1–T6** (freeze triggers created *after* the seed inserts), repositories, integrity check | Invariants 7–15, **15a–15e** (raw SQL), 16 |
+| **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
+| **5** | Job lifecycle | `job_create` (+ workspace allowlist), `job_get`, `job_list`, cycles, idempotency, CAS | Invariants 21, 22, 24, 29; integration to `APPROVED` with no workers |
+| **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34 |
+| **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, path jail, hashing, trust classes, size caps | Invariant 30 |
+| **8** | Resilience | Reaper, crash recovery, cancellation, graceful shutdown, `STALLED` paths, `audit_query` | Invariants 27, 35 |
+| **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, `SECURITY.md`, README, two-session Codex drill | The §19 verification checklist, start to finish |
+
+Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
+
+**Post-V1, in order:** register the external browser worker (config only, no core change) → then the `agy` adapter, **starting with empirical verification of the installed CLI's prompt/stdin contract** before any code is written against it. If either requires editing `domain/` or `store/`, the architecture failed and should be revisited rather than patched.
+
+---
+
+## 22. Open Questions
+
+Only what genuinely blocks or materially changes implementation. *(State location, concurrent Codex sessions, workspace roots, and the browser worker's location are decided and no longer asked.)*
+
+1. **How will each Codex session receive a distinct token?** Codex reads the bearer token from an environment variable named in `config.toml`, so distinct per-session tokens require launching each session with a different value for that variable. If all sessions inherit one environment, they will share one token and session attribution degrades from *verified* (`session_token_id`) to *claimed* (`session_hint`). The design already handles both, so this is **not blocking implementation** — but it determines how strong the audit answer to "which session decided this?" actually is, and it is worth confirming how sessions are launched. *Affects Phase 4 documentation, not code.*
+
+2. **Retention policy for the shared artifact root.** One global root now accumulates artifacts from every project, so growth is unbounded until `prune` exists (LATER). V1 records `bytes` per artifact, so the question is only whether a **hard cap or a warning threshold** should exist in V1 — e.g. refuse new artifact registration above N GB, or merely surface the total in `doctor`. Recommendation: warn in `doctor` only; no hard cap in V1. *Blocking Phase 7 only if a cap is wanted.*
+
+3. **`agy` prompt-delivery contract.** Deferred by decision, but recorded here so it is not forgotten: the installed CLI documents `--input-format text|stream-json` for print mode and does not document plain-text stdin prompts with `-p`. This must be verified empirically at the start of the agy phase rather than assumed. *Not blocking V1.*
+
+---
+
+## 23. FINAL RECOMMENDATION
+
+**Revision 3 is implementation-ready.**
+
+The central requirement — Codex as sole authority — is now enforced at five independent layers, and the database layer no longer merely checks that *a* decision exists: it checks that the referenced decision **semantically grants the exact status being written**, was authored by an **enabled principal**, targets the **same job, cycle, and state**, and does not regress or resurrect a terminal outcome. `RETEST`, `FIX`, `VERIFY_SELF`, and `IGNORE_FALSE_POSITIVE` have no grant row and therefore cannot justify any authoritative write, from the application or from a `sqlite3` shell. Those claims are proven by a raw-SQL test layer that bypasses the application entirely, not asserted in prose.
+
+Revision 3 closes the last gap in that argument: the reference data those triggers *read* is now as immutable as the triggers themselves. `decision_grants` and `authoritative_statuses` are both frozen against INSERT/UPDATE/DELETE by triggers created after their seed inserts, so an attacker cannot disarm terminality or monotonicity by editing a lookup table instead of a job row. Changing either map is a reviewed, versioned migration. Five raw-SQL tests (15a–15e) prove not only that each mutation is ABORTed but that the invariant it protects still holds afterwards.
+
+Naming now matches semantics: `authoritative_status` records milestones (some of which are not terminal), `state` records workflow position, and `worker_verdict` remains structurally unable to reach either.
+
+The Windows security model is Windows-native — inheritance-stripped, current-user-SID-only DACLs, verified after creation and on every startup, failing closed — with `chmod` correctly demoted to the POSIX implementation, and DPAPI evaluated and deferred on a stated cost/benefit basis rather than by omission. State lives in one global root so the orchestrator can coordinate across projects, while workspace access is a narrow, config-driven allowlist that never includes a drive root.
+
+Multiple Codex sessions are supported with **verified** session attribution and exactly one principal actor; the single-principal invariant is now guaranteed in both directions — at most one by index, exactly one enabled by startup check, with documented bootstrap.
+
+Scope remains honest: V1 is the authority core plus one generic worker adapter. `agy` and the browser worker are designed, external, and deferred, with the agy CLI contract explicitly flagged as unverified.
+
+**Recommended next step:** approve, then begin Phase 0.
