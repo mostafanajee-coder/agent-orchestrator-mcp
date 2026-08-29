@@ -1,7 +1,7 @@
 # Agent Orchestrator MCP — V1 Architecture (Revision 3)
 
 > **Status:** approved. This is the design of record; the implementation follows the phase plan in §21.
-> Implementation is at **Phase 0 (scaffold)**. Sections describing later phases are design intent, not
+> Implementation is at **Phase 1 (state root and secrets)**. Sections describing later phases are design intent, not
 > shipped behaviour. This document was written before any code existed, so present-tense descriptions
 > of components state what they must do, not what exists today.
 
