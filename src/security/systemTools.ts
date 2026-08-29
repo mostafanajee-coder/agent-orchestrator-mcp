@@ -19,19 +19,34 @@ export interface SystemToolPaths {
 
 const WINDOWS_ROOT_PATTERN = /^[A-Za-z]:[\\/]/;
 
-function assertUsableSystemRoot(systemRoot: string | undefined): string {
+function assertUsableSystemRoot(systemRoot: string | undefined, platform: NodeJS.Platform): string {
   if (systemRoot === undefined || systemRoot.trim() === '') {
     throw new SecurityError(
       'SystemRoot is not set, so trusted Windows system tools cannot be located.',
       'Run from a normal Windows session where SystemRoot is defined. Tools are never resolved through PATH.',
     );
   }
-  if (!isAbsolute(systemRoot) || !WINDOWS_ROOT_PATTERN.test(systemRoot)) {
+
+  // An absolute path is required everywhere: a relative SystemRoot would make
+  // the resolved tool path depend on the working directory.
+  if (!isAbsolute(systemRoot)) {
+    throw new SecurityError(
+      `SystemRoot (${systemRoot}) is not an absolute path, so system tools cannot be trusted.`,
+      'Tools are never resolved through PATH.',
+    );
+  }
+
+  // The drive-letter form is additionally required on Windows, where a
+  // SystemRoot that is not a real Windows path cannot be trusted. The rule is
+  // keyed on the injected platform rather than a global so the Windows
+  // rejection stays provable from a non-Windows CI machine.
+  if (platform === 'win32' && !WINDOWS_ROOT_PATTERN.test(systemRoot)) {
     throw new SecurityError(
       `SystemRoot (${systemRoot}) is not an absolute Windows path, so system tools cannot be trusted.`,
       'Tools are never resolved through PATH.',
     );
   }
+
   return systemRoot;
 }
 
@@ -79,9 +94,16 @@ export function expectedToolPaths(systemRoot: string): SystemToolPaths {
  * Resolves the Windows tools, failing closed when either is unavailable.
  *
  * There is deliberately no PATH fallback of any kind.
+ *
+ * `platform` selects how strictly SystemRoot itself is validated; it is
+ * injected so both the Windows and non-Windows rules are testable from either
+ * platform. Production callers pass the real platform.
  */
-export function resolveSystemTools(systemRoot: string | undefined): SystemToolPaths {
-  const root = assertUsableSystemRoot(systemRoot);
+export function resolveSystemTools(
+  systemRoot: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): SystemToolPaths {
+  const root = assertUsableSystemRoot(systemRoot, platform);
   const expected = expectedToolPaths(root);
   return {
     icacls: assertTrustedExecutable(expected.icacls, 'icacls.exe'),

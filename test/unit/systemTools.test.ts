@@ -50,9 +50,22 @@ describe('resolveSystemTools: fail closed', () => {
   it.each([
     ['relative', 'Windows'],
     ['relative with separator', 'some/Windows'],
-    ['a POSIX path', '/usr/lib'],
-  ])('refuses %s SystemRoot as structurally invalid', (_label, value) => {
-    expect(() => resolveSystemTools(value)).toThrow(/not an absolute Windows path/);
+  ])('refuses a %s SystemRoot on any platform', (_label, value) => {
+    expect(() => resolveSystemTools(value, 'win32')).toThrow(/not an absolute path/);
+    expect(() => resolveSystemTools(value, 'linux')).toThrow(/not an absolute path/);
+  });
+
+  it('refuses a POSIX SystemRoot when running on Windows', () => {
+    // Provable from a Linux CI machine because the platform is injected
+    // rather than read from a global.
+    expect(() => resolveSystemTools('/usr/lib', 'win32')).toThrow(/not an absolute Windows path/);
+  });
+
+  it('does not demand a drive letter off Windows', () => {
+    // The drive-letter rule is Windows-specific. Off Windows an absolute path
+    // is accepted and validation proceeds to the executable checks, which is
+    // what lets these tests run on a Linux runner at all.
+    expect(() => resolveSystemTools('/usr/lib', 'linux')).toThrow(/was not found/);
   });
 
   it('fails closed when icacls is missing', () => {
@@ -116,6 +129,28 @@ describe('resolveSystemTools: success', () => {
     const root = makeSystemRoot();
     expect(resolveSystemTools(root)).toEqual(expectedToolPaths(root));
   });
+
+  it('resolves a simulated SystemRoot under a POSIX temp directory', () => {
+    // Exercises the exact path a Linux CI runner takes: an absolute POSIX
+    // SystemRoot with real files standing in for the tools. Runs on every
+    // platform, so the Linux behaviour is provable from Windows.
+    const root = makeSystemRoot();
+    expect(resolveSystemTools(root, 'linux')).toEqual(expectedToolPaths(root));
+  });
+
+  // Separate tests: each needs a fresh workspace, since makeSystemRoot writes
+  // into one directory and does not remove tools a previous call created.
+  it('reaches the missing-icacls check off Windows', () => {
+    expect(() => resolveSystemTools(makeSystemRoot({ icacls: false }), 'linux')).toThrow(
+      /icacls\.exe was not found/,
+    );
+  });
+
+  it('reaches the missing-powershell check off Windows', () => {
+    expect(() => resolveSystemTools(makeSystemRoot({ powershell: false }), 'linux')).toThrow(
+      /powershell\.exe was not found/,
+    );
+  });
 });
 
 describe('production wiring', () => {
@@ -128,5 +163,14 @@ describe('production wiring', () => {
       systemRoot: undefined,
     });
     expect(() => provider.subject()).toThrow(SecurityError);
+  });
+
+  it('threads the platform through, so a Windows provider rejects a POSIX SystemRoot', () => {
+    const provider = createSecurityProvider({
+      platform: 'win32',
+      runner: nodeCommandRunner,
+      systemRoot: '/usr/lib',
+    });
+    expect(() => provider.subject()).toThrow(/not an absolute Windows path/);
   });
 });

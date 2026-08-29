@@ -48,6 +48,8 @@ export function buildIcaclsArgs(path: string, kind: PathKind, sid: string): stri
 export interface WindowsSecurityProviderOptions {
   readonly runner: CommandRunner;
   readonly systemRoot?: string | undefined;
+  /** Platform used to validate SystemRoot. Defaults to the real platform. */
+  readonly platform?: NodeJS.Platform | undefined;
   /**
    * Pre-resolved tool paths.
    *
@@ -74,12 +76,14 @@ export class WindowsSecurityProvider implements SecurityProvider {
 
   private readonly runner: CommandRunner;
   private readonly systemRoot: string | undefined;
+  private readonly platform: NodeJS.Platform;
   private cachedTools: SystemToolPaths | undefined;
   private cachedSid: string | undefined;
 
   public constructor(options: WindowsSecurityProviderOptions) {
     this.runner = options.runner;
     this.systemRoot = options.systemRoot;
+    this.platform = options.platform ?? process.platform;
     this.cachedTools = options.tools;
   }
 
@@ -89,7 +93,7 @@ export class WindowsSecurityProvider implements SecurityProvider {
    * fallback: if the absolute executable cannot be proven, this throws.
    */
   private tools(): SystemToolPaths {
-    this.cachedTools ??= resolveSystemTools(this.systemRoot);
+    this.cachedTools ??= resolveSystemTools(this.systemRoot, this.platform);
     return this.cachedTools;
   }
 
