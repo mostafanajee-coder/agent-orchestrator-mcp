@@ -9,8 +9,9 @@ triggers, not by prompt instructions.
 
 ## Status
 
-**Phase 0 — scaffold.** The TypeScript project, test runner, linter, and a `--help` / `--version`
-CLI exist. No orchestration functionality is implemented yet.
+**Phase 1 — state root and secrets.** The CLI can prepare, protect, and inspect the global state
+root, including the lease HMAC key. Nothing else is implemented: there is no MCP server, transport,
+database, actor model, job state machine, or worker runtime yet.
 
 The approved design and the full phase plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -30,6 +31,91 @@ npm run ci
 
 `npm run ci` runs the full gate: typecheck, lint, tests, build.
 
+## CLI
+
+```bash
+node dist/index.js init
+```
+
+Prepares the state root: creates each directory, applies owner-only protection, verifies it, and
+creates the lease key once. It is idempotent — running it again preserves the existing key
+unchanged. This is the Phase 1 portion of `init`; schema migrations and principal bootstrap arrive
+in later phases.
+
+```bash
+node dist/index.js doctor
+```
+
+Reports on the state root. **Read-only**: it never creates, hardens, or repairs anything, and it
+never reads the lease key. It exits non-zero if anything is insecure.
+
+Exit codes: `0` success, `1` unexpected internal failure, `2` usage error, `3` security or
+invariant failure.
+
+## State root
+
+Runtime state lives outside this repository, in one global root shared by every project:
+
+```
+%LOCALAPPDATA%\AgentOrchestratorMCP\
+  data\        reserved for the database (later phase)
+  artifacts\   per job / cycle / run
+  secrets\     lease.key
+  logs\
+```
+
+On POSIX the root is `$XDG_STATE_HOME/agent-orchestrator-mcp`, falling back to
+`~/.local/state/agent-orchestrator-mcp`. There is deliberately **no override** — no flag,
+environment variable, or config file can redirect the state root, so secrets cannot be steered to a
+less protected location. `init` refuses a state root inside a known cloud-synchronised directory.
+
+## Security model
+
+Every directory in the state root, and the lease key itself, is protected identically:
+
+- **Windows** — a DACL with inheritance removed and exactly one allow entry, for the current user's
+  SID. `BUILTIN\Users`, `Everyone`, `Authenticated Users`, `INTERACTIVE`, `SYSTEM`, and
+  `Administrators` are all absent by design. Applied with `icacls` using an argument vector and the
+  `*<SID>` principal form; never a shell string, never a localized account name.
+- **POSIX** — directories `0700`, secret files `0600`, owned by the current user. Note that
+  `chmod` is a no-op for access control on Windows and is *not* the Windows mechanism.
+
+Protection is **verified after it is applied**, and again on every `doctor` run. Verification reads
+the security descriptor as SDDL, which reports identities as SIDs, so it does not depend on the
+Windows display language. If protection cannot be proven, the command fails closed rather than
+continuing.
+
+Verification requires the descriptor to match the exact canonical shape hardening produces —
+owned by the current user, protected, and carrying **exactly one** full-access allow entry for the
+current user with the inheritance flags appropriate to a directory or a file. Deny entries,
+callback or unknown entry types, extra entries, reduced rights, unexpected inheritance flags, and
+anything the parser cannot fully model are all rejected. No attempt is made to compute Windows
+effective permissions; the policy is deliberately narrower than that.
+
+`icacls.exe` and `powershell.exe` are resolved only at their absolute locations under `SystemRoot`
+and are proven to be regular files before use. There is **no PATH fallback** — if a trusted tool
+cannot be located, the command fails closed.
+
+Every protected path is checked for redirection before it is hardened or inspected: symbolic
+links, NTFS junctions, wrong object types, and hard-linked secrets are refused, so protection is
+never applied through a link to a target elsewhere. The state root alone may sit on a filesystem
+virtualization boundary, because a packaged (MSIX) process legitimately has `%LOCALAPPDATA%`
+redirected into its own `LocalCache`; link detection still applies there.
+
+The same policy is applied uniformly to `data\`, `artifacts\`, and `logs\` as to `secrets\`, so the
+future database is never created inside a broadly accessible directory and no path is left weaker
+than another.
+
+Ordering is load-bearing: `secrets\` is created, hardened, and verified **before** the lease key is
+written into it, and an existing key has its protection verified **before** anything opens it. An
+unsafe key is refused, never read and never repaired in place.
+
+The lease key is **exactly** 32 random bytes (256-bit, for HMAC-SHA256) — not a minimum; a file of
+any other size is malformed and refused. It is written with a loop that honours short writes and
+its final size is confirmed before it is trusted; any failure removes the partial file. It is never
+printed, logged, or included in any error message or report — `doctor` reports only its size and
+protection status.
+
 ## Scripts
 
 | Script | What it does |
@@ -43,24 +129,14 @@ npm run ci
 | `npm run ci` | typecheck → lint → test → build |
 | `npm run clean` | Remove `dist/` |
 
-## CLI
-
-```bash
-node dist/index.js --help
-```
-
-```bash
-node dist/index.js --version
-```
-
 ## Layout
 
 ```
-src/            CLI entry point and version reader
-test/unit/      Unit tests, including a Phase 0 dependency-scope guard
-docs/           Approved architecture
+src/config/     state-root resolution, cloud-sync detection
+src/security/   ACL and permission providers, SDDL policy, safe process execution
+src/secrets/    lease key lifecycle
+src/commands/   init and doctor
+test/unit/      unit tests, including a dependency-scope guard
+docs/           approved architecture
 .github/        CI workflow (Windows + Linux)
 ```
-
-Runtime state (database, artifacts, secrets, logs) will live outside this repository, under
-`%LOCALAPPDATA%\AgentOrchestratorMCP\`. Nothing writes there yet.
