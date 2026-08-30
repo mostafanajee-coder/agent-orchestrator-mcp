@@ -1,4 +1,4 @@
-import type { SqliteDatabase } from './db.js';
+import type { SqliteDatabase, SynchronousTransactionCallback } from './db.js';
 import { withImmediateTransaction } from './db.js';
 
 export interface ActorRow {
@@ -53,7 +53,7 @@ export interface StructuralRepositories {
   readonly actors: ActorRepository;
   readonly actorTokens: ActorTokenRepository;
   readonly references: ReferenceRepository;
-  readonly withImmediateTransaction: <T>(callback: () => T) => T;
+  readonly withImmediateTransaction: <T>(callback: SynchronousTransactionCallback<T>) => T;
 }
 
 function actorFromSql(row: Record<string, unknown>): ActorRow {

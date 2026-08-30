@@ -25,6 +25,8 @@ export interface DatabasePaths {
 export interface OpenDatabaseResult {
   readonly db: SqliteDatabase;
   readonly fresh: boolean;
+  /** Exact DB/WAL/SHM paths that were absent when this fresh attempt began. */
+  readonly freshFiles: readonly string[];
 }
 
 export type SqliteDatabaseOpener = (
@@ -35,6 +37,10 @@ export type SqliteDatabaseOpener = (
 export interface DatabaseOpenDependencies {
   readonly opener?: SqliteDatabaseOpener;
 }
+
+export type SynchronousTransactionCallback<T> = () => T & (
+  T extends PromiseLike<unknown> ? never : unknown
+);
 
 export interface SqlitePragmaPolicy {
   readonly journalMode: 'wal';
@@ -168,7 +174,7 @@ function createSecureDatabaseFile(
         // Preserve the original failure.
       }
     }
-    if (created) removeFreshDatabaseFiles(layout);
+    if (created) removeFreshDatabaseFiles(layout, [layout.database]);
     if (cause instanceof SecurityError) throw cause;
     throw new SecurityError(
       'Could not securely create the authoritative database ' + layout.database + '.',
@@ -190,11 +196,15 @@ function removeIfPresent(path: string): void {
   }
 }
 
-/** Removes only files created by the current fresh-init attempt. */
-export function removeFreshDatabaseFiles(layout: StateLayout): void {
-  removeIfPresent(layout.databaseShm);
-  removeIfPresent(layout.databaseWal);
-  removeIfPresent(layout.database);
+/** Removes only the exact DB/WAL/SHM paths recorded for a fresh attempt. */
+export function removeFreshDatabaseFiles(
+  layout: StateLayout,
+  freshFiles: readonly string[],
+): void {
+  const allowed = new Set(freshFiles);
+  for (const path of [layout.databaseShm, layout.databaseWal, layout.database]) {
+    if (allowed.has(path)) removeIfPresent(path);
+  }
 }
 
 function pragmaSimple(db: SqliteDatabase, statement: string): unknown {
@@ -293,15 +303,23 @@ export function openDatabaseForInit(
 ): OpenDatabaseResult {
   const { layout, security, platform } = context;
   const fresh = lstatIfPresent(layout.database) === undefined;
+  const freshFiles = fresh
+    ? [layout.database, layout.databaseWal, layout.databaseShm]
+      .filter((path) => lstatIfPresent(path) === undefined)
+    : [];
   if (fresh) createSecureDatabaseFile(layout, security, platform);
   else assertExistingDatabaseFilesSecure(layout, security, platform);
 
   try {
-    return { db: openWritableDatabase(layout, security, platform, dependencies), fresh };
+    return {
+      db: openWritableDatabase(layout, security, platform, dependencies),
+      fresh,
+      freshFiles,
+    };
   } catch (cause) {
     if (fresh) {
       try {
-        removeFreshDatabaseFiles(layout);
+        removeFreshDatabaseFiles(layout, freshFiles);
       } catch {
         // Preserve the database error; cleanup failure remains visible on disk.
       }
@@ -316,7 +334,11 @@ export function openExistingDatabaseForServe(
 ): OpenDatabaseResult {
   const { layout, security, platform } = context;
   assertExistingDatabaseFilesSecure(layout, security, platform);
-  return { db: openWritableDatabase(layout, security, platform, dependencies), fresh: false };
+  return {
+    db: openWritableDatabase(layout, security, platform, dependencies),
+    fresh: false,
+    freshFiles: [],
+  };
 }
 
 /** Idempotent close helper for every init/serve path. */
@@ -330,7 +352,7 @@ export function closeDatabase(db: SqliteDatabase): void {
  */
 export function withImmediateTransaction<T>(
   db: SqliteDatabase,
-  callback: () => T,
+  callback: SynchronousTransactionCallback<T>,
 ): T {
   if (db.inTransaction) {
     throw new SecurityError(
@@ -342,6 +364,16 @@ export function withImmediateTransaction<T>(
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = callback();
+    if (
+      result !== null &&
+      (typeof result === 'object' || typeof result === 'function') &&
+      typeof (result as { readonly then?: unknown }).then === 'function'
+    ) {
+      throw new SecurityError(
+        'withImmediateTransaction does not support asynchronous callbacks.',
+        'Use a synchronous callback so all work completes before COMMIT.',
+      );
+    }
     db.exec('COMMIT');
     return result;
   } catch (cause) {
