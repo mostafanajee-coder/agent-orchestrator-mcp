@@ -11,7 +11,7 @@ import {
 } from './auth.js';
 import { createMcpServerFactory } from './server.js';
 
-export interface StdioServerOptions {
+interface CommonStdioServerOptions {
   readonly authInfo: ActorAuthInfo;
   readonly version: string;
   readonly onerror?: (error: Error) => void;
@@ -19,8 +19,12 @@ export interface StdioServerOptions {
   readonly transport?: Transport;
 }
 
-/** Starts the official stdio transport over the common MCP server factory. */
-export function startStdioServer(options: StdioServerOptions): StdioServerHandle {
+export interface StdioServerOptions extends CommonStdioServerOptions {
+  /** Read-only Phase 1 gate; it runs before protocol serving begins. */
+  readonly verifyStartup: () => void;
+}
+
+function startVerifiedStdioServer(options: CommonStdioServerOptions): StdioServerHandle {
   const stdioOptions = {
     legacy: 'serve' as const,
     ...(options.onerror === undefined ? {} : { onerror: options.onerror }),
@@ -36,6 +40,12 @@ export function startStdioServer(options: StdioServerOptions): StdioServerHandle
   );
 }
 
+/** Starts the official stdio transport over the common MCP server factory. */
+export function startStdioServer(options: StdioServerOptions): StdioServerHandle {
+  options.verifyStartup();
+  return startVerifiedStdioServer(options);
+}
+
 /**
  * Authenticates a supplied stdio token once before the transport starts.
  * This is useful for deterministic tests and for a future Phase 3 resolver.
@@ -45,9 +55,11 @@ export async function startAuthenticatedStdioServer(options: {
   readonly token: string;
   readonly version: string;
   readonly onerror?: (error: Error) => void;
+  readonly verifyStartup: () => void;
 }): Promise<StdioServerHandle> {
+  options.verifyStartup();
   const authInfo = await options.resolver.verifyAccessToken(options.token);
-  return startStdioServer({
+  return startVerifiedStdioServer({
     authInfo,
     version: options.version,
     ...(options.onerror === undefined ? {} : { onerror: options.onerror }),
@@ -59,11 +71,15 @@ export function startEnvironmentStdioServer(options: {
   readonly version: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly onerror?: (error: Error) => void;
+  readonly transport?: Transport;
+  readonly verifyStartup: () => void;
 }): StdioServerHandle {
+  options.verifyStartup();
   const authInfo = authenticateEnvironmentToken(options.environment);
-  return startStdioServer({
+  return startVerifiedStdioServer({
     authInfo,
     version: options.version,
     ...(options.onerror === undefined ? {} : { onerror: options.onerror }),
+    ...(options.transport === undefined ? {} : { transport: options.transport }),
   });
 }

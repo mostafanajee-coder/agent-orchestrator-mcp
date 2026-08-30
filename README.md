@@ -71,6 +71,11 @@ Starts Streamable HTTP on `127.0.0.1` only. Every MCP request requires a bearer 
 `mcp` scope; Host and Origin are restricted to localhost-class values. `--port` is optional and
 defaults to `4317`.
 
+Before either transport starts, `serve` performs the same structured, read-only Phase 1 verification
+used by `doctor`. It refuses to start when the state root, protected directories, cloud-sync
+relationship, ACL/mode metadata, or lease-key shape is not valid. It never runs `init`, creates
+state, repairs permissions, or reads lease-key contents automatically.
+
 Exit codes: `0` success, `1` unexpected internal failure, `2` usage error, `3` security or
 invariant failure.
 

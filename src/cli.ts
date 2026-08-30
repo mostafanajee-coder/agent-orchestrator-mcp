@@ -3,6 +3,7 @@ import { runDoctor } from './commands/doctor.js';
 import type { InitResult } from './commands/init.js';
 import { runInit } from './commands/init.js';
 import { createCommandContext } from './commands/context.js';
+import { assertPhase1Ready } from './commands/startup.js';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
 import { createEnvironmentTokenResolver } from './mcp/auth.js';
 import { MCP_HTTP_DEFAULT_PORT, MCP_HTTP_HOST, startHttpServer } from './mcp/http.js';
@@ -42,6 +43,7 @@ export const defaultCommands: CliCommands = {
     if (options.mode === 'stdio') {
       startEnvironmentStdioServer({
         version,
+        verifyStartup: () => assertPhase1Ready(createCommandContext()),
         onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
       });
       return;
@@ -50,6 +52,7 @@ export const defaultCommands: CliCommands = {
     const httpOptions = {
       resolver: createEnvironmentTokenResolver(),
       version,
+      verifyStartup: () => assertPhase1Ready(createCommandContext()),
       logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
       ...(options.port === undefined ? {} : { port: options.port }),
     };

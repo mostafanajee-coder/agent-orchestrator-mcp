@@ -1,21 +1,19 @@
 import { PassThrough } from 'node:stream';
 
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import type { AuthInfo as SdkAuthInfo } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createInMemoryTokenResolver,
-  createSdkTokenVerifier,
   hashAccessToken,
 } from '../../src/mcp/auth.js';
 import {
   startAuthenticatedStdioServer,
   startEnvironmentStdioServer,
-  startStdioServer,
 } from '../../src/mcp/stdio.js';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import type { ActorTokenRecord } from '../../src/mcp/auth.js';
+import { SecurityError } from '../../src/errors.js';
 
 const VALID_TOKEN = 'phase2-stdio-test-token';
 const HANDLES: StdioServerHandle[] = [];
@@ -58,11 +56,6 @@ function lineReader(stream: PassThrough): () => Promise<string> {
   };
 }
 
-async function fixtureAuth(): Promise<SdkAuthInfo> {
-  const resolver = createInMemoryTokenResolver([tokenRecord()]);
-  return createSdkTokenVerifier(resolver).verifyAccessToken(VALID_TOKEN);
-}
-
 afterEach(async () => {
   while (HANDLES.length > 0) {
     const handle = HANDLES.pop();
@@ -75,17 +68,12 @@ describe('official stdio transport over the shared MCP core', () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const nextLine = lineReader(output);
-    const auth = await fixtureAuth();
-    const handle = startStdioServer({
-      authInfo: {
-        clientId: auth.clientId,
-        scopes: auth.scopes,
-        tokenId: 'stdio-token',
-        sessionLabel: 'stdio-test',
-        expiresAt: auth.expiresAt ?? 0,
-      },
+    let startupChecks = 0;
+    const handle = startEnvironmentStdioServer({
       version: '0.0.0-test',
+      environment: { ORCHESTRATOR_ACTOR_TOKEN: VALID_TOKEN },
       transport: new StdioServerTransport(input, output),
+      verifyStartup: () => { startupChecks += 1; },
     });
     HANDLES.push(handle);
 
@@ -133,12 +121,37 @@ describe('official stdio transport over the shared MCP core', () => {
     expect(JSON.stringify(initialize)).not.toContain(VALID_TOKEN);
     expect(JSON.stringify(tools)).not.toContain(VALID_TOKEN);
     expect(JSON.stringify(ping)).not.toContain(VALID_TOKEN);
+    expect(startupChecks).toBe(1);
+  });
+
+  it('refuses before authentication and protocol output when startup verification fails', () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let startupChecks = 0;
+
+    expect(() =>
+      startEnvironmentStdioServer({
+        version: '0.0.0-test',
+        environment: {},
+        transport: new StdioServerTransport(input, output),
+        verifyStartup: () => {
+          startupChecks += 1;
+          throw new SecurityError('Phase 1 state is not ready');
+        },
+      }),
+    ).toThrow(SecurityError);
+    expect(startupChecks).toBe(1);
+    expect(output.readableLength).toBe(0);
   });
 
   it('refuses to start when the environment token is missing', () => {
-    expect(() => startEnvironmentStdioServer({ version: '0.0.0-test', environment: {} })).toThrow(
-      /ORCHESTRATOR_ACTOR_TOKEN is required/,
-    );
+    expect(() =>
+      startEnvironmentStdioServer({
+        version: '0.0.0-test',
+        environment: {},
+        verifyStartup: () => undefined,
+      }),
+    ).toThrow(/ORCHESTRATOR_ACTOR_TOKEN is required/);
   });
 
   it('refuses an invalid supplied token before creating a stdio handle', async () => {
@@ -148,6 +161,7 @@ describe('official stdio transport over the shared MCP core', () => {
         resolver,
         token: 'not-the-fixture-token',
         version: '0.0.0-test',
+        verifyStartup: () => undefined,
       }),
     ).rejects.toThrow('Invalid access token');
   });

@@ -35,6 +35,8 @@ export interface HttpServerOptions {
   readonly version: string;
   readonly port?: number;
   readonly logger?: HttpLogger;
+  /** Read-only Phase 1 gate; it runs before this server binds. */
+  readonly verifyStartup: () => void;
 }
 
 class RequestBodyTooLargeError extends Error {
@@ -247,6 +249,7 @@ function portOrDefault(port: number | undefined): number {
 
 /** Starts on the explicit loopback address; port 0 is useful only for tests. */
 export function startHttpServer(options: HttpServerOptions): Server {
+  options.verifyStartup();
   const server = createHttpServer(options);
   server.listen({ host: MCP_HTTP_HOST, port: portOrDefault(options.port) });
   return server;
@@ -254,6 +257,7 @@ export function startHttpServer(options: HttpServerOptions): Server {
 
 /** Starts and awaits the loopback bind, useful for integration acceptance tests. */
 export async function listenHttpServer(options: HttpServerOptions): Promise<Server> {
+  options.verifyStartup();
   const server = createHttpServer(options);
   const port = portOrDefault(options.port);
   await new Promise<void>((resolve, reject) => {

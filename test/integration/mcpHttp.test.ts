@@ -11,6 +11,7 @@ import {
   closeHttpServer,
   listenHttpServer,
   MCP_HTTP_HOST,
+  startHttpServer,
 } from '../../src/mcp/http.js';
 import type { ActorTokenRecord } from '../../src/mcp/auth.js';
 import type { HttpLogger } from '../../src/mcp/http.js';
@@ -83,6 +84,7 @@ describe('real loopback Streamable HTTP transport', () => {
       version: '0.0.0-test',
       port: 0,
       logger,
+      verifyStartup: () => undefined,
     });
     const address = server.address();
     if (address === null || typeof address === 'string') throw new Error('server did not bind');
@@ -227,5 +229,23 @@ describe('real loopback Streamable HTTP transport', () => {
 
     expect(response.status).toBe(200);
     expect(loggerMessages.join('\n')).not.toContain(VALID_TOKEN);
+  });
+});
+
+describe('HTTP startup gate', () => {
+  it('refuses before creating or binding when startup verification fails', () => {
+    let verified = false;
+    expect(() =>
+      startHttpServer({
+        resolver: createInMemoryTokenResolver([tokenRecord()]),
+        version: '0.0.0-test',
+        port: 0,
+        verifyStartup: () => {
+          verified = true;
+          throw new Error('startup verification failed');
+        },
+      }),
+    ).toThrow('startup verification failed');
+    expect(verified).toBe(true);
   });
 });
