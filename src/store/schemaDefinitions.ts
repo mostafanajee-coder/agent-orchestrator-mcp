@@ -34,6 +34,7 @@ export const CANONICAL_SCHEMA_DEFINITIONS = {
   },
   triggers: {
     trg_audit_no_delete: '93252a5a179051622b6046e65e2c8c73bc439846e5bded16c27729fbf05e8dc6',
+    trg_audit_no_replace: '0294da6c231ccd8be1d2ef7239d9869679ec36ba150c1ac62f0949daeece11cb',
     trg_audit_no_update: '5556621d1918e9d0252536fb9e366bd4f23a62a2beb4cbb9419ae1e60c36f7a7',
     trg_auth_status_monotonic: '669f6e44a416024aa24e6bc4c25f437a6c7042979733fd2ac5c0a3c341bfc230',
     trg_auth_status_requires_granting_decision: '17f9ef8e5d05b98a3309f87379db96ba6accbcd820aa5a98e654a5e1c75a6e16',
@@ -41,12 +42,14 @@ export const CANONICAL_SCHEMA_DEFINITIONS = {
     trg_auth_statuses_frozen_i: '8933f08fe3e55d5aad28bde9f369712bf021896082275ea4da0cf1b561605d40',
     trg_auth_statuses_frozen_u: '9d5b571737bc759bc9e382e67abbe1bb00127f09ae3a1f1b1a7f660b9d368fff',
     trg_decisions_no_delete: '7574b977171ed9e864e904c27621c9313803fcd6affd7fa4e41acaa11816a5ed',
+    trg_decisions_no_replace: '62f2a9cfea2d9b847908f3e82ea5da3159236a73b1922941a2a75604c268beba',
     trg_decisions_no_update: '2675c5732b9d14dcbfb763e41518cfb1f2198fbe39bddd7ccb07b77420e17376',
     trg_decisions_principal_only: '8986eb494769791612b4fb7d6092be83ff6413f5e56d898fc5ed57dcebe827df',
     trg_grants_frozen_d: 'd537a3064677887188e04b64e693ded366ee619a74ebd4e883c0e37c8579533d',
     trg_grants_frozen_i: 'ed46123a16daa112da5a1828d6673ef740bd598f263e772a96c2e2dd3d147fa6',
     trg_grants_frozen_u: '3f122c888384d0f0192f2203b4039e3d5ed0645b3409e12f07c36612689fb34b',
     trg_jobs_no_delete: '40df3038f28a3d159b6d62eccec0ba28e22d93af8793624d6cef9c3563df7883',
+    trg_jobs_no_replace: 'b9de1cd0300edaf247b3f2918445d888160b14e2e9f3787218a3153430d3eb12',
     trg_jobs_unstamped_on_insert: 'daeeb806a135d94adaa7995f488f2e57f8900da5ddf065c53fb7d65f462d8d49',
     trg_state_matches_auth_status: '13f7a365769053e869d4cffdb43094da10c2e39e6b6db30407d7dade175b6e9a',
   },
@@ -54,6 +57,11 @@ export const CANONICAL_SCHEMA_DEFINITIONS = {
 
 export type SchemaObjectType = keyof typeof CANONICAL_SCHEMA_DEFINITIONS;
 
+/**
+ * Deliberately normalizes whitespace only. SQL keyword/identifier case and
+ * comments remain part of the reviewed fingerprint so approved DDL changes
+ * require an explicit fingerprint regeneration in the same reviewed change.
+ */
 export function canonicalizeSchemaSql(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
 }

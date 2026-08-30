@@ -47,6 +47,7 @@ export interface SqlitePragmaPolicy {
   readonly foreignKeys: 1;
   readonly busyTimeout: 5000;
   readonly synchronous: 1;
+  readonly recursiveTriggers: 1;
 }
 
 export const SQLITE_PRAGMA_POLICY: SqlitePragmaPolicy = {
@@ -54,6 +55,7 @@ export const SQLITE_PRAGMA_POLICY: SqlitePragmaPolicy = {
   foreignKeys: 1,
   busyTimeout: 5000,
   synchronous: 1,
+  recursiveTriggers: 1,
 };
 
 const defaultOpener: SqliteDatabaseOpener = (filename, options) => new Database(filename, options);
@@ -225,12 +227,14 @@ export function verifyPragmaPolicy(db: SqliteDatabase): SqlitePragmaPolicy {
     foreignKeys: numberValue(pragmaSimple(db, 'foreign_keys')),
     busyTimeout: numberValue(pragmaSimple(db, 'busy_timeout')),
     synchronous: numberValue(pragmaSimple(db, 'synchronous')),
+    recursiveTriggers: numberValue(pragmaSimple(db, 'recursive_triggers')),
   };
   if (
     policy.journalMode !== SQLITE_PRAGMA_POLICY.journalMode ||
     policy.foreignKeys !== SQLITE_PRAGMA_POLICY.foreignKeys ||
     policy.busyTimeout !== SQLITE_PRAGMA_POLICY.busyTimeout ||
-    policy.synchronous !== SQLITE_PRAGMA_POLICY.synchronous
+    policy.synchronous !== SQLITE_PRAGMA_POLICY.synchronous ||
+    policy.recursiveTriggers !== SQLITE_PRAGMA_POLICY.recursiveTriggers
   ) {
     throw new SecurityError(
       'The SQLite PRAGMA policy is not the approved Phase 3 policy.',
@@ -245,6 +249,7 @@ function configurePragmas(db: SqliteDatabase): void {
   pragmaSimple(db, 'foreign_keys = ON');
   pragmaSimple(db, 'busy_timeout = 5000');
   pragmaSimple(db, 'synchronous = NORMAL');
+  pragmaSimple(db, 'recursive_triggers = ON');
   verifyPragmaPolicy(db);
 }
 

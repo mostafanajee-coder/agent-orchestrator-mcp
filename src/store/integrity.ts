@@ -15,9 +15,9 @@ import {
 } from './schemaDefinitions.js';
 
 export interface IntegrityReport {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly tableCount: 13;
-  readonly triggerCount: 16;
+  readonly triggerCount: 19;
   readonly appliedVersions: readonly number[];
   readonly pragmaPolicy: typeof SQLITE_PRAGMA_POLICY;
 }
@@ -225,6 +225,9 @@ export const EXPECTED_TRIGGERS = [
   'trg_auth_statuses_frozen_d',
   'trg_jobs_unstamped_on_insert',
   'trg_jobs_no_delete',
+  'trg_jobs_no_replace',
+  'trg_decisions_no_replace',
+  'trg_audit_no_replace',
 ] as const;
 
 function fail(message: string, remedy = 'Restore the approved schema and retry.'): never {
@@ -314,7 +317,7 @@ function verifyTriggers(db: SqliteDatabase): void {
     "SELECT name FROM sqlite_schema WHERE type = 'trigger'",
   ).all().map((row) => (row as SchemaNameRow).name);
   if (!equalNames(triggers, EXPECTED_TRIGGERS)) {
-    fail('The database does not contain exactly the approved T1–T7 trigger set.');
+    fail('The database does not contain exactly the approved T1–T8 trigger set.');
   }
   verifyCanonicalDefinitions(db, 'trigger', CANONICAL_SCHEMA_DEFINITIONS.triggers);
 }
@@ -406,7 +409,7 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     verifySeeds(db);
     verifyLeaseRelation(db);
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       tableCount: EXPECTED_TABLES.length,
       triggerCount: EXPECTED_TRIGGERS.length,
       appliedVersions: ledger.versions,

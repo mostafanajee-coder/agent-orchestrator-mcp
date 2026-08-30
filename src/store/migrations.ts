@@ -8,7 +8,7 @@ import {
   type SqliteDatabase,
 } from './db.js';
 
-export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3] as const;
+export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3, 4] as const;
 
 export interface Migration {
   readonly version: number;
@@ -100,7 +100,7 @@ function validateMigrationSet(migrations: readonly Migration[]): void {
     versions.some((version, index) => version !== KNOWN_MIGRATION_VERSIONS[index])
   ) {
     fail(
-      'The binary migration set is not exactly the approved known set [1,2,3].',
+      'The binary migration set is not exactly the approved known set [1,2,3,4].',
       'Remove unknown, missing, or future migration files before serving.',
     );
   }
@@ -214,6 +214,39 @@ function assertExactRows(
   }
 }
 
+const T1_TO_T6_TRIGGER_NAMES = [
+  'trg_audit_no_delete',
+  'trg_audit_no_update',
+  'trg_auth_status_monotonic',
+  'trg_auth_status_requires_granting_decision',
+  'trg_auth_statuses_frozen_d',
+  'trg_auth_statuses_frozen_i',
+  'trg_auth_statuses_frozen_u',
+  'trg_decisions_no_delete',
+  'trg_decisions_no_update',
+  'trg_decisions_principal_only',
+  'trg_grants_frozen_d',
+  'trg_grants_frozen_i',
+  'trg_grants_frozen_u',
+  'trg_state_matches_auth_status',
+] as const;
+
+const T7_TRIGGER_NAMES = [
+  'trg_jobs_no_delete',
+  'trg_jobs_unstamped_on_insert',
+] as const;
+
+const T8_TRIGGER_NAMES = [
+  'trg_audit_no_replace',
+  'trg_decisions_no_replace',
+  'trg_jobs_no_replace',
+] as const;
+
+const EXPECTED_T1_TO_T7_TRIGGER_COUNT =
+  T1_TO_T6_TRIGGER_NAMES.length + T7_TRIGGER_NAMES.length;
+const EXPECTED_T1_TO_T8_TRIGGER_COUNT =
+  EXPECTED_T1_TO_T7_TRIGGER_COUNT + T8_TRIGGER_NAMES.length;
+
 function verifyMigrationTwoInsideTransaction(db: SqliteDatabase): void {
   assertExactRows(
     db,
@@ -243,22 +276,7 @@ function verifyMigrationTwoInsideTransaction(db: SqliteDatabase): void {
   const triggerNames = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name",
   ).all().map((row) => (row as { readonly name: string }).name).sort();
-  const expectedTriggers = [
-    'trg_audit_no_delete',
-    'trg_audit_no_update',
-    'trg_auth_status_monotonic',
-    'trg_auth_status_requires_granting_decision',
-    'trg_auth_statuses_frozen_d',
-    'trg_auth_statuses_frozen_i',
-    'trg_auth_statuses_frozen_u',
-    'trg_decisions_no_delete',
-    'trg_decisions_no_update',
-    'trg_decisions_principal_only',
-    'trg_grants_frozen_d',
-    'trg_grants_frozen_i',
-    'trg_grants_frozen_u',
-    'trg_state_matches_auth_status',
-  ].sort();
+  const expectedTriggers = [...T1_TO_T6_TRIGGER_NAMES].sort();
   if (
     triggerNames.length !== expectedTriggers.length ||
     triggerNames.some((name, index) => name !== expectedTriggers[index])
@@ -271,15 +289,23 @@ function verifyMigrationThreeInsideTransaction(db: SqliteDatabase): void {
   const triggerNames = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name",
   ).all().map((row) => (row as { readonly name: string }).name);
-  const expected = [
-    'trg_jobs_no_delete',
-    'trg_jobs_unstamped_on_insert',
-  ];
   if (
-    triggerNames.length !== expected.length + 14 ||
-    !expected.every((name) => triggerNames.includes(name))
+    triggerNames.length !== EXPECTED_T1_TO_T7_TRIGGER_COUNT ||
+    !T7_TRIGGER_NAMES.every((name) => triggerNames.includes(name))
   ) {
     fail('Migration 003 did not install the exact T7 job lifecycle trigger set.');
+  }
+}
+
+function verifyMigrationFourInsideTransaction(db: SqliteDatabase): void {
+  const triggerNames = db.prepare(
+    "SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name",
+  ).all().map((row) => (row as { readonly name: string }).name);
+  if (
+    triggerNames.length !== EXPECTED_T1_TO_T8_TRIGGER_COUNT ||
+    !T8_TRIGGER_NAMES.every((name) => triggerNames.includes(name))
+  ) {
+    fail('Migration 004 did not install the exact T8 row-replacement trigger set.');
   }
 }
 
@@ -309,6 +335,7 @@ export function runMigrations(
       }
       if (next.version === 2) verifyMigrationTwoInsideTransaction(db);
       if (next.version === 3) verifyMigrationThreeInsideTransaction(db);
+      if (next.version === 4) verifyMigrationFourInsideTransaction(db);
 
       db.prepare(
         'INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)',

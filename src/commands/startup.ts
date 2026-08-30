@@ -35,5 +35,5 @@ export function assertServeReady(context: CommandContext): void {
   }
 }
 
-/** Backward-compatible internal name retained for Phase 2 callers. */
+/** Retained as a compatibility alias for existing internal tests/callers. */
 export const assertPhase1Ready = assertServeReady;
