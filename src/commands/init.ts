@@ -39,7 +39,7 @@ export function runInit(context: CommandContext): InitResult {
     }
     // Before hardening: never apply icacls or chmod through a link, which
     // would protect the target instead of this path.
-    assertPathIsSafe(directory, 'directory', context.platform, rootOptions(context, directory));
+    assertPathIsSafe(directory, 'directory', context.platform);
     security.harden(directory, 'directory');
     assertSecure(context, directory, 'directory');
   }
@@ -53,7 +53,7 @@ export function runInit(context: CommandContext): InitResult {
   // Final sweep: prove every path is still safe and protected after all
   // mutations, including the key just created.
   for (const directory of stateDirectories(layout)) {
-    assertPathIsSafe(directory, 'directory', context.platform, rootOptions(context, directory));
+    assertPathIsSafe(directory, 'directory', context.platform);
     assertSecure(context, directory, 'directory');
   }
   assertPathIsSafe(layout.leaseKey, 'file', context.platform, { requireSingleLink: true });
@@ -65,14 +65,6 @@ export function runInit(context: CommandContext): InitResult {
     leaseKeyCreated: leaseKey.created,
     securityModel: security.describe(),
   };
-}
-
-/**
- * The state root may sit on a filesystem-virtualization boundary; nothing
- * below it may. See PathSafetyOptions.allowRedirectionBoundary.
- */
-function rootOptions(context: CommandContext, path: string): { allowRedirectionBoundary: boolean } {
-  return { allowRedirectionBoundary: path === context.layout.root };
 }
 
 function assertSecure(

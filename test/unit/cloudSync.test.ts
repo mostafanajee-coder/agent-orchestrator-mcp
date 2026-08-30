@@ -1,57 +1,181 @@
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { CloudSyncEnvironment } from '../../src/config/cloudSync.js';
-import { assertStateRootNotSynced, detectSyncRoots, isInside } from '../../src/config/cloudSync.js';
+import {
+  assertStateRootNotSynced,
+  detectSyncRoots,
+  isInside,
+  isUsableSyncCandidate,
+} from '../../src/config/cloudSync.js';
 import { SecurityError } from '../../src/errors.js';
+
+const WIN_PROFILE = 'C:\\Users\\example';
+const ATTACKER_UNC = '\\\\attacker-server\\share';
+
+/** Records every path that reaches the filesystem, so probes can be asserted on. */
+interface Spy {
+  readonly reads: string[];
+  readonly realpaths: string[];
+}
+
+function spyEnvironment(
+  env: Record<string, string>,
+  options: {
+    files?: Record<string, string>;
+    realPaths?: Record<string, string>;
+    platform?: NodeJS.Platform;
+    profileDir?: string;
+    withRealPath?: boolean;
+  } = {},
+): { environment: CloudSyncEnvironment; spy: Spy } {
+  const spy: Spy = { reads: [], realpaths: [] };
+  const files = options.files ?? {};
+  const realPaths = options.realPaths ?? {};
+
+  const environment: CloudSyncEnvironment = {
+    platform: options.platform ?? 'win32',
+    env,
+    profileDir: options.profileDir ?? WIN_PROFILE,
+    readFileIfPresent: (path) => {
+      spy.reads.push(path);
+      return files[path];
+    },
+    ...(options.withRealPath === false
+      ? {}
+      : {
+          realPathIfPresent: (path: string): string | undefined => {
+            spy.realpaths.push(path);
+            return realPaths[path];
+          },
+        }),
+  };
+
+  return { environment, spy };
+}
 
 function environment(
   env: Record<string, string>,
   files: Record<string, string> = {},
   platform: NodeJS.Platform = 'win32',
 ): CloudSyncEnvironment {
-  return { platform, env, readFileIfPresent: (path) => files[path] };
+  return spyEnvironment(env, { files, platform, withRealPath: false }).environment;
 }
 
-/** Models a filesystem where some paths resolve elsewhere, as a link would. */
-function environmentWithRealPaths(
-  env: Record<string, string>,
-  realPaths: Record<string, string>,
-  platform: NodeJS.Platform = 'win32',
-): CloudSyncEnvironment {
-  return {
-    platform,
-    env,
-    readFileIfPresent: () => undefined,
-    realPathIfPresent: (path) => realPaths[path],
-  };
+/** The Dropbox config path production would build, captured from the spy. */
+function dropboxProbePath(profileDir = WIN_PROFILE): string {
+  const { environment: env, spy } = spyEnvironment({}, { profileDir });
+  detectSyncRoots(env);
+  return spy.reads[0] ?? '';
 }
 
-describe('detectSyncRoots', () => {
-  it('reads the real OneDrive path from the environment rather than a folder name', () => {
-    const roots = detectSyncRoots(
-      environment({ OneDrive: 'D:/Sync/Wolke', OneDriveCommercial: 'D:/Sync/Firma' }),
-    );
-    expect(roots.map((root) => root.path)).toEqual(['D:/Sync/Wolke', 'D:/Sync/Firma']);
+describe('isUsableSyncCandidate', () => {
+  it.each([['C:\\Users\\kingm\\OneDrive'], ['D:\\OneDrive'], ['C:/Users/kingm/OneDrive']])(
+    'accepts the local candidate %s',
+    (value) => {
+      expect(isUsableSyncCandidate(value, 'win32')).toBe(true);
+    },
+  );
+
+  it.each([
+    ['a UNC share', '\\\\server\\share'],
+    ['a device path', '\\\\?\\C:\\OneDrive'],
+    ['a dot-device path', '\\\\.\\C:\\OneDrive'],
+    ['a relative path', 'relative\\path'],
+    ['a drive-relative path', 'C:relative'],
+    ['a drive root', 'C:\\'],
+    ['an empty value', ''],
+  ])('rejects %s as a discovery candidate', (_label, value) => {
+    expect(isUsableSyncCandidate(value, 'win32')).toBe(false);
   });
 
-  it('reads Dropbox roots from its own info.json', () => {
-    const infoPath = join('C:/Users/example/AppData/Local', 'Dropbox', 'info.json');
+  it('keeps POSIX conventional', () => {
+    expect(isUsableSyncCandidate('/home/example/OneDrive', 'linux')).toBe(true);
+    expect(isUsableSyncCandidate('relative', 'linux')).toBe(false);
+  });
+});
+
+describe('detectSyncRoots: environment candidates are validated before use', () => {
+  it('accepts a legitimate local OneDrive root', () => {
+    const roots = detectSyncRoots(environment({ OneDrive: 'D:\\OneDrive' }));
+    expect(roots).toEqual([{ path: 'D:\\OneDrive', provider: 'OneDrive' }]);
+  });
+
+  it.each([
+    ['OneDrive', ATTACKER_UNC],
+    ['OneDriveCommercial', '\\\\?\\C:\\attacker'],
+    ['OneDriveConsumer', 'relative-path'],
+  ])('drops the unusable %s candidate without probing it', (variable, value) => {
+    const { environment: env, spy } = spyEnvironment({ [variable]: value });
+
+    expect(detectSyncRoots(env)).toEqual([]);
+    expect(spy.reads).not.toContain(value);
+    expect(spy.realpaths).not.toContain(value);
+  });
+
+  it('keeps a valid candidate while dropping an invalid sibling', () => {
     const roots = detectSyncRoots(
-      environment(
-        { LOCALAPPDATA: 'C:/Users/example/AppData/Local' },
-        { [infoPath]: JSON.stringify({ personal: { path: 'C:/Users/example/Dropbox' } }) },
-      ),
+      environment({ OneDrive: ATTACKER_UNC, OneDriveCommercial: 'D:\\OneDrive' }),
     );
-    expect(roots).toEqual([{ path: 'C:/Users/example/Dropbox', provider: 'Dropbox (personal)' }]);
+    expect(roots).toEqual([{ path: 'D:\\OneDrive', provider: 'OneDrive for Business' }]);
+  });
+});
+
+describe('detectSyncRoots: Dropbox config comes from the trusted profile', () => {
+  it('reads info.json from under the profile directory', () => {
+    const probe = dropboxProbePath();
+    expect(probe).toContain('Dropbox');
+    expect(probe).toContain('info.json');
+    expect(probe.startsWith(WIN_PROFILE)).toBe(true);
+  });
+
+  it('parses a legitimate Dropbox root', () => {
+    const probe = dropboxProbePath();
+    const roots = detectSyncRoots(
+      environment({}, { [probe]: JSON.stringify({ personal: { path: 'D:\\Dropbox' } }) }),
+    );
+    expect(roots).toEqual([{ path: 'D:\\Dropbox', provider: 'Dropbox (personal)' }]);
+  });
+
+  it.each([
+    ['a UNC share', ATTACKER_UNC],
+    ['a device path', '\\\\?\\D:\\attacker'],
+    ['another drive', 'D:\\attacker-local'],
+    ['a relative path', 'attacker'],
+  ])('does not let LOCALAPPDATA set to %s change the path read', (_label, value) => {
+    const { environment: env, spy } = spyEnvironment({ LOCALAPPDATA: value });
+    detectSyncRoots(env);
+
+    expect(spy.reads).toEqual([dropboxProbePath()]);
+    for (const read of spy.reads) {
+      expect(read).not.toContain('attacker');
+      expect(read.startsWith('\\\\')).toBe(false);
+    }
+  });
+
+  it('ignores HOME as a config location', () => {
+    const { environment: env, spy } = spyEnvironment({ HOME: ATTACKER_UNC });
+    detectSyncRoots(env);
+    expect(spy.reads).toEqual([dropboxProbePath()]);
+  });
+
+  it('reads nothing when the profile itself is unusable', () => {
+    const { environment: env, spy } = spyEnvironment({}, { profileDir: ATTACKER_UNC });
+    expect(detectSyncRoots(env)).toEqual([]);
+    expect(spy.reads).toEqual([]);
+  });
+
+  it('drops a networked root named inside the Dropbox config', () => {
+    // The config file is trusted to locate, but its contents are still hints.
+    const probe = dropboxProbePath();
+    const roots = detectSyncRoots(
+      environment({}, { [probe]: JSON.stringify({ business: { path: ATTACKER_UNC } }) }),
+    );
+    expect(roots).toEqual([]);
   });
 
   it('ignores malformed Dropbox configuration instead of failing', () => {
-    const infoPath = join('C:/Users/example/AppData/Local', 'Dropbox', 'info.json');
-    const roots = detectSyncRoots(
-      environment({ LOCALAPPDATA: 'C:/Users/example/AppData/Local' }, { [infoPath]: 'not json' }),
-    );
-    expect(roots).toEqual([]);
+    const probe = dropboxProbePath();
+    expect(detectSyncRoots(environment({}, { [probe]: 'not json' }))).toEqual([]);
   });
 
   it('returns nothing when no sync client is present', () => {
@@ -59,21 +183,57 @@ describe('detectSyncRoots', () => {
   });
 });
 
+describe('assertStateRootNotSynced: no probe for unusable candidates', () => {
+  it('never resolves an attacker-supplied sync root', () => {
+    const { environment: env, spy } = spyEnvironment({ OneDrive: ATTACKER_UNC });
+
+    expect(() =>
+      assertStateRootNotSynced('C:\\Users\\example\\.agent-orchestrator-mcp', env),
+    ).not.toThrow();
+
+    expect(spy.realpaths).not.toContain(ATTACKER_UNC);
+    for (const probed of spy.realpaths) expect(probed.startsWith('\\\\')).toBe(false);
+  });
+
+  it('still checks a legitimate local sync root', () => {
+    const root = 'D:\\OneDrive\\state';
+    const { environment: env } = spyEnvironment(
+      { OneDrive: 'D:\\OneDrive' },
+      { realPaths: { [root]: root } },
+    );
+    expect(() => assertStateRootNotSynced(root, env)).toThrow(SecurityError);
+  });
+});
+
 describe('isInside', () => {
   it('treats a path as inside itself', () => {
-    expect(isInside('/a/b', '/a/b', false)).toBe(true);
+    expect(isInside('/a/b', '/a/b', 'linux')).toBe(true);
   });
 
   it('detects containment', () => {
-    expect(isInside('/a/b/c', '/a/b', false)).toBe(true);
+    expect(isInside('/a/b/c', '/a/b', 'linux')).toBe(true);
   });
 
   it('rejects a sibling whose name shares a prefix', () => {
-    expect(isInside('/a/bcd', '/a/b', false)).toBe(false);
+    expect(isInside('/a/bcd', '/a/b', 'linux')).toBe(false);
   });
 
-  it('compares case-insensitively for Windows', () => {
-    expect(isInside('C:/Users/Example/OneDrive/state', 'C:/users/example/onedrive', true)).toBe(true);
+  it('applies Windows separator and case rules on any host', () => {
+    expect(
+      isInside('C:\\Users\\Fixed\\OneDrive\\state', 'C:\\users\\fixed\\onedrive', 'win32'),
+    ).toBe(true);
+    expect(isInside('C:\\Users\\Fixed\\Other', 'C:\\Users\\Fixed\\OneDrive', 'win32')).toBe(false);
+  });
+
+  it('keeps POSIX case-sensitive on any host', () => {
+    expect(isInside('/home/Fixed/sync/state', '/home/fixed/sync', 'linux')).toBe(false);
+    expect(isInside('/home/fixed/sync/state', '/home/fixed/sync', 'linux')).toBe(true);
+  });
+
+  it('does not treat a prefix-sharing sibling as contained, on Windows paths', () => {
+    expect(
+      isInside('C:\\Users\\Fixed\\OneDriveOther', 'C:\\Users\\Fixed\\OneDrive', 'win32'),
+    ).toBe(false);
   });
 });
 
@@ -81,24 +241,17 @@ describe('assertStateRootNotSynced', () => {
   it('passes when the state root is outside every sync root', () => {
     expect(() =>
       assertStateRootNotSynced(
-        'C:/Users/example/AppData/Local/AgentOrchestratorMCP',
-        environment({ OneDrive: 'C:/Users/example/OneDrive' }),
+        'C:\\Users\\example\\.agent-orchestrator-mcp',
+        environment({ OneDrive: 'C:\\Users\\example\\OneDrive' }),
       ),
     ).not.toThrow();
   });
 
   it('fails closed when the state root is inside a sync root, naming the provider', () => {
-    expect(() =>
-      assertStateRootNotSynced(
-        'C:/Users/example/OneDrive/AppData/Local/AgentOrchestratorMCP',
-        environment({ OneDrive: 'C:/Users/example/OneDrive' }),
-      ),
-    ).toThrow(SecurityError);
-
     try {
       assertStateRootNotSynced(
-        'C:/Users/example/OneDrive/state',
-        environment({ OneDrive: 'C:/Users/example/OneDrive' }),
+        'C:\\Users\\example\\OneDrive\\state',
+        environment({ OneDrive: 'C:\\Users\\example\\OneDrive' }),
       );
       expect.unreachable();
     } catch (error) {
@@ -110,56 +263,48 @@ describe('assertStateRootNotSynced', () => {
 });
 
 describe('assertStateRootNotSynced: real-path pass', () => {
-  const ONEDRIVE = 'C:/Users/example/OneDrive';
-  const ROOT = 'C:/Users/example/AppData/Local/AgentOrchestratorMCP';
+  const ONEDRIVE = 'C:\\Users\\example\\OneDrive';
+  const ROOT = 'C:\\Users\\example\\.agent-orchestrator-mcp';
+
+  function withRealPaths(realPaths: Record<string, string>): CloudSyncEnvironment {
+    return spyEnvironment({ OneDrive: ONEDRIVE }, { realPaths }).environment;
+  }
 
   it('passes when neither the name nor the resolved path is synchronised', () => {
     expect(() =>
-      assertStateRootNotSynced(
-        ROOT,
-        environmentWithRealPaths({ OneDrive: ONEDRIVE }, { [ROOT]: ROOT, [ONEDRIVE]: ONEDRIVE }),
-      ),
+      assertStateRootNotSynced(ROOT, withRealPaths({ [ROOT]: ROOT, [ONEDRIVE]: ONEDRIVE })),
     ).not.toThrow();
   });
 
   it('rejects a state root whose name looks safe but resolves into a sync root', () => {
     // The classic junction bypass: the literal path is outside OneDrive, but
     // the directory is a redirection into it.
-    const environment = environmentWithRealPaths(
-      { OneDrive: ONEDRIVE },
-      { [ROOT]: `${ONEDRIVE}/redirected/AgentOrchestratorMCP`, [ONEDRIVE]: ONEDRIVE },
-    );
-    expect(() => assertStateRootNotSynced(ROOT, environment)).toThrow(SecurityError);
-    expect(() => assertStateRootNotSynced(ROOT, environment)).toThrow(/resolves inside/);
+    const env = withRealPaths({
+      [ROOT]: `${ONEDRIVE}\\redirected\\state`,
+      [ONEDRIVE]: ONEDRIVE,
+    });
+    expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(/resolves inside/);
   });
 
   it('rejects when the sync root itself is a link containing the resolved state root', () => {
-    const environment = environmentWithRealPaths(
-      { OneDrive: ONEDRIVE },
-      { [ROOT]: 'D:/Synced/state', [ONEDRIVE]: 'D:/Synced' },
-    );
-    expect(() => assertStateRootNotSynced(ROOT, environment)).toThrow(/resolves inside/);
+    const env = withRealPaths({ [ROOT]: 'D:\\Synced\\state', [ONEDRIVE]: 'D:\\Synced' });
+    expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(/resolves inside/);
   });
 
   it('compares resolved paths case-insensitively on Windows', () => {
-    const environment = environmentWithRealPaths(
-      { OneDrive: ONEDRIVE },
-      { [ROOT]: 'D:/SYNCED/State', [ONEDRIVE]: 'd:/synced' },
-    );
-    expect(() => assertStateRootNotSynced(ROOT, environment)).toThrow(SecurityError);
+    const env = withRealPaths({ [ROOT]: 'D:\\SYNCED\\State', [ONEDRIVE]: 'd:\\synced' });
+    expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(SecurityError);
   });
 
   it('falls back to the lexical check when the state root does not exist yet', () => {
-    // Before init, realPathIfPresent returns undefined; the lexical check must
-    // still refuse an obviously synchronised location.
-    const environment = environmentWithRealPaths({ OneDrive: ONEDRIVE }, {});
-    expect(() => assertStateRootNotSynced(`${ONEDRIVE}/state`, environment)).toThrow(SecurityError);
-    expect(() => assertStateRootNotSynced(ROOT, environment)).not.toThrow();
+    const env = withRealPaths({});
+    expect(() => assertStateRootNotSynced(`${ONEDRIVE}\\state`, env)).toThrow(SecurityError);
+    expect(() => assertStateRootNotSynced(ROOT, env)).not.toThrow();
   });
 
   it('still works when no real-path resolver is supplied at all', () => {
     expect(() =>
-      assertStateRootNotSynced(`${ONEDRIVE}/state`, environment({ OneDrive: ONEDRIVE })),
+      assertStateRootNotSynced(`${ONEDRIVE}\\state`, environment({ OneDrive: ONEDRIVE })),
     ).toThrow(SecurityError);
   });
 });

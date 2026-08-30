@@ -48,6 +48,41 @@ const DIRECTORY_ACE_FLAGS = new Set(['OI', 'CI']);
 /** Every ACE flag token this parser recognises. An unknown token is fatal. */
 const KNOWN_ACE_FLAGS = new Set(['CI', 'OI', 'NP', 'IO', 'ID', 'SA', 'FA']);
 
+/**
+ * DACL control tokens this parser understands.
+ *
+ * `P` = protected (inheritance blocked), `AI` = auto-inherited,
+ * `AR` = auto-inherit-required. Anything outside this set is unparsed syntax
+ * and is rejected rather than ignored.
+ */
+const KNOWN_CONTROL_FLAGS = ['AI', 'AR', 'P'] as const;
+
+/** Control tokens our policy permits on a canonical descriptor. */
+const PERMITTED_CONTROL_FLAGS = new Set(['P', 'AI']);
+
+/** The number of fields in an ordinary ACE. Conditional/resource ACEs differ. */
+const ACE_FIELD_COUNT = 6;
+
+/**
+ * Splits a DACL control string into known tokens.
+ *
+ * Returns undefined on anything unrecognised, so `PXYZ`, `Q`, and `PAIX` are
+ * failures rather than "contains a P, good enough".
+ */
+export function parseControlTokens(flags: string): readonly string[] | undefined {
+  const tokens: string[] = [];
+  let index = 0;
+
+  while (index < flags.length) {
+    const match = KNOWN_CONTROL_FLAGS.find((token) => flags.startsWith(token, index));
+    if (match === undefined) return undefined;
+    tokens.push(match);
+    index += match.length;
+  }
+
+  return tokens;
+}
+
 export type PathShape = 'directory' | 'file';
 
 export interface SddlAce {
@@ -63,6 +98,8 @@ export interface SddlAce {
 export interface ParsedDacl {
   readonly isProtected: boolean;
   readonly autoInherited: boolean;
+  /** Every control token found, each one recognised. */
+  readonly controlTokens: readonly string[];
   readonly aces: readonly SddlAce[];
 }
 
@@ -149,8 +186,9 @@ export function parseDescriptor(sddl: string): ParseResult {
   if (flags.includes('NO_ACCESS_CONTROL')) {
     return { ok: true, descriptor: { ownerSid, dacl: null } };
   }
-  if (!/^[A-Z]*$/.test(flags)) {
-    return { ok: false, reason: `the DACL flags '${flags}' are not recognised` };
+  const controlTokens = parseControlTokens(flags);
+  if (controlTokens === undefined) {
+    return { ok: false, reason: `the DACL control flags '${flags}' are not recognised` };
   }
 
   const aces: SddlAce[] = [];
@@ -163,8 +201,13 @@ export function parseDescriptor(sddl: string): ParseResult {
     if (close === -1) return { ok: false, reason: 'the DACL contains an unterminated entry' };
 
     const fields = body.slice(index + 1, close).split(';');
-    if (fields.length < 6) {
-      return { ok: false, reason: 'the DACL contains an entry with too few fields' };
+    // Exactly six. A seventh field is a conditional/resource-attribute ACE,
+    // which this policy does not model and must not silently accept.
+    if (fields.length !== ACE_FIELD_COUNT) {
+      return {
+        ok: false,
+        reason: `the DACL contains an entry with ${String(fields.length)} fields; exactly ${String(ACE_FIELD_COUNT)} are supported`,
+      };
     }
 
     const flagTokens = parseFlagTokens((fields[1] ?? '').trim());
@@ -194,7 +237,12 @@ export function parseDescriptor(sddl: string): ParseResult {
     ok: true,
     descriptor: {
       ownerSid,
-      dacl: { isProtected: flags.includes('P'), autoInherited: flags.includes('AI'), aces },
+      dacl: {
+        isProtected: controlTokens.includes('P'),
+        autoInherited: controlTokens.includes('AI'),
+        controlTokens,
+        aces,
+      },
     },
   };
 }
@@ -241,6 +289,13 @@ export function evaluateDescriptor(
 
   if (!dacl.isProtected) {
     problems.push('inheritance from the parent directory is not blocked');
+  }
+
+  // Every token is recognised by now; policy decides which are acceptable.
+  for (const token of dacl.controlTokens) {
+    if (!PERMITTED_CONTROL_FLAGS.has(token)) {
+      problems.push(`the DACL carries the unexpected control flag '${token}'`);
+    }
   }
 
   for (const ace of dacl.aces) {

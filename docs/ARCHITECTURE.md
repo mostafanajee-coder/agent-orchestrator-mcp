@@ -1,7 +1,7 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 3)
+# Agent Orchestrator MCP — V1 Architecture (Revision 4)
 
 > **Status:** approved. This is the design of record; the implementation follows the phase plan in §21.
-> Implementation is at **Phase 1 (state root and secrets)**. Sections describing later phases are design intent, not
+> Implementation is at **Phase 1B (stable cross-process state root)**. Sections describing later phases are design intent, not
 > shipped behaviour. This document was written before any code existed, so present-tense descriptions
 > of components state what they must do, not what exists today.
 
@@ -9,7 +9,57 @@
 
 ## Revision Delta
 
-### Revision 3 (this revision — single hardening change)
+### Revision 4 / Phase 1B (this revision — approved architecture correction)
+
+**The Windows state root moves from `%LOCALAPPDATA%\AgentOrchestratorMCP\` to `<OS-reported user profile>\.agent-orchestrator-mcp\`** — typically `C:\Users\<user>\.agent-orchestrator-mcp`.
+
+**Why LocalAppData was rejected.** A packaged (MSIX) process has `%LOCALAPPDATA%` virtualized into
+`...\Packages\<id>\LocalCache\Local`. Measured on Windows 11 during Phase 1A: a state root created
+at `%LOCALAPPDATA%\AgentOrchestratorMCP` by a packaged process resolved to the package's private
+`LocalCache` store, and an unpackaged process launched on the same machine reported that same
+logical path as **absent**. Two clients would therefore have kept two different physical stores,
+breaking the core invariant that there is exactly **one orchestrator state store per user** — the
+store Codex, the orchestrator, and every worker must agree on.
+
+**Why the user-profile root was chosen.** It remains user-scoped rather than machine-wide, but sits
+outside the LocalAppData virtualization boundary. Measured from both a packaged and an unpackaged
+process on the same machine, the user-profile root produced an identical logical path, an identical
+real path, and an identical `lease.key` digest.
+
+**USERPROFILE is not the source of truth.** The location normally corresponds to `%USERPROFILE%`,
+but that environment variable is *not* trusted to determine it. The profile directory is obtained
+from OS user identity (`os.userInfo().homedir`). `os.homedir()` is explicitly not used on Windows:
+Node documents it as consulting USERPROFILE first, and that was confirmed here — with
+`USERPROFILE=D:\attacker-profile`, `os.homedir()` returned `D:\attacker-profile` while
+`os.userInfo().homedir` still returned the real profile. Trusting the variable would let anyone who
+can set it relocate the state root and the secrets in it. There is no fallback: if the OS cannot
+report the profile, resolution fails closed.
+
+**Network profiles are rejected in V1.** The Windows profile must be a normal local
+drive-qualified path (`<drive>:\...`). UNC paths (`\\server\share\...`), the Win32 device
+namespaces (`\\?\`, `\\.\`), drive roots, and relative paths are all refused. V1 is a local
+orchestrator; the system of record must not live on a share.
+
+Consequences, all narrow:
+
+- Neither `%LOCALAPPDATA%` nor `%USERPROFILE%` is consulted for the active root; it derives from the
+  OS-reported profile directory, validated as absolute, platform-appropriate, local (not UNC or
+  device-namespace), and not a filesystem root.
+- Pure path construction selects `path.win32` or `path.posix` from the *target* platform, so the
+  Windows rules produce genuine Windows paths even when checked on a Linux CI runner.
+- The `allowRedirectionBoundary` exemption introduced in Phase 1A is **removed**. It existed only
+  because the LocalAppData root sat on a virtualization boundary. Every protected path, the root
+  included, is now subject to the full strict check with no package-specific bypass.
+- The superseded LocalAppData root is **detected and reported by `doctor` as a warning only**. It is
+  never read, never migrated, never deleted, and never authoritative; a fresh `lease.key` is
+  generated in the new root. Its path is derived from the trusted profile directory
+  (`<profile>\AppData\Local\AgentOrchestratorMCP`), never from `LOCALAPPDATA`, so a poisoned
+  variable cannot make `doctor` probe an attacker-chosen or network location. The old key had not yet been used by any later phase, so preserving it
+  would add ambiguity for no functional benefit.
+
+POSIX behaviour, the security model, the directory layout, and the lease-key format are unchanged.
+
+### Revision 3 / Phase 1A (single hardening change)
 
 **`authoritative_statuses` is now frozen at runtime, exactly like `decision_grants`.**
 
@@ -24,7 +74,7 @@ Revision 3 adds `INSERT`/`UPDATE`/`DELETE` triggers on `authoritative_statuses`,
 | 1 | **Authority trigger strengthened.** The old trigger only proved the referenced decision belonged to the same job/cycle. It is replaced by an immutable `decision_grants` mapping table plus a `authoritative_statuses` rank/terminal table, and triggers that require the referenced decision to **semantically grant** the exact status being written, to have been authored by an **enabled principal**, and to target the same `state`. `RETEST`/`FIX`/`VERIFY_SELF`/`IGNORE_FALSE_POSITIVE` grant nothing and can never justify an authoritative write. Monotonicity and terminality are enforced in the DB. `decisions` and `audit_log` are now append-only at the DB level. | §4, §9, §19 |
 | 2 | **`final_status` renamed to `authoritative_status`** throughout. `state` remains the workflow position. `PACKAGING` reclassified as a *workflow* state that requires `job:decide` to enter but stamps no new milestone. | §4, §6, §9, §19 |
 | 3 | **Windows-native secret protection.** `chmod`/0600 is documented as a **no-op on Windows** and is now only the POSIX implementation. Windows uses inheritance-stripped, current-user-SID-only DACLs applied and **verified after creation**, failing closed. DPAPI evaluated explicitly and deferred, with rationale. Token material is **print-once** by default so the orchestrator holds no plaintext bearer token at rest. | §15, §18, §20, §21 |
-| 4 | **Single global state root** `%LOCALAPPDATA%\AgentOrchestratorMCP\` with `data\ artifacts\ secrets\ logs\`. **One database for all projects** — no per-workspace DB. Jobs still record their `workspace`, and `job_list` queries across projects. | §9, §13, §17, §18, §21 |
+| 4 | **Single global state root** `<OS profile>\.agent-orchestrator-mcp\` with `data\ artifacts\ secrets\ logs\`. **One database for all projects** — no per-workspace DB. Jobs still record their `workspace`, and `job_list` queries across projects. | §9, §13, §17, §18, §21 |
 | 5 | **Multiple concurrent Codex sessions supported from V1.** Still exactly one principal actor row. Tokens moved out of `actors` into a many-to-one `actor_tokens` table, so each Codex session can hold its own token that maps to the single principal — session identity becomes **verified, not claimed**. `session_token_id` and a server-generated `request_id` are recorded on decisions and audit rows. | §4, §5, §9, §14, §17, §19 |
 | 6 | **Workspace roots are an explicit config allowlist**, seeded with `C:\AgentProjects` and `C:\SallaProjects`. Additive without code changes. Artifact storage is separate, under the global root. | §9, §15, §18 |
 | 7 | **Browser/CDP worker stays external** for the first integration and is registered later as a generic process worker. No CDP dependency enters the V1 core. | §12, §20, §22 |
@@ -47,7 +97,7 @@ Intended outcome of V1: a small, reliable, well-tested core (job state machine +
 
 Environment verified read-only on this machine: Node **v22.22.0**, npm 11.6.4, git 2.53.0, `agy.exe` **1.1.22**, Python present but **3.7.9 (EOL)**.
 
-**Decisions already made and closed:** HTTP-first transport with stdio also supported · per-actor tokens plus single-use dispatch leases · V1 = core + one generic process-worker adapter · single global state root under `%LOCALAPPDATA%` · multiple concurrent Codex sessions with one principal · workspace allowlist `C:\AgentProjects`, `C:\SallaProjects` · browser worker stays external.
+**Decisions already made and closed:** HTTP-first transport with stdio also supported · per-actor tokens plus single-use dispatch leases · V1 = core + one generic process-worker adapter · single global state root under the OS-reported user profile (revised in Phase 1B; see the Revision Delta) · multiple concurrent Codex sessions with one principal · workspace allowlist `C:\AgentProjects`, `C:\SallaProjects` · browser worker stays external.
 
 ---
 
@@ -126,7 +176,7 @@ The orchestrator is the control plane; MCP is not forced to be the internal work
    │  artifacts/  path jail · sha256 · metadata-only in DB             │
    │  audit/      append-only hash-chained log · redaction             │
    │                                                                   │
-   │  STATE ROOT: %LOCALAPPDATA%\AgentOrchestratorMCP\                 │
+   │  STATE ROOT: <OS profile>\.agent-orchestrator-mcp\              │
    │    data\orchestrator.db · artifacts\ · secrets\ · logs\           │
    └───┬───────────────────────────┬──────────────────────┬───────────┘
        │ spawn + NDJSON            │ spawn + NDJSON       │ MCP ingress
@@ -457,7 +507,7 @@ Common: every mutating tool accepts `idempotency_key` and an optional `session_h
 
 ## 9. Data Model / SQLite Schema Proposal
 
-**One database for all projects:** `%LOCALAPPDATA%\AgentOrchestratorMCP\data\orchestrator.db`.
+**One database for all projects:** `<OS profile>\.agent-orchestrator-mcp\data\orchestrator.db`.
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -716,7 +766,7 @@ Each retry is **its own `worker_runs` row** (`attempt` incremented) — partial 
 
 ## 13. Artifact & Evidence Model
 
-**Layout:** `%LOCALAPPDATA%\AgentOrchestratorMCP\artifacts\<job_id>\<cycle>\<run_id>\<name>` — one global artifact root, isolated per job/cycle/run, **separate from workspace access**. A worker may read its workspace (per the allowlist) but may only write artifacts here.
+**Layout:** `<OS profile>\.agent-orchestrator-mcp\artifacts\<job_id>\<cycle>\<run_id>\<name>` — one global artifact root, isolated per job/cycle/run, **separate from workspace access**. A worker may read its workspace (per the allowlist) but may only write artifacts here.
 
 **DB stores metadata only** — id, job, cycle, run, kind, mime, label, rel_path, bytes, sha256, creator, timestamp. No blobs in SQLite: they would bloat the WAL, slow every backup, and buy nothing when every consumer reads files by path.
 
@@ -776,7 +826,7 @@ Every entry answers **who / which session / what / when / which job / what resul
 
 **What actually needs to persist.** The orchestrator stores only `token_sha256`, so it **never needs a plaintext bearer token at rest**. The only genuine at-rest secret it must read is the **lease HMAC key**. Bearer tokens are therefore **print-once**: `token issue` writes the value to stdout for the operator to place in the environment variable Codex reads, and does not persist a plaintext copy unless `--write-file` is passed.
 
-**Windows mechanism (V1).** For `%LOCALAPPDATA%\AgentOrchestratorMCP\secrets\` and every file in it:
+**Windows mechanism (V1).** For `<OS profile>\.agent-orchestrator-mcp\secrets\` and every file in it:
 
 1. Resolve the **current user's SID** (`whoami /user /fo csv /nh`, or the identity API) — SIDs avoid locale and domain-name pitfalls.
 2. Create the directory, then apply a DACL with inheritance **stripped** and exactly one ACE:
@@ -785,7 +835,7 @@ Every entry answers **who / which session / what / when / which job / what resul
 4. **Verify after creation**: read the ACL back and assert the ACE set contains *only* the current user's SID. Reject if `Everyone`, `BUILTIN\Users`, `Authenticated Users`, `INTERACTIVE`, or any inherited ACE is present.
 5. **Fail closed**: if `icacls` is missing, returns non-zero, or verification does not match, the orchestrator **refuses to write the secret and exits** with an actionable message. It never falls back to an unprotected file.
 6. Re-verify the ACL on **every startup**, not just at creation — an operator or an installer can loosen it later. A failed check refuses service.
-7. Refuse a state root under a known cloud-sync path (OneDrive/Dropbox). `%LOCALAPPDATA%` is not sync-redirected by default, unlike `Documents`; the check catches redirected setups.
+7. Refuse a state root under a known cloud-sync path (OneDrive/Dropbox). The user-profile root is not sync-redirected by default, unlike `Documents`; the check catches redirected setups, and runs again on the resolved real path once the root exists.
 
 The same verification is applied to `data\orchestrator.db` — the database contains no plaintext secrets, but it contains the decision ledger, and a world-readable ledger is its own problem.
 
@@ -870,7 +920,7 @@ Either the runs, the leases, and `QA_RUNNING` all exist, or none of them do. The
 ### Runtime state root (not in the repository)
 
 ```
-%LOCALAPPDATA%\AgentOrchestratorMCP\
+<OS profile>\.agent-orchestrator-mcp\
 ├── data\
 │   └── orchestrator.db            # ONE database for all projects
 ├── artifacts\
@@ -999,7 +1049,7 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 ### Verification (how a human confirms it end to end)
 
 1. `npm test` — all layers green, including the raw-SQL bypass suite.
-2. `node dist/index.js init` — creates `%LOCALAPPDATA%\AgentOrchestratorMCP\`, hardens `secrets\`, applies migrations, creates the `codex` principal, prints its token once.
+2. `node dist/index.js init` — creates `<OS profile>\.agent-orchestrator-mcp\`, hardens `secrets\`, applies migrations, creates the `codex` principal, prints its token once.
 3. `node dist/index.js doctor` — reports state-root ACL status, principal count, migration version, configured workspace roots.
 4. `npx @modelcontextprotocol/inspector node dist/index.js --stdio` — `tools/list` shows the ten tools; call `job_create` and `job_get` by hand.
 5. Start HTTP mode; `curl` with no token → 401; bad `Origin` → 403; worker token → `tools/list` **does not contain `codex_decide`**.
@@ -1016,7 +1066,7 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 
 - Config loading and validation, including the **workspace-root allowlist**
 - `init` / `migrate` / `token` / `doctor` / `serve` CLI, with documented bootstrap
-- Global state root under `%LOCALAPPDATA%\AgentOrchestratorMCP\`, **Windows ACL hardening with fail-closed verification** (§15.1), POSIX modes on POSIX
+- Global state root under `<OS profile>\.agent-orchestrator-mcp\`, **Windows ACL hardening with fail-closed verification** (§15.1), POSIX modes on POSIX
 - One SQLite store, migrations, all tables and **triggers T1–T6** (including the frozen `decision_grants` and `authoritative_statuses` reference tables)
 - Actors, `actor_tokens` (multi-session), capabilities, dispatch leases, print-once tokens
 - Job state machine and transition table exactly as §6, including the atomic `qa_dispatch` transaction
