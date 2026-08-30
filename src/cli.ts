@@ -82,8 +82,8 @@ export function renderHelp(version: string): string {
     `  ${CLI_NAME} <command> [options]`,
     '',
     'Commands:',
-    '  init             Prepare and protect the state root (Phase 1 bootstrap)',
-    '  doctor           Report on the state root. Read-only; repairs nothing',
+    '  init             Prepare the state root and initialize the Phase 3 schema',
+    '  doctor           Report state and DB-file security. Read-only; repairs nothing',
     '  serve            Serve the Phase 2 MCP spine (--http or --stdio)',
     '',
     'Serve options:',
@@ -102,8 +102,9 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 2. MCP ping, loopback HTTP/stdio transports, and bearer authentication.',
-    '  Persistent actor_tokens, jobs, workers, and database authority arrive in later phases.',
+    '  Phase 3. SQLite schema/structural integrity with the Phase 2 MCP ping surface.',
+    '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
+    '  Production actor_tokens auth, jobs, workers, and authority arrive in later phases.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
 }
@@ -163,8 +164,13 @@ function renderInit(result: InitResult): string[] {
       ? 'Lease key:       created'
       : 'Lease key:       already present, preserved unchanged',
   );
+  lines.push(
+    'Database:        schema ready (version ' + String(result.database.schemaVersion) + ')',
+  );
   lines.push('');
-  lines.push('init complete. This is the Phase 1 bootstrap: state root, directories, and lease key.');
+  lines.push(
+    'init complete. State root, lease key, and Phase 3 schema are ready; production authority remains Phase 4.',
+  );
   return lines;
 }
 
