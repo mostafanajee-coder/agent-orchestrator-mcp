@@ -17,7 +17,8 @@ Phase 3 is **STORE & DATABASE AUTHORITY**. Its purpose is to create the one
 durable, local SQLite source of truth on which the later authority, job, worker,
 evidence, artifact, audit, and recovery phases can rely.
 
-The phase will design and then implement, in a separately authorized change:
+The Phase 3 implementation provides the following within this separately
+authorized change:
 
 1. the direct `better-sqlite3` store dependency;
 2. deterministic numbered migrations and schema-version refusal;
@@ -45,7 +46,7 @@ fixtures required to prove that those later operations can be atomic.
 |---|---|
 | `docs/ARCHITECTURE.md` Revision 5 | Design of record. Exact table names, state/status meanings, trigger semantics, paths, phase boundaries, and the doctor/init/serve ownership split come from this document. |
 | `docs/PHASE2_PROTOCOL.md` | Historical Phase 2 protocol/API observation; confirms the installed SDK and observed Codex legacy era. It does not redefine Phase 3 schema authority. |
-| `README.md` | Current Phase 2 operational behavior and state-root/security user contract. |
+| `README.md` | Current Phase 3 operational behavior, Phase 2 transport contract, and state-root/security user contract. |
 | `C:\AgentProjects\aom-benchmark\AOM_EXTERNAL_BENCHMARK.md` | Advisory external evidence. It may strengthen an implementation choice, but cannot silently change the architecture. |
 | Merged `main` at `7d4cb847f6d98dfba81163af508073f77ff56dba` | Starting source tree for implementation after principal review of this plan. |
 
@@ -643,11 +644,10 @@ Phase 3 may initialize the **database schema** through the explicit init mode in
 `system` actor, a first bearer token, or persistent authentication. It does not
 print a production token and it does not replace the Phase 2 resolver.
 
-The existing Phase 2 `init` behavior remains the Phase 1 state-root/lease-key
-bootstrap until the separately authorized Phase 3 implementation adds schema
-initialization. Once schema initialization exists, it may create the empty
-trusted DB and apply migrations, then stop with a structural/integrity result.
-It must not silently create authority rows merely because the schema is empty.
+The Phase 3 implementation extends the existing Phase 2 state-root/lease-key
+bootstrap with trusted schema initialization. It creates the empty trusted DB
+only on explicit init, applies migrations, runs structural/integrity checks, and
+does not silently create authority rows merely because the schema is empty.
 
 ### 9.3 Fixture-only rows
 
@@ -1001,8 +1001,8 @@ Every gate below is executable within Phase 3 and does not require active Phase
 14. Doctor filesystem before/after tests prove the DB and every present WAL/SHM
     sidecar keep identical hash, size, and mtime, no new sidecar appears, and no
     DB is created.
-15. `git diff --check` passes for this planning change. Typecheck, lint, tests,
-    and build belong to the separately authorized implementation change.
+15. `git diff --check` passes for this implementation. Typecheck, lint, tests,
+    and build are green for the implementation change.
 
 ## 16. Explicit Phase 4+ exclusions and hand-offs
 
