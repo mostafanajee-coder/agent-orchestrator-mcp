@@ -90,16 +90,21 @@ function renderDoctor(report: DoctorReport): string[] {
     `Security model:  ${report.securityModel}`,
     '',
   ];
+  const label = { pass: 'PASS', warn: 'WARN', fail: 'FAIL' } as const;
   for (const check of report.checks) {
-    lines.push(`${check.status === 'pass' ? 'PASS' : 'FAIL'}  ${check.name}`);
+    lines.push(`${label[check.status]}  ${check.name}`);
     lines.push(`      ${check.detail}`);
   }
   lines.push('');
+
   const failed = report.checks.filter((check) => check.status === 'fail').length;
+  const warned = report.checks.filter((check) => check.status === 'warn').length;
+  const warnSuffix = warned === 0 ? '' : `, ${String(warned)} warning${warned === 1 ? '' : 's'}`;
+
   lines.push(
     report.ok
-      ? `doctor: PASS (${String(report.checks.length)} checks)`
-      : `doctor: FAIL (${String(failed)} of ${String(report.checks.length)} checks failed; nothing was repaired)`,
+      ? `doctor: PASS (${String(report.checks.length)} checks${warnSuffix})`
+      : `doctor: FAIL (${String(failed)} of ${String(report.checks.length)} checks failed${warnSuffix}; nothing was repaired)`,
   );
   return lines;
 }

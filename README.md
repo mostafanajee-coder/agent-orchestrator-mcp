@@ -9,9 +9,9 @@ triggers, not by prompt instructions.
 
 ## Status
 
-**Phase 1 — state root and secrets.** The CLI can prepare, protect, and inspect the global state
-root, including the lease HMAC key. Nothing else is implemented: there is no MCP server, transport,
-database, actor model, job state machine, or worker runtime yet.
+**Phase 1B — stable cross-process state root.** The CLI can prepare, protect, and inspect the global
+state root, including the lease HMAC key. Nothing else is implemented: there is no MCP server,
+transport, database, actor model, job state machine, or worker runtime yet.
 
 The approved design and the full phase plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -46,8 +46,10 @@ in later phases.
 node dist/index.js doctor
 ```
 
-Reports on the state root. **Read-only**: it never creates, hardens, or repairs anything, and it
-never reads the lease key. It exits non-zero if anything is insecure.
+Reports on the state root, printing the resolved active root. **Read-only**: it never creates,
+hardens, or repairs anything, and it never reads the lease key. It exits non-zero if anything is
+insecure. Advisory warnings — such as a superseded state root still present on disk — are reported
+without failing the run.
 
 Exit codes: `0` success, `1` unexpected internal failure, `2` usage error, `3` security or
 invariant failure.
@@ -57,7 +59,7 @@ invariant failure.
 Runtime state lives outside this repository, in one global root shared by every project:
 
 ```
-%LOCALAPPDATA%\AgentOrchestratorMCP\
+<OS user profile>\.agent-orchestrator-mcp\     e.g. C:\Users\<user>\.agent-orchestrator-mcp
   data\        reserved for the database (later phase)
   artifacts\   per job / cycle / run
   secrets\     lease.key
@@ -67,7 +69,22 @@ Runtime state lives outside this repository, in one global root shared by every 
 On POSIX the root is `$XDG_STATE_HOME/agent-orchestrator-mcp`, falling back to
 `~/.local/state/agent-orchestrator-mcp`. There is deliberately **no override** — no flag,
 environment variable, or config file can redirect the state root, so secrets cannot be steered to a
-less protected location. `init` refuses a state root inside a known cloud-synchronised directory.
+less protected location. `init` refuses a state root inside a known cloud-synchronised directory,
+checking both the literal path and, once the root exists, its resolved real path.
+
+**The profile directory comes from OS identity, not from `%USERPROFILE%`.** The location normally
+corresponds to that variable, but it is not trusted to determine it: `os.userInfo().homedir` is
+used, never `os.homedir()`, which Node documents as consulting USERPROFILE first. Measured here,
+`USERPROFILE=D:\attacker-profile` moved `os.homedir()` but not the state root. UNC and
+device-namespace profiles are rejected — V1 is a local orchestrator.
+
+**Why not `%LOCALAPPDATA%`?** A packaged (MSIX) process has LocalAppData virtualized into
+`...\Packages\<id>\LocalCache\Local`. Measured on Windows 11, a state root created there by a
+packaged process was reported as *absent* by an unpackaged process on the same machine — two
+clients, two physical stores, breaking the invariant that there is exactly one orchestrator state
+store per user. The user-profile root is still user-scoped but sits outside that boundary, and was
+measured to resolve identically from both contexts. A state root left behind at the old location is
+reported by `doctor` as a warning; it is never read, migrated, or deleted.
 
 ## Security model
 
@@ -98,9 +115,9 @@ cannot be located, the command fails closed.
 
 Every protected path is checked for redirection before it is hardened or inspected: symbolic
 links, NTFS junctions, wrong object types, and hard-linked secrets are refused, so protection is
-never applied through a link to a target elsewhere. The state root alone may sit on a filesystem
-virtualization boundary, because a packaged (MSIX) process legitimately has `%LOCALAPPDATA%`
-redirected into its own `LocalCache`; link detection still applies there.
+never applied through a link to a target elsewhere. This applies to **every** path including the
+state root — there is no package-specific bypass, because the root now lives outside the
+LocalAppData virtualization boundary.
 
 The same policy is applied uniformly to `data\`, `artifacts\`, and `logs\` as to `secrets\`, so the
 future database is never created inside a broadly accessible directory and no path is left weaker

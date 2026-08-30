@@ -26,22 +26,6 @@ export type PathShape = 'directory' | 'file';
 export interface PathSafetyOptions {
   /** Reject a file with more than one name. Used for secret material. */
   readonly requireSingleLink?: boolean;
-  /**
-   * Permit this path to be a filesystem-virtualization boundary.
-   *
-   * Set only for the state root. A packaged (MSIX) process has its writes
-   * under %LOCALAPPDATA% redirected into
-   * `...\Packages\<id>\LocalCache\Local`, and that boundary appears exactly at
-   * the state root's own component — so the resolved path legitimately differs
-   * from the literal one there, through no fault of ours.
-   *
-   * Verified on this machine: container redirection reports
-   * `isSymbolicLink() === false`, while a junction or symbolic link reports
-   * `true`. The link check below therefore still catches a hostile
-   * redirection of the state root; only the weaker realpath comparison is
-   * relaxed, and only here.
-   */
-  readonly allowRedirectionBoundary?: boolean;
 }
 
 export function canonicalise(path: string, platform: NodeJS.Platform): string {
@@ -109,18 +93,17 @@ export function assertPathIsSafe(
     );
   }
 
-  if (options.allowRedirectionBoundary === true) return;
-
   // Independent second signal, resolved relative to the parent.
   //
   // Comparing the resolved path against the literal path would be wrong: an
   // ancestor may be legitimately redirected by the OS and not by an attacker.
-  // A packaged (MSIX) process, for example, has %LOCALAPPDATA% virtualized to
-  // ...\Packages\<id>\LocalCache\Local, so every path under it resolves
-  // elsewhere through no fault of ours.
-  //
   // What must hold is that THIS component introduces no new redirection: the
   // path must resolve to exactly its parent's real location plus its own name.
+  //
+  // This applies to EVERY protected path including the state root. There is no
+  // package-specific bypass: the root lives under the user profile, outside
+  // the LocalAppData virtualization boundary, and was measured to resolve
+  // identically from packaged and unpackaged processes.
   const parent = dirname(path);
   const resolved = realPathOf(path);
   const expected = parent === path ? resolved : join(realPathOf(parent), basename(path));
