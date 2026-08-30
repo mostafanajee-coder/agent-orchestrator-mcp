@@ -9,7 +9,7 @@ import { assertDatabaseReadyForServe } from '../store/serve.js';
  * The doctor portion is filesystem-only. Deep SQLite integrity is checked
  * separately for serve after the doctor-owned security checks pass.
  */
-export function assertPhase1Ready(context: CommandContext): void {
+export function assertServeReady(context: CommandContext): void {
   const report = runDoctor(context);
   if (!report.ok) {
     const failures = report.checks
@@ -34,3 +34,6 @@ export function assertPhase1Ready(context: CommandContext): void {
     throw cause;
   }
 }
+
+/** Backward-compatible internal name retained for Phase 2 callers. */
+export const assertPhase1Ready = assertServeReady;

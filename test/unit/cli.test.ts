@@ -33,8 +33,8 @@ const initResult: InitResult = {
   securityModel: 'fake model',
   database: {
     created: true,
-    schemaVersion: 2,
-    appliedVersions: [1, 2],
+    schemaVersion: 3,
+    appliedVersions: [1, 2, 3],
   },
 };
 

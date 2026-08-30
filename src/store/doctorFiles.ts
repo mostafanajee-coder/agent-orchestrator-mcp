@@ -85,7 +85,7 @@ function inspectDatabaseFile(
 }
 
 /**
- * Revision 5 doctor contract: only filesystem/security inspection. This
+ * Revision 6 doctor contract (retaining the Revision 5 boundary): only filesystem/security inspection. This
  * module deliberately has no SQLite import and never opens the DB or sidecars.
  */
 export function inspectDatabaseFilesForDoctor(context: CommandContext): DatabaseFileCheck[] {

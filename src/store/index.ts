@@ -12,6 +12,7 @@ export {
   type SqliteDatabase,
   type SqliteDatabaseOpener,
   type SqlitePragmaPolicy,
+  type SynchronousTransactionCallback,
 } from './db.js';
 export {
   discoverMigrations,
@@ -26,8 +27,16 @@ export {
 } from './migrations.js';
 export {
   verifyDatabaseIntegrity,
+  EXPECTED_INDEXES,
+  EXPECTED_TABLES,
+  EXPECTED_TRIGGERS,
   type IntegrityReport,
 } from './integrity.js';
+export {
+  CANONICAL_SCHEMA_DEFINITIONS,
+  canonicalizeSchemaSql,
+  fingerprintSchemaSql,
+} from './schemaDefinitions.js';
 export {
   createStructuralRepositories,
   type ActorRepository,
