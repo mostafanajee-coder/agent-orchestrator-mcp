@@ -1,4 +1,4 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 4)
+# Agent Orchestrator MCP — V1 Architecture (Revision 5)
 
 > **Status:** approved. This is the design of record; the implementation follows the phase plan in §21.
 > Implementation is at **Phase 2 (MCP spine)**. Sections describing later phases are design intent, not
@@ -9,7 +9,38 @@
 
 ## Revision Delta
 
-### Revision 4 / Phase 1B (this revision — approved architecture correction)
+### Revision 5 / Phase 3 doctor ownership (this revision — approved architecture correction)
+
+Phase 3 adopts a **FAIL-CLOSED / NO-DIRECT-SQL DOCTOR** contract for the
+authoritative WAL database. `doctor` never opens
+`orchestrator.db` through SQLite, even with `readonly: true`,
+`immutable=1`, or a URI environment toggle.
+
+The doctor owns filesystem/security diagnostics only: trusted-path existence,
+`lstat`/realpath safety, object type, Windows DACL/POSIX mode, reparse
+and hard-link safety, DB metadata, and the security state of any existing
+`-wal`/`-shm` sidecars. Its structural result explicitly
+reports `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; that status is not a
+SQL-integrity pass. Unsafe DB/path/DACL/sidecar state remains a doctor failure,
+while an absent DB is reported without creation. The inability to perform SQL
+inspection is not itself an error: if all doctor-owned checks pass, doctor may
+exit successfully with `DB_FILE_SECURITY=PASS` and the explicit
+`NOT_CHECKED_BY_DESIGN` status.
+
+`init` and `serve` startup own authoritative SQLite integrity:
+secure open/create ordering, approved PRAGMAs, migrations, exact ledger/schema
+verification, `quick_check`, `foreign_key_check`, tables,
+indexes, triggers, seeds, and structural guards. `serve` fails before
+MCP service when a required DB check fails.
+
+The empirical Windows finding is that direct readonly WAL queries can mutate an
+existing `-shm` or create `-wal`/`-shm`, while
+immutable mode can ignore uncheckpointed WAL state. Phase 3 therefore selects no
+snapshot, copy, quiescence, VSS, immutable, alternate engine, or external
+snapshot workaround. A future offline/deep doctor may be reconsidered only after
+a later lifecycle/hardening phase owns the required maintenance semantics.
+
+### Revision 4 / Phase 1B (historical approved architecture correction)
 
 **The Windows state root moves from `%LOCALAPPDATA%\AgentOrchestratorMCP\` to `<OS-reported user profile>\.agent-orchestrator-mcp\`** — typically `C:\Users\<user>\.agent-orchestrator-mcp`.
 
@@ -852,7 +883,14 @@ The same verification is applied to `data\orchestrator.db` — the database cont
 
 ## 16. Failure & Recovery Strategy
 
-**Startup invariants**, checked before serving a single request; any failure exits non-zero with an actionable message and an `startup.invariant_failed` audit row:
+**Init and serve own SQL integrity.** `init` may securely create the
+database, apply migrations, and run every required SQLite integrity/schema check
+before it returns. `serve` opens an existing database only, performs
+the same deep checks at startup, and fails before serving a request if any
+required check fails. `doctor` performs no SQLite open or SQL integrity
+check; it owns only the filesystem/security diagnosis described in Revision 5.
+
+**Serve startup invariants**, checked before serving a single request; any failure exits non-zero with an actionable message and an `startup.invariant_failed` audit row:
 
 1. State root exists and its ACL verifies (§15.1).
 2. Migrations applied; `PRAGMA quick_check` clean; DB not newer than the binary.
@@ -1050,12 +1088,23 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 
 1. `npm test` — all layers green, including the raw-SQL bypass suite.
 2. `node dist/index.js init` — creates `<OS profile>\.agent-orchestrator-mcp\`, hardens `secrets\`, applies migrations, creates the `codex` principal, prints its token once.
-3. `node dist/index.js doctor` — reports state-root ACL status, principal count, migration version, configured workspace roots.
+3. `node dist/index.js doctor` — reports state-root, DB-file, and
+   WAL/SHM filesystem-security status. For an existing DB it reports
+   `DB_FILE_SECURITY=PASS` and
+   `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; it does not open the
+   authoritative DB or report SQL migration/principal counts. Deep SQLite
+   integrity is verified by `init` and `serve` startup.
 4. `npx @modelcontextprotocol/inspector node dist/index.js --stdio` — `tools/list` shows the ten tools; call `job_create` and `job_get` by hand.
 5. Start HTTP mode; `curl` with no token → 401; bad `Origin` → 403; worker token → `tools/list` **does not contain `codex_decide`**.
 6. Issue a *second* Codex token (`token issue --label codex-session-b`); register both in two Codex sessions via `bearer_token_env_var`; confirm both can act and that `audit_query` distinguishes them.
 7. Scripted job against the fixture worker: create (in `C:\AgentProjects\...`) → dispatch → report(PASS) → confirm `authoritative_status` is NULL → `codex_decide(REJECT)` → `audit_query` explains the chain.
-8. Open the DB with `sqlite3` and attempt by hand: the three decision bypasses (invariants 7–9), then `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status='JOB_COMPLETED'` and `UPDATE authoritative_statuses SET rank = 99 WHERE authoritative_status='APPROVED'` (invariants 15a–15b). Every one must ABORT, and `SELECT * FROM authoritative_statuses` must be unchanged afterwards.
+8. Against a DB created/validated by `init` or
+   `serve` startup, open the DB with `sqlite3` and attempt by
+   hand: the three decision bypasses (invariants 7–9), then
+   `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status='JOB_COMPLETED'`
+   and `UPDATE authoritative_statuses SET rank = 99 WHERE authoritative_status='APPROVED'`
+   (invariants 15a–15b). Every one must ABORT, and
+   `SELECT * FROM authoritative_statuses` must be unchanged afterwards.
 9. Kill the service mid-run and restart; confirm `STALLED` with orphaned runs and no authoritative status set.
 
 ---
@@ -1113,7 +1162,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **0** | Skeleton | package.json, tsconfig, vitest, lint, empty CLI, CI script | `npm test` runs; `--help` works |
 | **1** | State root & secrets | State-root resolution, directory creation, **Windows ACL apply + verify + fail-closed**, POSIX modes, lease-key generation, `doctor` | Invariants 31, 32; manual ACL tamper drill |
 | **2** | MCP spine | Both entry points, one trivial `ping` tool, localhost guards, bearer gate, `actor_tokens` resolution | Inspector connects; invariant 37; **observed Codex protocol era recorded** |
-| **3** | Store & DB authority | Migrations, all tables, seeds, **triggers T1–T6** (freeze triggers created *after* the seed inserts), repositories, integrity check | Invariants 7–15, **15a–15e** (raw SQL), 16 |
+| **3** | Store & DB authority | Migrations, all tables, seeds, **triggers T1–T6** (freeze triggers created *after* the seed inserts), repositories, init/serve SQL integrity checks, and doctor filesystem/security diagnosis | Invariants 7–15, **15a–15e** (raw SQL), 16; doctor explicitly reports SQL integrity not checked by design |
 | **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
 | **5** | Job lifecycle | `job_create` (+ workspace allowlist), `job_get`, `job_list`, cycles, idempotency, CAS | Invariants 21, 22, 24, 29; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34 |
@@ -1133,7 +1182,7 @@ Only what genuinely blocks or materially changes implementation. *(State locatio
 
 1. **How will each Codex session receive a distinct token?** Codex reads the bearer token from an environment variable named in `config.toml`, so distinct per-session tokens require launching each session with a different value for that variable. If all sessions inherit one environment, they will share one token and session attribution degrades from *verified* (`session_token_id`) to *claimed* (`session_hint`). The design already handles both, so this is **not blocking implementation** — but it determines how strong the audit answer to "which session decided this?" actually is, and it is worth confirming how sessions are launched. *Affects Phase 4 documentation, not code.*
 
-2. **Retention policy for the shared artifact root.** One global root now accumulates artifacts from every project, so growth is unbounded until `prune` exists (LATER). V1 records `bytes` per artifact, so the question is only whether a **hard cap or a warning threshold** should exist in V1 — e.g. refuse new artifact registration above N GB, or merely surface the total in `doctor`. Recommendation: warn in `doctor` only; no hard cap in V1. *Blocking Phase 7 only if a cap is wanted.*
+2. **Retention policy for the shared artifact root.** One global root now accumulates artifacts from every project, so growth is unbounded until `prune` exists (LATER). V1 records `bytes` per artifact, so the question is only whether a **hard cap or a warning threshold** should exist in V1 — e.g. refuse new artifact registration above N GB, or surface the total in a later artifact/prune report. Recommendation: warn from the later artifact owner only; no hard cap in V1. *Blocking Phase 7 only if a cap is wanted.*
 
 3. **`agy` prompt-delivery contract.** Deferred by decision, but recorded here so it is not forgotten: the installed CLI documents `--input-format text|stream-json` for print mode and does not document plain-text stdin prompts with `-p`. This must be verified empirically at the start of the agy phase rather than assumed. *Not blocking V1.*
 
@@ -1141,7 +1190,15 @@ Only what genuinely blocks or materially changes implementation. *(State locatio
 
 ## 23. FINAL RECOMMENDATION
 
-**Revision 3 is implementation-ready.**
+**Revision 5 is the approved architecture for Phase 3 implementation
+authorization.**
+
+Revision 5 makes the doctor boundary explicit: it performs filesystem/security
+diagnosis only and reports SQL integrity as
+`NOT_CHECKED_BY_DESIGN`. Authoritative SQLite integrity belongs to
+`init` and `serve` startup, where migration, schema, trigger,
+seed, and integrity checks can fail closed without giving the diagnostic path a
+direct SQLite handle to the WAL database.
 
 The central requirement — Codex as sole authority — is now enforced at five independent layers, and the database layer no longer merely checks that *a* decision exists: it checks that the referenced decision **semantically grants the exact status being written**, was authored by an **enabled principal**, targets the **same job, cycle, and state**, and does not regress or resurrect a terminal outcome. `RETEST`, `FIX`, `VERIFY_SELF`, and `IGNORE_FALSE_POSITIVE` have no grant row and therefore cannot justify any authoritative write, from the application or from a `sqlite3` shell. Those claims are proven by a raw-SQL test layer that bypasses the application entirely, not asserted in prose.
 
@@ -1155,5 +1212,6 @@ Multiple Codex sessions are supported with **verified** session attribution and 
 
 Scope remains honest: V1 is the authority core plus one generic worker adapter. `agy` and the browser worker are designed, external, and deferred, with the agy CLI contract explicitly flagged as unverified.
 
-**Recommended next step:** principal review of the Phase 2 MCP spine, then
-begin Phase 3 only after that review approves the boundary.
+**Recommended next step:** separately authorize the Phase 3 implementation
+against this Revision 5 boundary; do not add Phase 3 runtime code merely because
+this architecture revision is approved.
