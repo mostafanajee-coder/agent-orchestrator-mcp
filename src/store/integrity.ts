@@ -9,11 +9,15 @@ import {
   readMigrationLedger,
   validateAppliedPrefix,
 } from './migrations.js';
+import {
+  CANONICAL_SCHEMA_DEFINITIONS,
+  fingerprintSchemaSql,
+} from './schemaDefinitions.js';
 
 export interface IntegrityReport {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly tableCount: 13;
-  readonly triggerCount: 14;
+  readonly triggerCount: 16;
   readonly appliedVersions: readonly number[];
   readonly pragmaPolicy: typeof SQLITE_PRAGMA_POLICY;
 }
@@ -39,7 +43,7 @@ interface ForeignKeyRow {
   readonly to: string;
 }
 
-const EXPECTED_TABLES = [
+export const EXPECTED_TABLES = [
   'schema_migrations',
   'actors',
   'actor_tokens',
@@ -187,7 +191,7 @@ const EXPECTED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
-const EXPECTED_INDEXES = [
+export const EXPECTED_INDEXES = [
   'ux_actors_single_principal',
   'ix_actor_tokens_actor',
   'ix_jobs_state_updated',
@@ -204,7 +208,7 @@ const EXPECTED_INDEXES = [
   'ix_audit_session',
 ] as const;
 
-const EXPECTED_TRIGGERS = [
+export const EXPECTED_TRIGGERS = [
   'trg_decisions_principal_only',
   'trg_auth_status_requires_granting_decision',
   'trg_auth_status_monotonic',
@@ -219,6 +223,8 @@ const EXPECTED_TRIGGERS = [
   'trg_auth_statuses_frozen_i',
   'trg_auth_statuses_frozen_u',
   'trg_auth_statuses_frozen_d',
+  'trg_jobs_unstamped_on_insert',
+  'trg_jobs_no_delete',
 ] as const;
 
 function fail(message: string, remedy = 'Restore the approved schema and retry.'): never {
@@ -231,6 +237,24 @@ function equalNames(actual: readonly string[], expected: readonly string[]): boo
   return left.length === right.length && left.every((name, index) => name === right[index]);
 }
 
+function verifyCanonicalDefinitions(
+  db: SqliteDatabase,
+  type: 'table' | 'index' | 'trigger',
+  definitions: Readonly<Record<string, string>>,
+): void {
+  for (const [name, expectedFingerprint] of Object.entries(definitions)) {
+    const row = db.prepare(
+      'SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?',
+    ).get(type, name) as { readonly sql?: unknown } | undefined;
+    if (typeof row?.sql !== 'string' || fingerprintSchemaSql(row.sql) !== expectedFingerprint) {
+      fail(
+        'The approved ' + type + ' definition for ' + name + ' does not match the canonical Phase 3 definition.',
+        'Restore the exact approved schema before serving.',
+      );
+    }
+  }
+}
+
 function verifyTables(db: SqliteDatabase): void {
   const tables = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -238,6 +262,7 @@ function verifyTables(db: SqliteDatabase): void {
   if (!equalNames(tables, EXPECTED_TABLES)) {
     fail('The database does not contain exactly the approved 13-table schema.');
   }
+  verifyCanonicalDefinitions(db, 'table', CANONICAL_SCHEMA_DEFINITIONS.tables);
 }
 
 function verifyColumns(db: SqliteDatabase): void {
@@ -254,15 +279,33 @@ function verifyIndexes(db: SqliteDatabase): void {
   const indexes = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
   ).all().map((row) => (row as SchemaNameRow).name);
-  if (EXPECTED_INDEXES.some((name) => !indexes.includes(name))) {
-    fail('The database is missing one or more approved indexes.');
+  if (!equalNames(indexes, EXPECTED_INDEXES)) {
+    fail('The database does not contain exactly the approved named index set.');
   }
+  verifyCanonicalDefinitions(db, 'index', CANONICAL_SCHEMA_DEFINITIONS.indexes);
 
   const partial = db.prepare(
     "SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = 'ux_actors_single_principal'",
   ).get() as { readonly sql?: string } | undefined;
   if (!partial?.sql?.toLowerCase().includes("where role = 'principal'")) {
     fail('The at-most-one-principal partial unique index is malformed.');
+  }
+
+  const uniqueIndexChecks = [
+    ['actors', 'ux_actors_single_principal', true, true],
+    ['worker_runs', 'ux_worker_runs_run_job_cycle', true, false],
+    ['leases', 'ux_leases_run_id', true, false],
+    ['artifacts', 'ux_artifacts_job_rel_path', true, false],
+  ] as const;
+  for (const [table, indexName, unique, partial] of uniqueIndexChecks) {
+    const row = (db.pragma("index_list('" + table + "')") as Array<{
+      readonly name: string;
+      readonly unique: number;
+      readonly partial: number;
+    }>).find((entry) => entry.name === indexName);
+    if (row?.unique !== (unique ? 1 : 0) || row.partial !== (partial ? 1 : 0)) {
+      fail('The security-sensitive index ' + indexName + ' is not uniquely defined as approved.');
+    }
   }
 }
 
@@ -271,8 +314,9 @@ function verifyTriggers(db: SqliteDatabase): void {
     "SELECT name FROM sqlite_schema WHERE type = 'trigger'",
   ).all().map((row) => (row as SchemaNameRow).name);
   if (!equalNames(triggers, EXPECTED_TRIGGERS)) {
-    fail('The database does not contain exactly the approved T1–T6 trigger set.');
+    fail('The database does not contain exactly the approved T1–T7 trigger set.');
   }
+  verifyCanonicalDefinitions(db, 'trigger', CANONICAL_SCHEMA_DEFINITIONS.triggers);
 }
 
 function verifySeeds(db: SqliteDatabase): void {
@@ -354,15 +398,15 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     ) {
       fail('The database is not at the current Phase 3 schema version.');
     }
-    verifySqlHealth(db);
     verifyTables(db);
     verifyColumns(db);
     verifyIndexes(db);
     verifyTriggers(db);
+    verifySqlHealth(db);
     verifySeeds(db);
     verifyLeaseRelation(db);
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       tableCount: EXPECTED_TABLES.length,
       triggerCount: EXPECTED_TRIGGERS.length,
       appliedVersions: ledger.versions,

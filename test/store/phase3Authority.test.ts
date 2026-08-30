@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
 
 import {
   closeStoreFixture,
@@ -46,6 +47,14 @@ function expectTerminalReopenToFail(): void {
   expect(() => db().prepare(
     "UPDATE jobs SET authoritative_status = 'APPROVED', deciding_decision_id = ? WHERE job_id = 'job-1'",
   ).run('decision-reopen')).toThrow('authoritative_status is terminal or would regress');
+}
+
+function establishRejectedJob(): void {
+  seedJob(db());
+  seedDecision(db(), 'decision-reject', 'REJECT', 'codex', 'job-1', 0, 'REJECTED');
+  db().prepare(
+    "UPDATE jobs SET state = 'REJECTED', authoritative_status = 'REJECTED', deciding_decision_id = ? WHERE job_id = 'job-1'",
+  ).run('decision-reject');
 }
 
 beforeEach(() => {
@@ -339,5 +348,74 @@ describe('Phase 3 raw-SQL authority matrix', () => {
     expect(() => db().prepare(
       "INSERT INTO leases(lease_id, run_id, job_id, cycle, actor_id, nonce, expires_at, consumed_at, created_at) VALUES ('lease-1', 'run-1', 'job-2', 0, 'worker', 'nonce', ?, NULL, ?)",
     ).run('2026-08-30T01:00:00Z', '2026-08-30T00:00:00Z')).toThrow();
+  });
+
+  it('SQL-39 rejects inserting a job with an authoritative status', () => {
+    expect(() => seedJob(db(), 'preapproved', 'EVIDENCE_READY', 'APPROVED')).toThrow(
+      'jobs must begin without authoritative state',
+    );
+    expect(db().prepare("SELECT 1 FROM jobs WHERE job_id = 'preapproved'").get()).toBeUndefined();
+  });
+
+  it('SQL-40 rejects inserting a terminal authoritative job', () => {
+    expect(() => seedJob(db(), 'precompleted', 'JOB_COMPLETED', 'JOB_COMPLETED')).toThrow(
+      'jobs must begin without authoritative state',
+    );
+    expect(db().prepare("SELECT 1 FROM jobs WHERE job_id = 'precompleted'").get()).toBeUndefined();
+  });
+
+  it('SQL-41 rejects inserting an authoritative workflow state without status', () => {
+    expect(() => seedJob(db(), 'prestate', 'APPROVED')).toThrow(
+      'jobs must begin without authoritative state',
+    );
+    expect(db().prepare("SELECT 1 FROM jobs WHERE job_id = 'prestate'").get()).toBeUndefined();
+  });
+
+  it('SQL-42 rejects inserting a job with a non-null deciding decision', () => {
+    expect(() => seedJob(db(), 'predecision', 'EVIDENCE_READY', null, 'missing-decision')).toThrow(
+      'jobs must begin without authoritative state',
+    );
+    expect(db().prepare("SELECT 1 FROM jobs WHERE job_id = 'predecision'").get()).toBeUndefined();
+  });
+
+  it('SQL-43 rejects deleting an unstamped durable job', () => {
+    seedJob(db());
+    const before = db().prepare("SELECT * FROM jobs WHERE job_id = 'job-1'").get();
+    expect(() => db().prepare("DELETE FROM jobs WHERE job_id = 'job-1'").run()).toThrow(
+      'jobs are durable and cannot be deleted',
+    );
+    expect(db().prepare("SELECT * FROM jobs WHERE job_id = 'job-1'").get()).toEqual(before);
+  });
+
+  it('SQL-44 rejects deleting a stamped terminal durable job', () => {
+    establishRejectedJob();
+    const before = db().prepare("SELECT * FROM jobs WHERE job_id = 'job-1'").get();
+    expect(() => db().prepare("DELETE FROM jobs WHERE job_id = 'job-1'").run()).toThrow(
+      'jobs are durable and cannot be deleted',
+    );
+    expect(db().prepare("SELECT * FROM jobs WHERE job_id = 'job-1'").get()).toEqual(before);
+  });
+
+  it('SQL-45 rejects foreign-key-off delete and reinsert laundering', () => {
+    establishRejectedJob();
+    const beforeJob = db().prepare("SELECT * FROM jobs WHERE job_id = 'job-1'").get();
+    const beforeDecision = db().prepare(
+      "SELECT * FROM decisions WHERE job_id = 'job-1' ORDER BY decision_id",
+    ).all();
+    const attacker = new Database(fixture.layout.database);
+    try {
+      attacker.pragma('foreign_keys = OFF');
+      expect(() => attacker.exec(
+        "DELETE FROM jobs WHERE job_id = 'job-1'; " +
+        "INSERT INTO jobs(job_id, workspace, title, spec_json, state, state_reason, authoritative_status, deciding_decision_id, owner_actor_id, cycle, max_cycles, version, deadline_at, stale_after_s, created_at, updated_at) " +
+        "VALUES ('job-1', 'C:\\\\AgentProjects\\\\fixture', 'Laundered', '{}', 'APPROVED', NULL, 'APPROVED', NULL, 'codex', 0, 10, 1, NULL, 60, '2026-08-30T00:00:00Z', '2026-08-30T00:00:00Z');",
+      )).toThrow('jobs are durable and cannot be deleted');
+    } finally {
+      attacker.close();
+    }
+    expect(db().prepare("SELECT * FROM jobs WHERE job_id = 'job-1'").get()).toEqual(beforeJob);
+    expect(db().prepare(
+      "SELECT * FROM decisions WHERE job_id = 'job-1' ORDER BY decision_id",
+    ).all()).toEqual(beforeDecision);
   });
 });

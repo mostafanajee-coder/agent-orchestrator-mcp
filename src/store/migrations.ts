@@ -8,7 +8,7 @@ import {
   type SqliteDatabase,
 } from './db.js';
 
-export const KNOWN_MIGRATION_VERSIONS = [1, 2] as const;
+export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3] as const;
 
 export interface Migration {
   readonly version: number;
@@ -100,7 +100,7 @@ function validateMigrationSet(migrations: readonly Migration[]): void {
     versions.some((version, index) => version !== KNOWN_MIGRATION_VERSIONS[index])
   ) {
     fail(
-      'The binary migration set is not exactly the approved known set [1,2].',
+      'The binary migration set is not exactly the approved known set [1,2,3].',
       'Remove unknown, missing, or future migration files before serving.',
     );
   }
@@ -161,8 +161,8 @@ export function validateAppliedPrefix(
   if (!ledger.exists) {
     if (fresh && ledger.versions.length === 0) return;
     fail(
-      'An existing database is missing schema_migrations.',
-      'Run the approved recovery process; an arbitrary SQLite file is never reclassified as fresh.',
+      'An existing database is missing schema_migrations and is not treated as a fresh AOM database.',
+      'If this is a known failed fresh-init artifact, remove that exact partial database and rerun init; otherwise restore through the approved recovery process.',
     );
   }
 
@@ -183,6 +183,10 @@ export function validateAppliedPrefix(
   }
 
   if (ledger.versions.length > known.length) {
+    fail('The schema_migrations ledger contains an unknown or future version.');
+  }
+
+  if (ledger.versions.some((version) => !known.includes(version))) {
     fail('The schema_migrations ledger contains an unknown or future version.');
   }
 
@@ -263,6 +267,22 @@ function verifyMigrationTwoInsideTransaction(db: SqliteDatabase): void {
   }
 }
 
+function verifyMigrationThreeInsideTransaction(db: SqliteDatabase): void {
+  const triggerNames = db.prepare(
+    "SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name",
+  ).all().map((row) => (row as { readonly name: string }).name);
+  const expected = [
+    'trg_jobs_no_delete',
+    'trg_jobs_unstamped_on_insert',
+  ];
+  if (
+    triggerNames.length !== expected.length + 14 ||
+    !expected.every((name) => triggerNames.includes(name))
+  ) {
+    fail('Migration 003 did not install the exact T7 job lifecycle trigger set.');
+  }
+}
+
 export function runMigrations(
   db: SqliteDatabase,
   options: MigrationRunOptions,
@@ -288,6 +308,7 @@ export function runMigrations(
         fail('Migration 001 did not create schema_migrations.');
       }
       if (next.version === 2) verifyMigrationTwoInsideTransaction(db);
+      if (next.version === 3) verifyMigrationThreeInsideTransaction(db);
 
       db.prepare(
         'INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)',

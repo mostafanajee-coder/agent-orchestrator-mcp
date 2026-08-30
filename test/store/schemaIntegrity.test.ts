@@ -44,10 +44,10 @@ describe('Phase 3 schema and integrity', () => {
 
   it('reports the current schema and approved PRAGMA policy', () => {
     const report = verifyDatabaseIntegrity(fixture.db);
-    expect(report.schemaVersion).toBe(2);
+    expect(report.schemaVersion).toBe(3);
     expect(report.tableCount).toBe(13);
-    expect(report.triggerCount).toBe(14);
-    expect(report.appliedVersions).toEqual([1, 2]);
+    expect(report.triggerCount).toBe(16);
+    expect(report.appliedVersions).toEqual([1, 2, 3]);
     expect(report.pragmaPolicy).toEqual({
       journalMode: 'wal',
       foreignKeys: 1,
