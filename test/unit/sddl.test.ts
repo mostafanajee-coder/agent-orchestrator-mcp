@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateDescriptor, parseDescriptor, resolveTrustee } from '../../src/security/sddl.js';
+import {
+  evaluateDescriptor,
+  parseControlTokens,
+  parseDescriptor,
+  resolveTrustee,
+} from '../../src/security/sddl.js';
 
 const USER = 'S-1-5-21-1-2-3-1001';
 const OTHER = 'S-1-5-21-9-9-9-500';
@@ -213,5 +218,64 @@ describe('evaluateDescriptor: inheritance flags', () => {
 
   it('accepts a file entry with no inheritance flags', () => {
     expect(evaluateDescriptor(`${HEAD}D:P(A;;FA;;;${USER})`, USER, 'file').secure).toBe(true);
+  });
+});
+
+describe('ACE field count is exact', () => {
+  it('accepts the canonical six-field directory entry', () => {
+    expect(evaluateDescriptor(REAL_DIRECTORY, REAL_USER, 'directory').secure).toBe(true);
+  });
+
+  it('accepts the canonical six-field file entry', () => {
+    expect(evaluateDescriptor(REAL_LEASE_KEY, REAL_USER, 'file').secure).toBe(true);
+  });
+
+  it.each([
+    ['five', `${HEAD}D:P(A;OICI;FA;;${USER})`],
+    ['seven', `${HEAD}D:P(A;OICI;FA;;;${USER};extra)`],
+    ['eight', `${HEAD}D:P(A;OICI;FA;;;${USER};extra;more)`],
+  ])('rejects an entry with %s fields', (_label, sddl) => {
+    // A seventh field marks a conditional/resource ACE, which this policy does
+    // not model and must not silently accept.
+    expect(parseDescriptor(sddl).ok).toBe(false);
+    expect(evaluateDescriptor(sddl, USER, 'directory').secure).toBe(false);
+  });
+});
+
+describe('DACL control flags are fully parsed', () => {
+  it('accepts the canonical PAI form captured from Windows', () => {
+    expect(evaluateDescriptor(REAL_DIRECTORY, REAL_USER, 'directory').secure).toBe(true);
+  });
+
+  it('accepts a bare P form', () => {
+    expect(evaluateDescriptor(`${HEAD}D:P(A;OICI;FA;;;${USER})`, USER, 'directory').secure).toBe(
+      true,
+    );
+  });
+
+  it('tokenises known control flags', () => {
+    expect(parseControlTokens('PAI')).toEqual(['P', 'AI']);
+    expect(parseControlTokens('AIP')).toEqual(['AI', 'P']);
+    expect(parseControlTokens('')).toEqual([]);
+  });
+
+  it.each([['PXYZ'], ['Q'], ['PAIX'], ['X'], ['PA']])(
+    'refuses to parse the unknown control sequence %s',
+    (flags) => {
+      expect(parseControlTokens(flags)).toBeUndefined();
+    },
+  );
+
+  it.each([['PXYZ'], ['Q'], ['PAIX']])('rejects a descriptor whose control is %s', (flags) => {
+    const sddl = `${HEAD}D:${flags}(A;OICI;FA;;;${USER})`;
+    expect(parseDescriptor(sddl).ok).toBe(false);
+    expect(evaluateDescriptor(sddl, USER, 'directory').secure).toBe(false);
+  });
+
+  it('rejects a known but unpermitted control flag', () => {
+    // AR is recognised syntax, but is not part of the canonical shape.
+    const result = evaluateDescriptor(`${HEAD}D:PAIAR(A;OICI;FA;;;${USER})`, USER, 'directory');
+    expect(result.secure).toBe(false);
+    expect(result.problems.join(' ')).toContain("unexpected control flag 'AR'");
   });
 });

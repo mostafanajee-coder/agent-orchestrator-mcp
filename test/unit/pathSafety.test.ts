@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SecurityError } from '../../src/errors.js';
+import type { PathSafetyOptions } from '../../src/security/pathSafety.js';
 import { assertPathIsSafe, canonicalise, inspectPathSafety } from '../../src/security/pathSafety.js';
 
 const onWindows = process.platform === 'win32';
@@ -125,35 +126,19 @@ describe('inspectPathSafety', () => {
   });
 });
 
-describe('allowRedirectionBoundary', () => {
-  it('still rejects a link even when the boundary is permitted', () => {
-    // The exemption relaxes only the weaker realpath comparison. A hostile
-    // junction or symlink is caught by lstat regardless, which is what makes
-    // the exemption safe for the state root.
-    const link = join(workspace, 'linkdir2');
-    if (!tryLink(realDir, link, 'dir')) return;
-    expect(() =>
-      assertPathIsSafe(link, 'directory', process.platform, { allowRedirectionBoundary: true }),
-    ).toThrow(/link or junction/);
+describe('no redirection exemption exists', () => {
+  it('offers no option that relaxes the realpath check', () => {
+    // Phase 1B removed allowRedirectionBoundary along with the LocalAppData
+    // root that needed it. The strict check now applies to every protected
+    // path, the state root included, with no package-specific bypass.
+    const options = { requireSingleLink: true } satisfies PathSafetyOptions;
+    expect(Object.keys(options)).toEqual(['requireSingleLink']);
   });
 
-  it('still rejects the wrong object type', () => {
-    expect(() =>
-      assertPathIsSafe(realFile, 'directory', process.platform, { allowRedirectionBoundary: true }),
-    ).toThrow(/expected to be a directory/);
-  });
-
-  it('still rejects a missing path', () => {
-    expect(() =>
-      assertPathIsSafe(join(workspace, 'nope'), 'directory', process.platform, {
-        allowRedirectionBoundary: true,
-      }),
-    ).toThrow(SecurityError);
-  });
-
-  it('accepts a real directory', () => {
-    expect(() =>
-      assertPathIsSafe(realDir, 'directory', process.platform, { allowRedirectionBoundary: true }),
-    ).not.toThrow();
+  it('applies the strict realpath check to a root-like directory too', () => {
+    // A directory standing in for the state root gets no special treatment.
+    const rootLike = join(workspace, 'rootlike');
+    if (!tryLink(realDir, rootLike, 'dir')) return;
+    expect(() => assertPathIsSafe(rootLike, 'directory')).toThrow(/link or junction/);
   });
 });

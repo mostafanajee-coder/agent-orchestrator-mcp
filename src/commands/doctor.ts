@@ -7,7 +7,8 @@ import { inspectLeaseKey, LEASE_KEY_BYTES } from '../secrets/leaseKey.js';
 import { inspectPathSafety } from '../security/pathSafety.js';
 import type { CommandContext } from './context.js';
 
-export type CheckStatus = 'pass' | 'fail';
+/** `warn` is advisory: it is reported but never makes doctor fail. */
+export type CheckStatus = 'pass' | 'warn' | 'fail';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -41,6 +42,7 @@ export function runDoctor(context: CommandContext): DoctorReport {
   }
 
   checks.push(leaseKeyCheck(context));
+  checks.push(...legacyRootChecks(context));
 
   let subject: string;
   try {
@@ -54,8 +56,30 @@ export function runDoctor(context: CommandContext): DoctorReport {
     securityModel: security.describe(),
     subject,
     checks,
-    ok: checks.every((check) => check.status === 'pass'),
+    // Warnings are advisory and never fail the run.
+    ok: checks.every((check) => check.status !== 'fail'),
   };
+}
+
+/**
+ * Reports a pre-Phase-1B state root if one is still present.
+ *
+ * Presence only: the legacy root is never opened, never read, and never
+ * migrated, so no secret or hash from it reaches this report. It is advisory,
+ * so a leftover directory cannot make an otherwise secure new root fail.
+ */
+function legacyRootChecks(context: CommandContext): DoctorCheck[] {
+  const checks: DoctorCheck[] = [];
+  for (const legacy of context.legacyRoots) {
+    if (!existsSync(legacy)) continue;
+    checks.push({
+      name: `legacy state root ${legacy}`,
+      status: 'warn',
+      detail:
+        'present but not used. It was superseded because LocalAppData is virtualized for packaged processes. Nothing was read from or written to it; delete it manually once you are satisfied.',
+    });
+  }
+  return checks;
 }
 
 function cloudSyncCheck(context: CommandContext): DoctorCheck {
@@ -87,9 +111,7 @@ function pathCheck(
 
   // Path safety first: a link or junction is reported as such rather than
   // having its target's protection reported as if it were this path's.
-  const safety = inspectPathSafety(path, kind, context.platform, {
-    allowRedirectionBoundary: path === context.layout.root,
-  });
+  const safety = inspectPathSafety(path, kind, context.platform);
   if (!safety.safe) {
     return { name, status: 'fail', detail: safety.problem ?? 'path is unsafe' };
   }

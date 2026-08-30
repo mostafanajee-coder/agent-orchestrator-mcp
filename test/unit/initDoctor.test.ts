@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,11 +18,19 @@ let security: FakeSecurityProvider;
 
 function context(overrides: Partial<CommandContext> = {}): CommandContext {
   const cloudSync: CloudSyncEnvironment = {
-    platform: 'linux',
+    platform: process.platform,
     env: {},
+    profileDir: workspace,
     readFileIfPresent: () => undefined,
   };
-  return { layout: stateLayout(root), security, cloudSync, platform: process.platform, ...overrides };
+  return {
+    layout: stateLayout(root, process.platform),
+    security,
+    cloudSync,
+    platform: process.platform,
+    legacyRoots: [],
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -37,7 +45,7 @@ afterEach(() => {
 
 describe('runInit', () => {
   it('creates every state directory and the lease key', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     const result = runInit(context());
 
     for (const path of [layout.root, layout.data, layout.artifacts, layout.secrets, layout.logs]) {
@@ -49,7 +57,7 @@ describe('runInit', () => {
   });
 
   it('hardens the secrets directory before the lease key is written into it', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     runInit(context());
 
     const secretsIndex = security.hardened.findIndex((call) => call.path === layout.secrets);
@@ -59,13 +67,13 @@ describe('runInit', () => {
   });
 
   it('hardens the root first', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     runInit(context());
     expect(security.hardened[0]?.path).toBe(layout.root);
   });
 
   it('is idempotent and preserves the lease key', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     runInit(context());
     const first = readFileSync(layout.leaseKey);
 
@@ -78,8 +86,9 @@ describe('runInit', () => {
   it('refuses a state root inside a cloud-synchronised directory, creating nothing', () => {
     const synced = context({
       cloudSync: {
-        platform: 'linux',
+        platform: process.platform,
         env: { OneDrive: workspace },
+        profileDir: workspace,
         readFileIfPresent: () => undefined,
       },
     });
@@ -89,7 +98,7 @@ describe('runInit', () => {
   });
 
   it('fails closed and writes no key when a directory cannot be protected', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     security.forcedInsecure.add(layout.secrets);
 
     expect(() => runInit(context())).toThrow(SecurityError);
@@ -97,7 +106,7 @@ describe('runInit', () => {
   });
 
   it('fails closed when protection cannot be verified at all', () => {
-    security.verifyThrows.add(stateLayout(root).root);
+    security.verifyThrows.add(stateLayout(root, process.platform).root);
     expect(() => runInit(context())).toThrow('verification unavailable');
   });
 });
@@ -122,7 +131,7 @@ describe('runDoctor', () => {
   });
 
   it('fails on an insecure state root without repairing it', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     runInit(context());
 
     const hardenedBefore = security.hardened.length;
@@ -136,7 +145,7 @@ describe('runDoctor', () => {
   });
 
   it('fails when the lease key is missing', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     runInit(context());
     rmSync(layout.leaseKey);
 
@@ -154,8 +163,9 @@ describe('runDoctor', () => {
     const report = runDoctor(
       context({
         cloudSync: {
-          platform: 'linux',
+          platform: process.platform,
           env: { OneDrive: workspace },
+          profileDir: workspace,
           readFileIfPresent: () => undefined,
         },
       }),
@@ -167,7 +177,7 @@ describe('runDoctor', () => {
   });
 
   it('never exposes key material in its report', () => {
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     runInit(context());
     const keyHex = readFileSync(layout.leaseKey).toString('hex');
 
@@ -181,12 +191,74 @@ describe('redirection-boundary exemption', () => {
   it('is applied to the state root only, never to a child', () => {
     // Directly assert the policy the commands encode: only the root may sit on
     // a filesystem-virtualization boundary.
-    const layout = stateLayout(root);
+    const layout = stateLayout(root, process.platform);
     const children = [layout.data, layout.artifacts, layout.secrets, layout.logs, layout.leaseKey];
     for (const child of children) {
       expect(child).not.toBe(layout.root);
     }
     runInit(context());
     expect(runDoctor(context()).ok).toBe(true);
+  });
+});
+
+describe('legacy state root', () => {
+  let legacy: string;
+
+  beforeEach(() => {
+    // Distinct from the active root, which lives elsewhere in the workspace.
+    legacy = join(workspace, 'LocalAppData', 'AgentOrchestratorMCP');
+  });
+
+  it('is reported as a warning without failing an otherwise secure root', () => {
+    mkdirSync(join(legacy, 'secrets'), { recursive: true });
+    writeFileSync(join(legacy, 'secrets', 'lease.key'), Buffer.alloc(32, 7));
+    runInit(context({ legacyRoots: [legacy] }));
+
+    const report = runDoctor(context({ legacyRoots: [legacy] }));
+    const warning = report.checks.find((check) => check.status === 'warn');
+
+    expect(report.ok).toBe(true);
+    expect(warning?.name).toContain(legacy);
+    expect(warning?.detail).toContain('not used');
+  });
+
+  it('does not read or hash anything from the legacy root', () => {
+    mkdirSync(join(legacy, 'secrets'), { recursive: true });
+    const legacySecret = Buffer.alloc(32, 9);
+    writeFileSync(join(legacy, 'secrets', 'lease.key'), legacySecret);
+    runInit(context({ legacyRoots: [legacy] }));
+
+    const serialised = JSON.stringify(runDoctor(context({ legacyRoots: [legacy] })));
+    expect(serialised).not.toContain(legacySecret.toString('hex'));
+    expect(serialised).not.toContain(legacySecret.toString('base64'));
+  });
+
+  it('is not reported when it does not exist', () => {
+    runInit(context({ legacyRoots: [legacy] }));
+    const report = runDoctor(context({ legacyRoots: [legacy] }));
+    expect(report.checks.some((check) => check.status === 'warn')).toBe(false);
+  });
+
+  it('never becomes authoritative: init creates only the new root', () => {
+    mkdirSync(legacy, { recursive: true });
+    const result = runInit(context({ legacyRoots: [legacy] }));
+
+    expect(result.stateRoot).toBe(root);
+    expect(result.stateRoot).not.toBe(legacy);
+    // The legacy root is left exactly as found: not migrated, not deleted.
+    expect(existsSync(legacy)).toBe(true);
+    expect(existsSync(join(legacy, 'secrets'))).toBe(false);
+    expect(runDoctor(context({ legacyRoots: [legacy] })).stateRoot).toBe(root);
+  });
+
+  it('does not copy a legacy key into the new root', () => {
+    mkdirSync(join(legacy, 'secrets'), { recursive: true });
+    const legacySecret = Buffer.alloc(32, 3);
+    writeFileSync(join(legacy, 'secrets', 'lease.key'), legacySecret);
+
+    const layout = stateLayout(root, process.platform);
+    runInit(context({ legacyRoots: [legacy] }));
+
+    expect(readFileSync(layout.leaseKey).equals(legacySecret)).toBe(false);
   });
 });
