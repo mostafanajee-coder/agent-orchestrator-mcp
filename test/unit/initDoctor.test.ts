@@ -8,6 +8,7 @@ import { stateLayout } from '../../src/config/stateRoot.js';
 import type { CommandContext } from '../../src/commands/context.js';
 import { runDoctor } from '../../src/commands/doctor.js';
 import { runInit } from '../../src/commands/init.js';
+import { assertPhase1Ready } from '../../src/commands/startup.js';
 import { SecurityError } from '../../src/errors.js';
 import { LEASE_KEY_BYTES } from '../../src/secrets/leaseKey.js';
 import { FakeSecurityProvider } from '../helpers/fakeSecurity.js';
@@ -184,6 +185,58 @@ describe('runDoctor', () => {
     const serialised = JSON.stringify(runDoctor(context()));
     expect(serialised).not.toContain(keyHex);
     expect(serialised).toContain(`${String(LEASE_KEY_BYTES)} bytes`);
+  });
+});
+
+describe('serve startup verification', () => {
+  it('fails closed before creating anything when Phase 1 is uninitialised', () => {
+    expect(() => assertPhase1Ready(context())).toThrow(/Phase 1 security verification failed/);
+    expect(existsSync(root)).toBe(false);
+    expect(security.hardened).toEqual([]);
+  });
+
+  it('proceeds for a valid initialized Phase 1 state', () => {
+    runInit(context());
+    const hardenedBefore = security.hardened.length;
+
+    expect(() => assertPhase1Ready(context())).not.toThrow();
+    expect(security.hardened).toHaveLength(hardenedBefore);
+  });
+
+  it('fails closed on a tampered protected directory without repairing it', () => {
+    const layout = stateLayout(root, process.platform);
+    runInit(context());
+    security.forcedInsecure.add(layout.secrets);
+    const hardenedBefore = security.hardened.length;
+
+    expect(() => assertPhase1Ready(context())).toThrow(/Phase 1 security verification failed/);
+    expect(security.hardened).toHaveLength(hardenedBefore);
+  });
+
+  it('fails closed on invalid lease-key metadata without reading its contents', () => {
+    const layout = stateLayout(root, process.platform);
+    runInit(context());
+    rmSync(layout.leaseKey);
+    writeFileSync(layout.leaseKey, Buffer.alloc(31, 4));
+
+    expect(() => assertPhase1Ready(context())).toThrow(/lease key/);
+    expect(readFileSync(layout.leaseKey).length).toBe(31);
+  });
+
+  it('fails closed on the cloud-sync invariant without repairing state', () => {
+    runInit(context());
+    const hardenedBefore = security.hardened.length;
+    const syncedContext = context({
+      cloudSync: {
+        platform: process.platform,
+        env: { OneDrive: workspace },
+        profileDir: workspace,
+        readFileIfPresent: () => undefined,
+      },
+    });
+
+    expect(() => assertPhase1Ready(syncedContext)).toThrow(/cloud-sync safety/);
+    expect(security.hardened).toHaveLength(hardenedBefore);
   });
 });
 

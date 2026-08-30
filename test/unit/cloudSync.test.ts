@@ -7,6 +7,7 @@ import {
   isInside,
   isUsableSyncCandidate,
 } from '../../src/config/cloudSync.js';
+import { stateLayout } from '../../src/config/stateRoot.js';
 import { SecurityError } from '../../src/errors.js';
 
 const WIN_PROFILE = 'C:\\Users\\example';
@@ -61,11 +62,16 @@ function environment(
   return spyEnvironment(env, { files, platform, withRealPath: false }).environment;
 }
 
-/** The Dropbox config path production would build, captured from the spy. */
-function dropboxProbePath(profileDir = WIN_PROFILE): string {
+/** The Dropbox config paths production would build, captured from the spy. */
+function dropboxProbePaths(profileDir = WIN_PROFILE): string[] {
   const { environment: env, spy } = spyEnvironment({}, { profileDir });
   detectSyncRoots(env);
-  return spy.reads[0] ?? '';
+  return spy.reads;
+}
+
+/** The first (Local) Dropbox config path production would build. */
+function dropboxProbePath(profileDir = WIN_PROFILE): string {
+  return dropboxProbePaths(profileDir)[0] ?? '';
 }
 
 describe('isUsableSyncCandidate', () => {
@@ -122,17 +128,85 @@ describe('detectSyncRoots: environment candidates are validated before use', () 
 
 describe('detectSyncRoots: Dropbox config comes from the trusted profile', () => {
   it('reads info.json from under the profile directory', () => {
-    const probe = dropboxProbePath();
-    expect(probe).toContain('Dropbox');
-    expect(probe).toContain('info.json');
-    expect(probe.startsWith(WIN_PROFILE)).toBe(true);
+    const probes = dropboxProbePaths();
+    expect(probes).toHaveLength(2);
+    expect(probes[0]).toBe(`${WIN_PROFILE}\\AppData\\Local\\Dropbox\\info.json`);
+    expect(probes[1]).toBe(`${WIN_PROFILE}\\AppData\\Roaming\\Dropbox\\info.json`);
+    for (const probe of probes) {
+      expect(probe).toContain('Dropbox');
+      expect(probe).toContain('info.json');
+      expect(probe.startsWith(WIN_PROFILE)).toBe(true);
+    }
   });
 
-  it('parses a legitimate Dropbox root', () => {
-    const probe = dropboxProbePath();
+  it('parses a legitimate Local Dropbox root', () => {
+    const [local] = dropboxProbePaths();
     const roots = detectSyncRoots(
-      environment({}, { [probe]: JSON.stringify({ personal: { path: 'D:\\Dropbox' } }) }),
+      environment({}, { [local ?? '']: JSON.stringify({ personal: { path: 'D:\\Dropbox' } }) }),
     );
+    expect(roots).toEqual([{ path: 'D:\\Dropbox', provider: 'Dropbox (personal)' }]);
+  });
+
+  it('parses a legitimate Roaming-only Dropbox root', () => {
+    const [, roaming] = dropboxProbePaths();
+    const roots = detectSyncRoots(
+      environment({}, { [roaming ?? '']: JSON.stringify({ personal: { path: 'D:\\Dropbox' } }) }),
+    );
+    expect(roots).toEqual([{ path: 'D:\\Dropbox', provider: 'Dropbox (personal)' }]);
+  });
+
+  it('reads both metadata locations when both are present', () => {
+    const [local, roaming] = dropboxProbePaths();
+    const { environment: env, spy } = spyEnvironment({}, {
+      files: {
+        [local ?? '']: JSON.stringify({ personal: { path: 'D:\\Dropbox-Local' } }),
+        [roaming ?? '']: JSON.stringify({ business: { path: 'E:\\Dropbox-Roaming' } }),
+      },
+    });
+
+    expect(detectSyncRoots(env)).toEqual([
+      { path: 'D:\\Dropbox-Local', provider: 'Dropbox (personal)' },
+      { path: 'E:\\Dropbox-Roaming', provider: 'Dropbox (business)' },
+    ]);
+    expect(spy.reads).toEqual([local, roaming]);
+  });
+
+  it('deduplicates the same root described by both metadata locations', () => {
+    const [local, roaming] = dropboxProbePaths();
+    const roots = detectSyncRoots(
+      environment({}, {
+        [local ?? '']: JSON.stringify({ personal: { path: 'D:\\Dropbox' } }),
+        [roaming ?? '']: JSON.stringify({ business: { path: 'd:/DROPBOX\\' } }),
+      }),
+    );
+
+    expect(roots).toEqual([{ path: 'D:\\Dropbox', provider: 'Dropbox (personal)' }]);
+  });
+
+  it('keeps distinct valid roots from both metadata locations', () => {
+    const [local, roaming] = dropboxProbePaths();
+    const roots = detectSyncRoots(
+      environment({}, {
+        [local ?? '']: JSON.stringify({ personal: { path: 'D:\\Dropbox' } }),
+        [roaming ?? '']: JSON.stringify({ business: { path: 'E:\\Dropbox' } }),
+      }),
+    );
+
+    expect(roots).toEqual([
+      { path: 'D:\\Dropbox', provider: 'Dropbox (personal)' },
+      { path: 'E:\\Dropbox', provider: 'Dropbox (business)' },
+    ]);
+  });
+
+  it('keeps a valid location when the other metadata file is malformed', () => {
+    const [local, roaming] = dropboxProbePaths();
+    const roots = detectSyncRoots(
+      environment({}, {
+        [local ?? '']: 'not json',
+        [roaming ?? '']: JSON.stringify({ personal: { path: 'D:\\Dropbox' } }),
+      }),
+    );
+
     expect(roots).toEqual([{ path: 'D:\\Dropbox', provider: 'Dropbox (personal)' }]);
   });
 
@@ -145,7 +219,7 @@ describe('detectSyncRoots: Dropbox config comes from the trusted profile', () =>
     const { environment: env, spy } = spyEnvironment({ LOCALAPPDATA: value });
     detectSyncRoots(env);
 
-    expect(spy.reads).toEqual([dropboxProbePath()]);
+    expect(spy.reads).toEqual(dropboxProbePaths());
     for (const read of spy.reads) {
       expect(read).not.toContain('attacker');
       expect(read.startsWith('\\\\')).toBe(false);
@@ -155,7 +229,24 @@ describe('detectSyncRoots: Dropbox config comes from the trusted profile', () =>
   it('ignores HOME as a config location', () => {
     const { environment: env, spy } = spyEnvironment({ HOME: ATTACKER_UNC });
     detectSyncRoots(env);
-    expect(spy.reads).toEqual([dropboxProbePath()]);
+    expect(spy.reads).toEqual(dropboxProbePaths());
+  });
+
+  it('ignores hostile USERPROFILE, LOCALAPPDATA, and APPDATA values', () => {
+    const { environment: env, spy } = spyEnvironment({
+      USERPROFILE: ATTACKER_UNC,
+      LOCALAPPDATA: '\\\\?\\C:\\attacker',
+      APPDATA: 'relative-attacker',
+    });
+
+    detectSyncRoots(env);
+
+    expect(spy.reads).toEqual(dropboxProbePaths());
+    for (const read of spy.reads) {
+      expect(read.startsWith(WIN_PROFILE)).toBe(true);
+      expect(read).not.toContain('attacker');
+      expect(read.startsWith('\\\\')).toBe(false);
+    }
   });
 
   it('reads nothing when the profile itself is unusable', () => {
@@ -171,6 +262,23 @@ describe('detectSyncRoots: Dropbox config comes from the trusted profile', () =>
       environment({}, { [probe]: JSON.stringify({ business: { path: ATTACKER_UNC } }) }),
     );
     expect(roots).toEqual([]);
+  });
+
+  it.each([
+    ['a UNC share', ATTACKER_UNC],
+    ['a device path', '\\\\?\\D:\\attacker'],
+    ['a relative path', 'attacker-relative'],
+  ])('drops %s candidates from both Dropbox metadata files', (_label, value) => {
+    const [local, roaming] = dropboxProbePaths();
+    const { environment: env, spy } = spyEnvironment({}, {
+      files: {
+        [local ?? '']: JSON.stringify({ local: { path: value } }),
+        [roaming ?? '']: JSON.stringify({ roaming: { path: value } }),
+      },
+    });
+
+    expect(detectSyncRoots(env)).toEqual([]);
+    expect(spy.reads).toEqual([local, roaming]);
   });
 
   it('ignores malformed Dropbox configuration instead of failing', () => {
@@ -238,10 +346,12 @@ describe('isInside', () => {
 });
 
 describe('assertStateRootNotSynced', () => {
+  const ROOT = 'C:\\Users\\example\\.agent-orchestrator-mcp';
+
   it('passes when the state root is outside every sync root', () => {
     expect(() =>
       assertStateRootNotSynced(
-        'C:\\Users\\example\\.agent-orchestrator-mcp',
+        ROOT,
         environment({ OneDrive: 'C:\\Users\\example\\OneDrive' }),
       ),
     ).not.toThrow();
@@ -259,6 +369,61 @@ describe('assertStateRootNotSynced', () => {
       expect((error as SecurityError).message).toContain('OneDrive');
       expect((error as SecurityError).remedy).toBeDefined();
     }
+  });
+
+  it('rejects a provider root equal to the state root', () => {
+    expect(() => assertStateRootNotSynced(ROOT, environment({ OneDrive: ROOT }))).toThrow(
+      SecurityError,
+    );
+  });
+
+  it.each(['secrets', 'data', 'artifacts', 'logs'])(
+    'rejects a provider root nested at stateRoot\\%s',
+    (directory) => {
+      const layout = stateLayout(ROOT, 'win32');
+      const syncRoot = layout[directory as 'secrets' | 'data' | 'artifacts' | 'logs'];
+      expect(() => assertStateRootNotSynced(ROOT, environment({ OneDrive: syncRoot }))).toThrow(
+        SecurityError,
+      );
+    },
+  );
+
+  it('rejects a provider root equal to the protected lease key path', () => {
+    const layout = stateLayout(ROOT, 'win32');
+    expect(() => assertStateRootNotSynced(ROOT, environment({ OneDrive: layout.leaseKey }))).toThrow(
+      SecurityError,
+    );
+  });
+
+  it('performs nested-provider rejection lexically before any real-path probe', () => {
+    const { environment: env, spy } = spyEnvironment({ OneDrive: `${ROOT}\\secrets` });
+
+    expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(SecurityError);
+    expect(spy.realpaths).toEqual([]);
+  });
+
+  it('does not probe hostile environment or Dropbox candidates', () => {
+    const [local, roaming] = dropboxProbePaths();
+    const { environment: env, spy } = spyEnvironment(
+      {
+        OneDrive: ATTACKER_UNC,
+        OneDriveConsumer: '\\\\?\\C:\\attacker',
+        OneDriveCommercial: 'relative-attacker',
+        USERPROFILE: ATTACKER_UNC,
+        LOCALAPPDATA: '\\\\?\\C:\\attacker',
+        APPDATA: 'relative-attacker',
+      },
+      {
+        files: {
+          [local ?? '']: JSON.stringify({ local: { path: ATTACKER_UNC } }),
+          [roaming ?? '']: JSON.stringify({ roaming: { path: '\\\\?\\C:\\attacker' } }),
+        },
+      },
+    );
+
+    expect(() => assertStateRootNotSynced(ROOT, env)).not.toThrow();
+    expect(spy.realpaths).toEqual([]);
+    expect(spy.reads).toEqual([local, roaming]);
   });
 });
 
@@ -286,9 +451,28 @@ describe('assertStateRootNotSynced: real-path pass', () => {
     expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(/resolves inside/);
   });
 
+  it('rejects a protected child whose real path resolves into a sync root', () => {
+    const layout = stateLayout(ROOT, 'win32');
+    const env = withRealPaths({
+      [ROOT]: ROOT,
+      [layout.secrets]: `${ONEDRIVE}\\redirected-secrets`,
+      [ONEDRIVE]: ONEDRIVE,
+    });
+    expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(/resolves inside/);
+  });
+
   it('rejects when the sync root itself is a link containing the resolved state root', () => {
     const env = withRealPaths({ [ROOT]: 'D:\\Synced\\state', [ONEDRIVE]: 'D:\\Synced' });
     expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(/resolves inside/);
+  });
+
+  it('rejects a sync root whose real path resolves below protected state', () => {
+    const declared = 'D:\\ProviderLink';
+    const env = spyEnvironment(
+      { OneDrive: declared },
+      { realPaths: { [ROOT]: ROOT, [declared]: `${ROOT}\\secrets` } },
+    ).environment;
+    expect(() => assertStateRootNotSynced(ROOT, env)).toThrow(/inside protected state path/);
   });
 
   it('compares resolved paths case-insensitively on Windows', () => {

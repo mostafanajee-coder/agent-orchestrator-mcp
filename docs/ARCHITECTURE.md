@@ -1,7 +1,7 @@
 # Agent Orchestrator MCP — V1 Architecture (Revision 4)
 
 > **Status:** approved. This is the design of record; the implementation follows the phase plan in §21.
-> Implementation is at **Phase 1B (stable cross-process state root)**. Sections describing later phases are design intent, not
+> Implementation is at **Phase 2 (MCP spine)**. Sections describing later phases are design intent, not
 > shipped behaviour. This document was written before any code existed, so present-tense descriptions
 > of components state what they must do, not what exists today.
 
@@ -1155,4 +1155,5 @@ Multiple Codex sessions are supported with **verified** session attribution and 
 
 Scope remains honest: V1 is the authority core plus one generic worker adapter. `agy` and the browser worker are designed, external, and deferred, with the agy CLI contract explicitly flagged as unverified.
 
-**Recommended next step:** approve, then begin Phase 0.
+**Recommended next step:** principal review of the Phase 2 MCP spine, then
+begin Phase 3 only after that review approves the boundary.
