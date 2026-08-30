@@ -55,6 +55,14 @@ describe('serve startup Phase 3 gate', () => {
     expect(() => requirePath(context.layout.database)).toThrow();
   });
 
+  it('fails closed before serving when an existing DB is corrupt', () => {
+    writeFileSync(context.layout.database, Buffer.from('not a SQLite database'));
+    (context.security as FakeSecurityProvider).harden(context.layout.database, 'file');
+    expect(() => assertPhase1Ready(context)).toThrow(
+      'MCP serve refused because Phase 3 database verification failed',
+    );
+  });
+
   it('fails HTTP before creating or binding a server', () => {
     expect(() => startHttpServer({
       resolver: createInMemoryTokenResolver([]),
