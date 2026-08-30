@@ -1,6 +1,6 @@
 # Phase 3 Plan — Store & Database Authority
 
-> **IMPLEMENTED — PHASE 3 STORE & DATABASE AUTHORITY — REVISION 6 REMEDIATION**
+> **IMPLEMENTED — PHASE 3 STORE & DATABASE AUTHORITY — REVISION 7 F-1 REMEDIATION**
 >
 > Phase 3 is implemented on the implementation branch. Phase 4 authority/auth,
 > job, worker, and later runtime behavior remains unimplemented.
@@ -9,7 +9,7 @@ Date: 2026-08-30
 Authoritative repository: `C:\AgentProjects\agent-orchestrator-mcp`
 Authoritative implementation base: `d255a5b2062f38c475cfb83c080e6bd98754505c`
 External benchmark: `C:\AgentProjects\aom-benchmark\AOM_EXTERNAL_BENCHMARK.md`
-Implementation status: **REVISION 6 REMEDIATION IMPLEMENTED — READY FOR RE-REVIEW**
+Implementation status: **REVISION 7 F-1 REMEDIATION IMPLEMENTED — READY FOR FINAL RE-REVIEW**
 
 ## 1. Phase 3 objectives
 
@@ -27,7 +27,7 @@ authorized change:
 5. `actors` and `actor_tokens` schema persistence without bearer plaintext,
    without activating production authentication;
 6. thin table-oriented repositories and transaction primitives;
-7. the exact T1–T7 database authority protections;
+7. the exact T1–T8 database authority protections;
 8. canonical startup database/schema integrity checks;
 9. raw-SQL adversarial tests that bypass TypeScript repositories;
 10. a documented Phase 4 hand-off for principal bootstrap and the transition
@@ -44,7 +44,7 @@ fixtures required to prove that those later operations can be atomic.
 
 | Input | Authority/use |
 |---|---|
-| `docs/ARCHITECTURE.md` Revision 6 | Design of record. Exact table names, state/status meanings, T1–T7 trigger semantics, canonical schema definitions, paths, phase boundaries, and the doctor/init/serve ownership split come from this document. Revision 5 remains historical context. |
+| `docs/ARCHITECTURE.md` Revision 7 | Design of record. Exact table names, state/status meanings, T1–T8 trigger semantics, canonical schema definitions, paths, phase boundaries, and the doctor/init/serve ownership split come from this document. Revisions 5 and 6 remain historical context. |
 | `docs/PHASE2_PROTOCOL.md` | Historical Phase 2 protocol/API observation; confirms the installed SDK and observed Codex legacy era. It does not redefine Phase 3 schema authority. |
 | `README.md` | Current Phase 3 operational behavior, Phase 2 transport contract, and state-root/security user contract. |
 | `C:\AgentProjects\aom-benchmark\AOM_EXTERNAL_BENCHMARK.md` | Advisory external evidence. It may strengthen an implementation choice, but cannot silently change the architecture. |
@@ -64,6 +64,19 @@ artifacts; the original failure is preserved. The migration copy step clears
 its exact destination, the transaction callback is synchronous-only, and the
 implemented repository inventory is the single `src/store/repositories.ts`
 module.
+
+### 2.1.2 Revision 7 F-1 remediation authority
+
+The independent F-1 reproduction is accepted. On the real migrated schema,
+with `recursive_triggers=OFF`, SQLite `INSERT OR REPLACE` and bare `REPLACE`
+can remove a conflicting row without firing a `BEFORE DELETE` trigger. This
+made Revision 6's DELETE-only durability claim incomplete for `jobs`,
+`decisions`, and `audit_log`. Revision 7 therefore adds migration
+`004_row_replacement_integrity.sql` with three INSERT-side identity-existence
+guards. It also enables and verifies `recursive_triggers=ON` on AOM-owned
+connections as defense in depth, while the schema guards must independently
+reject replacement from arbitrary external connections with that setting OFF.
+No historical migration is rewritten and no Phase 4 behavior is activated.
 
 ### 2.2 Architecture-versus-benchmark reconciliation
 
@@ -105,7 +118,7 @@ section is preserved:
 | Architecture section | Preserved requirement | Plan coverage |
 |---|---|---|
 | Revision Delta / Context / §§1–3 | Codex-only authority, local-first V1, TypeScript/Node, one global state root, official MCP SDK, no browser dependency in core | §§2–4, §16 |
-| §4 Codex Authority Model | Five layers, semantic grants, T1–T7, worker-verdict separation, and the principal/system hand-off | §§5, 7, 9, 10, 13; invariant 16 is Phase 3 and exactly-one-enabled activation is Phase 4 |
+| §4 Codex Authority Model | Five layers, semantic grants, T1–T8, worker-verdict separation, and the principal/system hand-off | §§5, 7, 9, 10, 13; invariant 16 is Phase 3 and exactly-one-enabled activation is Phase 4 |
 | §5 Worker Trust Model | Worker evidence is untrusted data; capability grants and leases are narrow/expiring | §§3, 10, 16 |
 | §6 Job State Machine | Exact workflow/authoritative states and transition ownership; no Phase 3 active tools | §§5, 16 |
 | §7 MCP Transport Decision | Loopback HTTP, authenticated stdio, dual-era official SDK, MCP control plane versus NDJSON execution plane | §§3, 4, 14, 16 |
@@ -136,7 +149,7 @@ section is preserved:
   auth hand-off. Phase 3 does not bootstrap production actors/tokens or activate
   DB-backed authentication.
 - Thin repositories and transaction primitives.
-- T1–T7 and raw-SQL bypass tests.
+- T1–T8 and raw-SQL bypass tests, including SQLite REPLACE coverage.
 - DB-level checks that do not change the approved state/authority model.
 - Documentation of bootstrap, failure, and recovery behavior.
 
@@ -164,10 +177,10 @@ features. The tools and behaviors that act on them remain later-phase work.
 
 The expected post-Phase-3/pre-Phase-4 repository state is explicit:
 
-- the trusted DB schema exists at the approved path;
+- the trusted schema-v4 DB exists at the approved path;
 - all 13 tables exist;
 - the exact reference rows are seeded and frozen;
-- T1–T7, structural constraints, migration, store, repository, and integrity
+- T1–T8, structural constraints, migration, store, repository, and integrity
   mechanics exist;
 - Phase 3 raw-SQL DB-authority tests pass, including invariant 16 (at most one
   principal);
@@ -182,7 +195,7 @@ The expected post-Phase-3/pre-Phase-4 repository state is explicit:
   gate is active yet.
 
 Throwaway DB fixtures may insert principal/system/token rows directly when
-needed to exercise T1–T7. Fixture rows are test data, not production bootstrap
+needed to exercise T1–T8. Fixture rows are test data, not production bootstrap
 behavior.
 
 ## 4. Database path and secure opening policy
@@ -238,7 +251,7 @@ absent before the explicit create is a fresh DB.
 Phase 3 init initializes the **database schema only**. It does not create the
 production `codex` principal, production `system` actor, first bearer token, or
 DB-backed authentication. Those are the explicit Phase 4 hand-off in §10. A
-throwaway test fixture may insert such rows to exercise T1–T7.
+  throwaway test fixture may insert such rows to exercise T1–T8.
 
 #### Serve mode
 
@@ -473,9 +486,10 @@ transactional state guards, or Phase 1 filesystem security.
 ### 6.2 Supporting-guard classification
 
 The exact T1–T6 semantics below remain mandatory and unchanged. Revision 6 adds
-T7 as a required job-row lifecycle guard. The five additional guards requested
-by principal review are resolved as follows; the lease dimension guard is
-unconditional, and none is a replacement for T1–T7.
+T7 as a required job-row lifecycle guard, and Revision 7 adds T8 for SQLite
+row-replacement integrity. The five additional guards requested by principal
+review are resolved as follows; the lease dimension guard is unconditional, and
+none is a replacement for T1–T8.
 
 | Guard | Classification | Phase 3 action | Later owner/reason |
 |---|---|---|---|
@@ -483,14 +497,16 @@ unconditional, and none is a replacement for T1–T7.
 | `actor_tokens` actor/digest binding immutability | **DEFERRED TO PHASE 4** | Create the exact `actor_tokens` columns, actor FK, unique digest, and digest/boolean structural checks. Do not activate persistent auth or token lifecycle administration. | Phase 4 owns production token issuance/revocation and decides any binding-immutability trigger without adding a token-scopes column. |
 | Lease `(run_id, job_id, cycle)` consistency | **PHASE 3 REQUIRED** as a pure structural constraint | Add a composite parent uniqueness key on `worker_runs(run_id, job_id, cycle)` and a matching composite FK from `leases(run_id, job_id, cycle)`, while retaining the approved `run_id` UNIQUE/FK. This uses the existing tables and preserves every valid future lease. | Phase 6 owns active lease issue/consume/report behavior. The structural relation can be proven now without consuming a lease or dispatching a worker. |
 | Job-row lifecycle integrity | **PHASE 3 REQUIRED** as T7 | Add `trg_jobs_unstamped_on_insert` and `trg_jobs_no_delete` in migration 003. New jobs must have NULL `authoritative_status`/`deciding_decision_id` and a non-authoritative state; every runtime DELETE is rejected, including with foreign keys disabled. | Phase 5/4 may advance an existing job through the reviewed authority transaction; no later phase may delete the durable job ledger root. |
+| Durable-row replacement integrity | **PHASE 3 REQUIRED** as T8 | Add INSERT-side identity-existence guards for `jobs.job_id`, `decisions.decision_id`, and `audit_log.seq` in migration 004. Genuine new rows remain insertable; `INSERT OR REPLACE` and bare `REPLACE` cannot replace existing durable identities. | This is a schema boundary, not an application-repository rule. AOM-owned `recursive_triggers=ON` is defense in depth; external connections with it OFF must still be rejected. |
 | Lease single-consumption immutability | **DEFERRED TO PHASE 6** | Create `consumed_at` with its approved nullable shape; do not add active consumption/replay behavior or a lifecycle trigger in Phase 3. | Phase 6 owns `UPDATE … WHERE consumed_at IS NULL`, duplicate reports, expiry, and cleanup. |
 | Non-principal `job:decide` capability guard | **DEFERRED TO PHASE 4** | Validate only the approved actor role/boolean/schema domains and prove T1/T2 with fixture actors. Do not activate capability semantics or a production capability administrator. | Phase 4 owns the static catalogue, active role/capability checks, and `codex_decide` visibility/authorization. T1/T2 remain independent DB barriers. |
 
 No guard is rejected and no architecture change is required. The Phase 3
 supporting guards implemented in the schema are the safe composite FK/UNIQUE
-relationship for lease dimensions and T7 job-row lifecycle integrity; all
-active identity, capability, token-lifecycle, and lease-consumption behavior
-remains with its assigned later phase.
+relationship for lease dimensions, T7 job-row lifecycle integrity, and T8
+row-replacement integrity; all active actor identity, capability,
+token-lifecycle, and lease-consumption behavior remains with its assigned later
+phase.
 
 ### 6.3 Atomic transaction API
 
@@ -520,13 +536,14 @@ before `COMMIT`, so async work cannot escape the transaction boundary. Phase 3
 defines and tests these mechanics without registering the later tools or
 implementing their state-machine behavior.
 
-## 7. T1–T7 trigger matrix
+## 7. T1–T8 trigger matrix
 
 T1–T6 below preserve the exact trigger definitions and error strings from
 `docs/ARCHITECTURE.md` §4. T5 and T6 are logical groups containing several
-physical triggers. T7 is two physical job-row triggers added by migration 003.
-The reference freeze triggers must be created **after** all required reference
-seed rows are inserted, in the same migration transaction.
+physical triggers. T7 is two physical job-row triggers added by migration 003;
+T8 is three physical row-replacement triggers added by migration 004. The
+reference freeze triggers must be created **after** all required reference seed
+rows are inserted, in the same migration transaction.
 
 | Group | Exact trigger/event | Invariant protected | Expected SQLite behavior | Legitimate operation | Raw-SQL bypass that must fail | Test IDs |
 |---|---|---|---|---|---|---|
@@ -537,6 +554,7 @@ seed rows are inserted, in the same migration transaction.
 | T5 | `trg_decisions_no_update`, `trg_decisions_no_delete`, `trg_audit_no_update`, `trg_audit_no_delete`, `trg_grants_frozen_i`, `trg_grants_frozen_u`, and `trg_grants_frozen_d`. | Decisions and audit rows are append-only; the semantic grant map cannot be widened or rewritten. | `RAISE(ABORT, 'decisions are append-only')`, `RAISE(ABORT, 'audit_log is append-only')`, or `RAISE(ABORT, 'decision_grants is immutable')` as specified. | Insert a decision/audit row through the later repository; seed grant rows only before freeze triggers exist in the migration. | Update/delete a decision; update/delete an audit row; insert/update/delete a grant row; insert a new grant after seed. | SQL-12, SQL-13, SQL-25, SQL-26, SQL-30 |
 | T6 | `trg_auth_statuses_frozen_i`, `trg_auth_statuses_frozen_u`, and `trg_auth_statuses_frozen_d`. | Rank and terminality reference data cannot be edited to disarm T3. | `RAISE(ABORT, 'authoritative_statuses is immutable')`. | Seed the exact five rows before T6 is installed; changes require a reviewed, numbered migration. | Set `JOB_COMPLETED.terminal=0`; reorder/lower ranks; insert `UNAPPROVED`; delete `REJECTED`. | SQL-09, SQL-10, SQL-11 |
 | T7 | `trg_jobs_unstamped_on_insert BEFORE INSERT ON jobs` and `trg_jobs_no_delete BEFORE DELETE ON jobs`. | Jobs are durable ledger roots and cannot enter the ledger already authoritative. | `RAISE(ABORT, 'jobs must begin without authoritative state')` or `RAISE(ABORT, 'jobs are durable and cannot be deleted')`. | Insert a non-authoritative job with both authority columns NULL; later reviewed authority code may stamp it. | Insert with non-NULL status, non-NULL deciding decision, or an authoritative initial state; delete an unstamped or stamped job, including from a foreign-key-off second connection. | SQL-39 through SQL-45 |
+| T8 | `trg_jobs_no_replace`, `trg_decisions_no_replace`, and `trg_audit_no_replace`, all `BEFORE INSERT` identity-existence guards. | SQLite `REPLACE` cannot erase and recreate a durable `jobs`, `decisions`, or `audit_log` primary-key row. | `RAISE(ABORT, 'jobs are durable and cannot be replaced')`, `RAISE(ABORT, 'decisions are append-only and cannot be replaced')`, or `RAISE(ABORT, 'audit_log is append-only and cannot be replaced')`. | Insert a genuinely new job/decision/audit row; omit `audit_log.seq` for normal AUTOINCREMENT. | Duplicate ordinary INSERT, `INSERT OR REPLACE`, or bare `REPLACE` for an existing identity, with `recursive_triggers=OFF`. | SQL-46 through SQL-53 |
 
 ### 7.1 T2/T3/T4 ordering and transaction rule
 
@@ -551,9 +569,9 @@ independent DB barrier against direct SQL and repository mistakes.
 
 ## 8. Numbered migration sequence
 
-**Three migrations are approved and implemented.** The original `001` and
-`002` semantics are unchanged; `003` is the narrow Revision 6 addition. Each
-file is executed by the runner in its own transaction.
+**Four migrations are approved and implemented.** The original `001`, `002`,
+and `003` semantics are unchanged; `004` is the narrow Revision 7 F-1
+addition. Each file is executed by the runner in its own transaction.
 
 ### Migration 001 — `001_base_schema.sql`
 
@@ -611,6 +629,23 @@ table or reference-seed semantics. Startup then verifies the canonical SQL
 definitions for every approved table, security-sensitive index, and physical
 T1–T7 trigger.
 
+### Migration 004 — `004_row_replacement_integrity.sql`
+
+Adds the three physical T8 INSERT-side identity guards:
+
+1. `trg_jobs_no_replace` rejects an existing `job_id` with
+   `jobs are durable and cannot be replaced`;
+2. `trg_decisions_no_replace` rejects an existing `decision_id` with
+   `decisions are append-only and cannot be replaced`;
+3. `trg_audit_no_replace` rejects an existing explicit `seq` with
+   `audit_log is append-only and cannot be replaced`.
+
+The guard permits genuinely new rows. An omitted `audit_log.seq` remains a
+normal AUTOINCREMENT insert; the implementation tests the current SQLite
+`NEW.seq` behavior directly. T8 is independent of both `foreign_keys` and
+`recursive_triggers`, so `INSERT OR REPLACE` and bare `REPLACE` cannot reset a
+durable identity from an external connection.
+
 ### 8.1 Migration runner contract and edge cases
 
 - Discover migration files by numeric prefix and sort numerically, not by
@@ -625,12 +660,13 @@ T1–T7 trigger.
 - An **existing DB** with a missing, malformed, or corrupt `schema_migrations`
   table fails closed. An arbitrary existing SQLite file is never reclassified
   as a fresh AOM DB merely because a ledger query returns no rows.
-- The known ordered migration set is `[1, 2, 3]`. Read the complete applied
+- The known ordered migration set is `[1, 2, 3, 4]`. Read the complete applied
   set, not a maximum-version shortcut, and require it to be an exact contiguous
   prefix of that known set. `{}` is valid only for the explicitly-created
-  fresh init file before its first migration; `{1}` and `{1, 2}` are valid
-  existing prefixes with pending migrations; and `{1, 2, 3}` is current. An
-  existing ledger containing `{}`, `{2}`, `{1, 3}`, `{1, 2, 4}`,
+  fresh init file before its first migration; `{1}`, `{1, 2}`, and `{1, 2, 3}`
+  are valid existing prefixes with pending migrations; and `{1, 2, 3, 4}` is
+  current. An existing ledger containing `{}`, `{2}`, `{1, 3}`, `{1, 2, 4}`,
+  `{1, 2, 3, 5}`,
   duplicate rows, malformed rows, gaps, unknown versions,
   or a version newer than the binary knows fails closed.
 - Inside the runner-owned `BEGIN IMMEDIATE` transaction, reread and
@@ -643,6 +679,12 @@ T1–T7 trigger.
   installs T5/T6 freeze triggers after the seed inserts and before commit.
 - Migration 003 installs the two T7 job-row lifecycle triggers before recording
   version 3; it never changes the approved `001`/`002` semantics.
+- Migration 004 installs the three T8 identity-existence triggers before
+  recording version 4; it never changes the approved `001`/`002`/`003`
+  semantics.
+- AOM-owned writable SQLite connections set and verify
+  `recursive_triggers=ON` as defense in depth. External connections with
+  `recursive_triggers=OFF` must still be rejected by T8.
 - A fresh-init migration failure closes the SQLite handle before removing only
   the DB/WAL/SHM files created by that fresh attempt. The original initialization
   error remains the primary failure, and the known failed-init artifact can be
@@ -700,7 +742,7 @@ does not silently create authority rows merely because the schema is empty.
 
 The raw-SQL and trigger tests may insert fixture rows for `codex`, `system`,
 workers, and `actor_tokens` inside a throwaway DB. Those rows exist only to
-exercise T1–T7 and invariant 16. Fixture setup is not production bootstrap,
+exercise T1–T8 and invariant 16. Fixture setup is not production bootstrap,
 does not alter the Phase 3 transitional runtime, and must not be reused by the
 CLI.
 
@@ -730,7 +772,7 @@ Phase 4 owns:
 The planned hand-off is:
 
 ```text
-Phase 3: trusted schema v3 + T1–T7 + structural stores + Phase 2 runtime
+Phase 3: trusted schema v4 + T1–T8 + structural stores + Phase 2 runtime
     -> principal review / Phase 4 authorization
 Phase 4: production codex/system bootstrap + token issue + persistent auth
     -> later Phase 5/6 workflow and lease use
@@ -754,13 +796,15 @@ The store layer should be table-oriented and explicit:
   at-most-one-principal check, and quick-check/foreign-key results. It must not
   enforce Phase 4’s exactly-one-enabled-principal serve gate;
 - `schemaDefinitions.ts`: canonical normalized-SQL fingerprints for every
-  approved table, security-sensitive index, and physical T1–T7 trigger;
+  approved table, security-sensitive index, and physical T1–T8 trigger. It
+  intentionally collapses whitespace only: SQL case and comments remain part
+  of the reviewed fingerprint, so approved DDL changes require regeneration;
 - `repositories.ts`: the single implemented structural repository module. It
   exposes actor/token/reference reads and inserts for fixtures and the later
   hand-off, plus a synchronous `BEGIN IMMEDIATE` transaction primitive. It
   contains no production bootstrap, persistent-auth activation, active token
   lifecycle, job authority setter, or later MCP tool;
-- `migrations/*.sql`: the exact numbered source set `001`, `002`, and `003`.
+- `migrations/*.sql`: the exact numbered source set `001`, `002`, `003`, and `004`.
 
 The implementation must keep these responsibilities explicit in the actual
 single-file repository inventory. No ORM, dependency-injection container,
@@ -773,7 +817,7 @@ The store layer persists and constrains data. It does not decide whether a job
 may transition. That belongs to the later domain layer:
 
 ```text
-Phase 3 store:      SQL rows, FK/CHECK, transactions, T1–T7, canonical integrity, invariant 16
+Phase 3 store:      SQL rows, FK/CHECK, transactions, T1–T8, canonical integrity, invariant 16
 Phase 4 domain:     actors/capabilities, TRANSITIONS, applyTransition, codex_decide, audit semantics
 Phase 5 lifecycle:   job tools, cycles, CAS/idempotency orchestration
 Phase 6 runtime:    workers, leases in use, reports, NDJSON
@@ -801,13 +845,13 @@ require Phase 4 data that Phase 3 is not allowed to bootstrap:
 3. `serve` finds an existing DB; an absent DB is a fail-closed startup error.
    Only explicit init mode may create the DB.
 4. Init/serve SQLite opens use the approved WAL, foreign-key, busy-timeout, and
-   synchronous policy after file security is proven.
+  synchronous and `recursive_triggers=ON` policy after file security is proven.
 5. Init/serve verify that the DB is not newer than the binary and that the
-   exact expected migration set `[1, 2, 3]` has no gaps, unknown versions, or
+   exact expected migration set `[1, 2, 3, 4]` has no gaps, unknown versions, or
    duplicates.
 6. Init/serve run `PRAGMA quick_check` and `foreign_key_check`; both are clean.
 7. Init/serve verify all 13 tables, approved indexes, structural constraints,
-   canonical normalized SQL definitions, all physical T1–T7 triggers, and
+   canonical normalized SQL definitions, all physical T1–T8 triggers, and
    exact frozen reference rows.
 8. Init/serve verify invariant 16: the unique partial index and raw-SQL test prove **at most
    one** principal actor. Phase 3 does not require an enabled principal.
@@ -860,9 +904,9 @@ owner phase, enforcement layer, and whether it is executable as part of Phase
 3. The suite will assert the exact error class/message where specified and that
 protected rows remain unchanged.
 
-There are **45 total traceable attack cases**:
+There are **53 total traceable attack cases**:
 
-- `PHASE_3_CASE_COUNT = 40`: executable before Phase 4 and required for Phase 3
+- `PHASE_3_CASE_COUNT = 48`: executable before Phase 4 and required for Phase 3
   completion;
 - `FUTURE_HANDOFF_CASE_COUNT = 5`: documented now, but not Phase 3 gates.
 
@@ -915,12 +959,22 @@ not falsely claim a direct SQLite rejection.
 | SQL-43 | Delete an unstamped job row. | Phase 3 | T7 | YES | ABORT via `trg_jobs_no_delete`; the complete job row is unchanged. |
 | SQL-44 | Delete a stamped terminal job row. | Phase 3 | T7 | YES | ABORT via `trg_jobs_no_delete`; the complete job row is unchanged. |
 | SQL-45 | Disable foreign keys on a second connection, delete a stamped job, and reinsert it as authoritative. | Phase 3 | T7 | YES | The DELETE aborts before the laundering INSERT; job/status/decision rows remain unchanged. |
+| SQL-46 | Duplicate ordinary INSERT into an existing `jobs.job_id`. | Phase 3 | T8 | YES | ABORT via `trg_jobs_no_replace`; the original job remains unchanged. |
+| SQL-47 | `INSERT OR REPLACE` an existing job with an unstamped row. | Phase 3 | T8 | YES | ABORT with `recursive_triggers=OFF`; terminal/state/status/decision data remains unchanged. |
+| SQL-48 | Bare `REPLACE` an existing job with an unstamped row. | Phase 3 | T8 | YES | ABORT with `recursive_triggers=OFF`; the durable job identity cannot be reset. |
+| SQL-49 | `INSERT OR REPLACE` an existing decision with different contents. | Phase 3 | T8 | YES | ABORT; T2 continues to evaluate the original decision row. |
+| SQL-50 | Bare `REPLACE` an existing decision with different contents. | Phase 3 | T8 | YES | ABORT; the append-only decision ledger remains unchanged. |
+| SQL-51 | `INSERT OR REPLACE` an existing `audit_log.seq` with forged contents. | Phase 3 | T8 | YES | ABORT; the original audit row/hash remains unchanged. |
+| SQL-52 | Bare `REPLACE` an existing `audit_log.seq` with forged contents. | Phase 3 | T8 | YES | ABORT; the original audit row/hash remains unchanged. |
+| SQL-53 | Use an UPSERT conflict path against an existing job. | Phase 3 | T8 | YES | ABORT as a durable-row replacement; ordinary new inserts remain valid. |
 
-These cases include architecture raw-SQL invariants 7–15 and 15a–15g, plus
-invariant 16 and the required FK/UNIQUE/CHECK/migration protections. SQL-09
+These cases include architecture raw-SQL invariants 7–15 and 15a–15j, plus
+the F-1 replacement cases, invariant 16, and the required FK/UNIQUE/CHECK/
+migration protections. SQL-09
 through SQL-11 also rerun live T3 attempts after each rejected reference-data
 mutation to prove the protected behavior, not merely the ABORT. SQL-39 through
-SQL-45 prove the T7 job-row lifecycle independently of application repositories.
+SQL-45 prove the T7 job-row lifecycle independently of application repositories;
+SQL-46 through SQL-53 prove T8 against all replacement forms.
 
 ### 13.2 FUTURE HAND-OFF ADVERSARIAL MATRIX
 
@@ -936,7 +990,7 @@ SQL-45 prove the T7 job-row lifecycle independently of application repositories.
 
 - Phase 3 executable tests may use fixture principal/system/token rows directly
   in a throwaway DB. They must not add those rows to production init or serve.
-- Phase 3 owns structural DB rejection, T1–T7, exact seed freezing, canonical
+- Phase 3 owns structural DB rejection, T1–T8, exact seed freezing, canonical
   schema-definition verification, and invariant 16. It does not own production
   authentication or exactly-one-enabled-principal startup enforcement.
 - Phase 4/5/6 hand-off cases remain required design evidence and must not be
@@ -1020,12 +1074,12 @@ Every gate below is executable within Phase 3 and does not require active Phase
 3. Existing DB path, DB file, and WAL/SHM sidecars are security-checked before
    any writable SQLite open; doctor performs the filesystem/security checks and
    never opens SQLite or runs a write-affecting PRAGMA.
-4. All three migrations apply deterministically once, roll back atomically, validate
+4. All four migrations apply deterministically once, roll back atomically, validate
    the applied set as a contiguous prefix of the known ordered set, reread it
    after `BEGIN IMMEDIATE` before deciding pending work, and refuse
    gaps/unknown/newer/corrupt schema states.
 5. All 13 tables, approved indexes, exact seeds, structural checks, canonical
-   definitions, and T1–T7 triggers are present and verified after migration.
+   definitions, and T1–T8 triggers are present and verified after migration.
 6. T5/T6 seed ordering is tested: seed inserts succeed before freeze triggers;
    equivalent post-seed mutations abort.
 7. Invariant 16 is proven: a second principal is rejected by the partial unique
@@ -1033,9 +1087,9 @@ Every gate below is executable within Phase 3 and does not require active Phase
 8. Actor/token structural tests prove FK, digest shape, UNIQUE digest, and no
    token-scopes column. Production actors, tokens, persistent lookup, and
    token lifecycle are not activated; fixtures may seed rows in throwaway DBs.
-9. The 40-case Phase 3 raw-SQL matrix passes, including architecture invariants
-   7–15 and 15a–15g, invariant 16, and post-attack assertions. The five future
-   hand-off cases are not Phase 3 gates.
+9. The 48-case Phase 3 raw-SQL matrix passes, including architecture invariants
+   7–15 and 15a–15j, F-1 replacement cases, invariant 16, and post-attack
+   assertions. The five future hand-off cases are not Phase 3 gates.
 10. Decisions and audit rows are structurally append-only under T5; worker
     verdicts have no database authority path; transaction primitives use
     `BEGIN IMMEDIATE` without exposing later tools.
@@ -1052,12 +1106,15 @@ Every gate below is executable within Phase 3 and does not require active Phase
     DB is created.
 15. `git diff --check` passes for this implementation. Typecheck, lint, tests,
      and build are green for the implementation change.
-16. Canonical same-name tampering of every physical T1–T7 trigger, the
-    principal index, `actor_tokens`, and the lease composite relation is
-    rejected before serve binds HTTP or emits stdio protocol output.
+16. Canonical same-name tampering of every physical T1–T8 trigger, the
+     principal index, `actor_tokens`, and the lease composite relation is
+     rejected before serve binds HTTP or emits stdio protocol output.
 17. Actual Windows temporary fresh-init failures for migration 001 and 002
     preserve the original error, leave zero DB/WAL/SHM artifacts, and allow a
-    normal schema-v3 retry.
+     normal schema-v4 retry.
+18. `recursive_triggers=ON` is set and verified on AOM-owned writable
+    connections, while replacement remains rejected with it explicitly OFF on
+    an external connection.
 
 ## 16. Explicit Phase 4+ exclusions and hand-offs
 
@@ -1073,8 +1130,8 @@ Every gate below is executable within Phase 3 and does not require active Phase
 
 ### 16.1 PHASE 4 HAND-OFF contract (design only)
 
-The Phase 4 implementation must receive a migrated Phase 3 schema-v3 DB and
-must not change the Phase 3 table names or remove T1–T7. Its activation
+The Phase 4 implementation must receive a migrated Phase 3 schema-v4 DB and
+must not change the Phase 3 table names or remove T1–T8. Its activation
 checklist is:
 
 1. bootstrap the sole production `codex` principal and internal `system` actor
@@ -1108,7 +1165,7 @@ activation:
    init/serve/doctor contracts, pre-open file/sidecar security, post-create
    DB-file hardening, PRAGMAs, close behavior, and safe error mapping. Doctor
    is filesystem/security-only and never opens the authoritative DB with SQLite.
-3. **WP-2 — migration runner:** implement exact-set discovery for `[1, 2, 3]`, fresh-versus-
+3. **WP-2 — migration runner:** implement exact-set discovery for `[1, 2, 3, 4]`, fresh-versus-
    existing classification, contiguous-prefix validation, post-`BEGIN IMMEDIATE`
    ledger reread, future/gap refusal, runner-owned transactions, rollback,
    quick-check, foreign-key check, and required-object verification.
@@ -1118,27 +1175,27 @@ activation:
 5. **WP-4 — migration 002 seeds + T1–T6:** seed the exact grant/status rows,
    verify them inside the transaction, then install T1–T6 and verify the frozen
    state.
-6. **WP-5 — migration 003 + canonical verifier:** install T7 without changing
-   `001`/`002`, then make init/serve verify the exact migration set,
-   canonical tables/indexes/triggers/seeds, PRAGMA policy, sidecars, FK health,
-   and invariant 16 at-most-one principal. Make doctor verify only
+6. **WP-5 — migration 003/004 + canonical verifier:** install T7 and T8
+   without changing historical migrations, then make init/serve verify the
+   exact migration set, canonical tables/indexes/triggers/seeds, PRAGMA policy,
+   sidecars, FK health, and invariant 16 at-most-one principal. Make doctor verify only
    filesystem/security state and report SQL as not checked by design. Do not
    enforce Phase 4’s exactly-one-enabled-principal serve rule in Phase 3.
 7. **WP-6 — thin repositories:** implement structural actor/token/reference
    access and typed table/transaction primitives for fixtures and later
    hand-offs; no production bootstrap, auth activation, active token lifecycle,
    or later MCP tool.
-8. **WP-7 — Phase 3 executable adversarial tests:** add the 40 executable SQL
-   cases, including SQL-39–SQL-45 T7 lifecycle tests, post-attack assertions,
-   seed-order tests, invariant-16 tests, canonical tamper tests, and migration
-   crash/rollback tests. Keep the five future cases as documented hand-offs
-   only.
+8. **WP-7 — Phase 3 executable adversarial tests:** add the 48 executable SQL
+   cases, including SQL-39–SQL-45 T7 lifecycle tests, SQL-46–SQL-53 F-1
+   replacement tests, post-attack assertions, seed-order tests, invariant-16
+   tests, canonical tamper tests, and migration crash/rollback tests. Keep the
+   five future cases as documented hand-offs only.
 9. **WP-8 — doctor/init DB-schema integration:** allow init to create/apply the
    schema only; keep serve existing-only and deep-integrity-gated; implement
    doctor as filesystem/security-only with no authoritative SQLite opener;
    preserve the Phase 2 resolver and `ping` surface; do not bootstrap
    principal/system/token.
-10. **WP-9 — documentation/acceptance:** record the Revision 6 transitional
+10. **WP-9 — documentation/acceptance:** record the Revision 7 transitional
      runtime and Phase 4 hand-off, run only the authorized Phase 3 acceptance
      gates, and leave later behavior absent.
 
@@ -1149,7 +1206,8 @@ anything automatically. Those actions require separate authorization.
 
 The implementation evidence for this branch records:
 
-- [x] The plan is marked `IMPLEMENTED — PHASE 3 STORE & DATABASE AUTHORITY`;
+- [x] The plan is marked `IMPLEMENTED — PHASE 3 STORE & DATABASE AUTHORITY —
+      REVISION 7 F-1 REMEDIATION`;
       Phase 4 remains unimplemented.
 - [x] The exact database path and Phase 1 security/open ordering are enforced.
 - [x] Init may create the schema DB only; serve is existing-only and owns deep
@@ -1168,19 +1226,27 @@ The implementation evidence for this branch records:
 - [x] T5/T6 freeze triggers are created after seed inserts in migration 002.
 - [x] T1–T6 names, timing, predicates, and abort strings match the
       architecture unchanged; T7 adds the two approved physical job-row
-      triggers with fixed abort strings.
+      triggers and T8 adds the three approved replacement guards, all with
+      fixed abort strings.
 - [x] The migration ledger accepts only the exact contiguous prefix of the
-      known ordered set `[1, 2, 3]`, and is reread after `BEGIN IMMEDIATE`
-      before pending migrations are selected; migration 003 is present.
+      known ordered set `[1, 2, 3, 4]`, and is reread after `BEGIN IMMEDIATE`
+      before pending migrations are selected; migration 004 is present.
 - [x] Init/serve compare canonical normalized SQL definitions for every
-      approved table, security-sensitive index, and physical T1–T7 trigger;
+      approved table, security-sensitive index, and physical T1–T8 trigger;
       same-name weakened objects fail closed before serving.
 - [x] T7 raw-SQL tests cover authoritative/stamped job inserts, unstamped and
       stamped deletes, and foreign-key-off laundering, preserving job/status/
       decision rows.
+- [x] F-1 replacement tests prove ordinary new inserts still work while
+      duplicate INSERT, `INSERT OR REPLACE`, and bare `REPLACE` fail for jobs,
+      decisions, and audit rows with `recursive_triggers=OFF`; audit
+      AUTOINCREMENT inserts remain valid.
 - [x] Fresh migration 001/002 failures close SQLite before removing only their
       DB/WAL/SHM artifacts, preserve the original error, and retry to schema
-      version 3; stale `dist/store/migrations` files do not survive copying.
+      version 4; stale `dist/store/migrations` files do not survive copying.
+- [x] AOM-owned writable connections set and verify
+      `recursive_triggers=ON` as defense in depth; external OFF connections
+      remain covered by schema-resident T8 guards.
 - [x] `withImmediateTransaction` rejects asynchronous/thenable callbacks and
       rolls back before COMMIT.
 - [x] Supporting guards are classified: lease dimension consistency is a
@@ -1194,7 +1260,7 @@ The implementation evidence for this branch records:
 - [x] Production bootstrap, token issuance, persistent auth, and
       `ORCHESTRATOR_ACTOR_TOKEN` transition are confined to the Phase 4 hand-off.
 - [x] SQLite-only durability and `BEGIN IMMEDIATE` are preserved.
-- [x] The raw-SQL matrix has 40 Phase 3 executable cases and 5 future
+- [x] The raw-SQL matrix has 48 Phase 3 executable cases and 5 future
       hand-off cases, without falsely assigning path/time/CAS/auth checks to
       Phase 3 SQLite.
 - [x] No Phase 4+ MCP tools, worker runtime, retries, reaper, remote registry,
@@ -1206,9 +1272,10 @@ The implementation evidence for this branch records:
 ## Plan status
 
 This document records the implemented Phase 3 behavior under the approved
-Revision 6 boundary, which retains the Revision 5 doctor decision. The §4.5 feasibility evidence records why direct
+Revision 7 boundary, which retains the Revision 5 doctor decision and Revision
+6 canonical-schema/job-row protections. The §4.5 feasibility evidence records why direct
 SQLite inspection, immutable mode, and snapshot/copy workarounds are forbidden
 in the Phase 3 doctor. Phase 4 authority/auth and later runtime behavior remain
 unimplemented.
 
-Current status: **PHASE 3 REVIEW REMEDIATION READY FOR RE-REVIEW**.
+Current status: **PHASE 3 F-1 REMEDIATION READY FOR FINAL RE-REVIEW**.

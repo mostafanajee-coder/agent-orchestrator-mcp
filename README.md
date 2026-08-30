@@ -10,11 +10,11 @@ triggers, not by prompt instructions.
 ## Status
 
 **Phase 3 — Store & database authority.** The CLI prepares and protects the global state root,
-initializes the approved schema-v3 local SQLite store, and serves the existing authenticated MCP spine with
+initializes the approved schema-v4 local SQLite store, and serves the existing authenticated MCP spine with
 only one diagnostic `ping` tool over loopback Streamable HTTP or stdio. Doctor is
 filesystem/security-only and explicitly reports
 `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; `init` and serve startup own deep
-SQLite integrity, including canonical table/index/trigger definitions and T1–T7. Persistent `actor_tokens` authentication, jobs, decisions, workers,
+SQLite integrity, including canonical table/index/trigger definitions and T1–T8. Persistent `actor_tokens` authentication, jobs, decisions, workers,
 and authority tools remain later-phase work.
 
 The approved design and the full phase plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -44,10 +44,11 @@ node dist/index.js init
 ```
 
 Prepares the state root, creates the database only on the explicit init path, applies owner-only
-protection, verifies it, applies the exact numbered migration set `[1, 2, 3]`, and runs the deep
+protection, verifies it, applies the exact numbered migration set `[1, 2, 3, 4]`, and runs the deep
 structural/canonical integrity gate. It is idempotent — running it again preserves the existing
 lease key unchanged. Jobs are durable ledger roots: they begin without authority and are never
-deleted by runtime SQL.
+deleted or replaced by runtime SQL. The same replacement guard applies to durable decisions and
+audit rows; normal audit AUTOINCREMENT inserts remain valid.
 Phase 3 creates schema only; production principal/system/token bootstrap remains Phase 4.
 
 ```bash
@@ -83,6 +84,10 @@ an existing authoritative DB for the approved deep migration/schema/integrity ga
 start before HTTP bind or stdio protocol output when the state root, DB/sidecars, migrations,
 PRAGMA policy, schema, or integrity checks are invalid. It never runs `init`, creates a
 missing DB, repairs permissions, or reads lease-key contents automatically.
+
+Writable AOM connections enable and verify `recursive_triggers=ON` as defense in depth. The
+schema itself rejects `INSERT OR REPLACE` and `REPLACE` against existing job, decision, and audit
+identities even when an external connection explicitly disables that pragma.
 
 Exit codes: `0` success, `1` unexpected internal failure, `2` usage error, `3` security or
 invariant failure.
