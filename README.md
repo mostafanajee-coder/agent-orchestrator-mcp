@@ -9,11 +9,15 @@ triggers, not by prompt instructions.
 
 ## Status
 
-**Phase 1B — stable cross-process state root.** The CLI can prepare, protect, and inspect the global
-state root, including the lease HMAC key. Nothing else is implemented: there is no MCP server,
-transport, database, actor model, job state machine, or worker runtime yet.
+**Phase 2 — MCP spine.** The CLI prepares, protects, and inspects the global state root, and now
+serves a minimal authenticated MCP spine with one diagnostic `ping` tool over loopback Streamable
+HTTP or stdio. Dropbox discovery covers both documented Windows metadata locations, and cloud-sync
+containment covers every protected state path in both nesting directions. SQLite, persistent
+`actor_tokens`, jobs, decisions, workers, and audit authority remain later-phase work.
 
 The approved design and the full phase plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The empirical Codex/Inspector protocol observation is recorded in
+[docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 
 ## Requirements
 
@@ -51,6 +55,22 @@ hardens, or repairs anything, and it never reads the lease key. It exits non-zer
 insecure. Advisory warnings — such as a superseded state root still present on disk — are reported
 without failing the run.
 
+```bash
+ORCHESTRATOR_ACTOR_TOKEN="<operator-supplied-token>" node dist/index.js serve --stdio
+```
+
+Starts the official MCP stdio transport. Authentication is resolved once at startup; the Phase 2
+boundary keeps only a SHA-256 token digest in memory and does not create a competing token database.
+Operational errors go to stderr and stdout remains reserved for MCP protocol traffic.
+
+```bash
+ORCHESTRATOR_ACTOR_TOKEN="<operator-supplied-token>" node dist/index.js serve --http --port 4317
+```
+
+Starts Streamable HTTP on `127.0.0.1` only. Every MCP request requires a bearer token with the
+`mcp` scope; Host and Origin are restricted to localhost-class values. `--port` is optional and
+defaults to `4317`.
+
 Exit codes: `0` success, `1` unexpected internal failure, `2` usage error, `3` security or
 invariant failure.
 
@@ -71,6 +91,8 @@ On POSIX the root is `$XDG_STATE_HOME/agent-orchestrator-mcp`, falling back to
 environment variable, or config file can redirect the state root, so secrets cannot be steered to a
 less protected location. `init` refuses a state root inside a known cloud-synchronised directory,
 checking both the literal path and, once the root exists, its resolved real path.
+The check covers `root`, `secrets`, `data`, `artifacts`, `logs`, and `secrets\lease.key`; it rejects
+both protected paths inside a sync root and sync roots nested inside protected state.
 
 **The profile directory comes from OS identity, not from `%USERPROFILE%`.** The location normally
 corresponds to that variable, but it is not trusted to determine it: `os.userInfo().homedir` is
@@ -153,7 +175,9 @@ src/config/     state-root resolution, cloud-sync detection
 src/security/   ACL and permission providers, SDDL policy, safe process execution
 src/secrets/    lease key lifecycle
 src/commands/   init and doctor
+src/mcp/        shared MCP factory, ping, auth boundary, HTTP and stdio entry points
 test/unit/      unit tests, including a dependency-scope guard
+test/integration/ real loopback HTTP and stdio transport acceptance tests
 docs/           approved architecture
 .github/        CI workflow (Windows + Linux)
 ```

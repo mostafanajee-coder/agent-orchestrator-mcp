@@ -2,9 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Phase 0 is a scaffold. These tests fail the build if a later phase's
- * dependency is pulled in early, so scope creep is caught by CI rather than
- * by review.
+ * Phase 2 owns only the official MCP server/node adapters and schema runtime.
+ * These tests keep Phase 3+ dependencies out of the spine.
  */
 
 interface Manifest {
@@ -14,14 +13,16 @@ interface Manifest {
 
 const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as Manifest;
 
-/** Dependencies that belong to Phase 1 and later, per docs/ARCHITECTURE.md. */
-const FUTURE_PHASE_PACKAGES = [
-  '@modelcontextprotocol/server',
-  '@modelcontextprotocol/client',
-  '@modelcontextprotocol/node',
+const PHASE_2_PACKAGES = {
+  '@modelcontextprotocol/server': '2.0.0',
+  '@modelcontextprotocol/node': '2.0.0',
+  zod: '4.5.4',
+};
+
+/** Packages reserved for Phase 3+ or explicitly forbidden by the architecture. */
+const FORBIDDEN_PHASE_PACKAGES = [
   '@modelcontextprotocol/express',
   '@modelcontextprotocol/sdk',
-  'zod',
   'better-sqlite3',
   '@types/better-sqlite3',
   'chrome-remote-interface',
@@ -31,12 +32,12 @@ const FUTURE_PHASE_PACKAGES = [
   'express',
 ];
 
-describe('Phase 0 dependency scope', () => {
-  it('declares no runtime dependencies', () => {
-    expect(manifest.dependencies ?? {}).toEqual({});
+describe('Phase 2 dependency scope', () => {
+  it('declares the verified exact Phase 2 runtime dependencies', () => {
+    expect(manifest.dependencies ?? {}).toEqual(PHASE_2_PACKAGES);
   });
 
-  it.each(FUTURE_PHASE_PACKAGES)('does not depend on %s', (name) => {
+  it.each(FORBIDDEN_PHASE_PACKAGES)('does not depend on %s', (name) => {
     const all = { ...manifest.dependencies, ...manifest.devDependencies };
     expect(Object.keys(all)).not.toContain(name);
   });

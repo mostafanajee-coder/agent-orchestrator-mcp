@@ -3,7 +3,11 @@ import { runDoctor } from './commands/doctor.js';
 import type { InitResult } from './commands/init.js';
 import { runInit } from './commands/init.js';
 import { createCommandContext } from './commands/context.js';
-import { EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
+import { EXIT_INTERNAL, EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
+import { createEnvironmentTokenResolver } from './mcp/auth.js';
+import { MCP_HTTP_DEFAULT_PORT, MCP_HTTP_HOST, startHttpServer } from './mcp/http.js';
+import { startEnvironmentStdioServer } from './mcp/stdio.js';
+import { readPackageVersion } from './version.js';
 
 export const CLI_NAME = 'agent-orchestrator-mcp';
 export { EXIT_OK, EXIT_INTERNAL, EXIT_SECURITY, EXIT_USAGE } from './errors.js';
@@ -18,15 +22,50 @@ export interface CliResult {
   readonly exitCode: number;
 }
 
+export interface ServeOptions {
+  readonly mode: 'http' | 'stdio';
+  readonly port?: number;
+}
+
 /** Command implementations, injected so the CLI can be tested without touching disk. */
 export interface CliCommands {
   readonly init: () => InitResult;
   readonly doctor: () => DoctorReport;
+  readonly serve?: (options: ServeOptions, io: CliIo) => void;
 }
 
 export const defaultCommands: CliCommands = {
   init: () => runInit(createCommandContext()),
   doctor: () => runDoctor(createCommandContext()),
+  serve: (options, io) => {
+    const version = readPackageVersion();
+    if (options.mode === 'stdio') {
+      startEnvironmentStdioServer({
+        version,
+        onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
+      });
+      return;
+    }
+
+    const httpOptions = {
+      resolver: createEnvironmentTokenResolver(),
+      version,
+      logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
+      ...(options.port === undefined ? {} : { port: options.port }),
+    };
+    const server = startHttpServer(httpOptions);
+    server.on('listening', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : options.port;
+      io.err(
+        `${CLI_NAME}: MCP HTTP listening on ${MCP_HTTP_HOST}:${String(port ?? MCP_HTTP_DEFAULT_PORT)}`,
+      );
+    });
+    server.on('error', () => {
+      io.err(`${CLI_NAME}: MCP HTTP server error`);
+      process.exitCode = EXIT_INTERNAL;
+    });
+  },
 };
 
 export function renderHelp(version: string): string {
@@ -42,6 +81,12 @@ export function renderHelp(version: string): string {
     'Commands:',
     '  init             Prepare and protect the state root (Phase 1 bootstrap)',
     '  doctor           Report on the state root. Read-only; repairs nothing',
+    '  serve            Serve the Phase 2 MCP spine (--http or --stdio)',
+    '',
+    'Serve options:',
+    `  --http           Streamable HTTP on ${MCP_HTTP_HOST} (default port ${String(MCP_HTTP_DEFAULT_PORT)})`,
+    '  --stdio         MCP stdio transport; requires ORCHESTRATOR_ACTOR_TOKEN',
+    '  --port PORT     Override the HTTP port (HTTP only)',
     '',
     'Options:',
     '  -h, --help       Show this help and exit',
@@ -54,10 +99,47 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 1. init prepares the state root, its directories, and the lease key only.',
-    '  Schema migrations and principal bootstrap arrive in later phases.',
+    '  Phase 2. MCP ping, loopback HTTP/stdio transports, and bearer authentication.',
+    '  Persistent actor_tokens, jobs, workers, and database authority arrive in later phases.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
+}
+
+function parseServeOptions(args: readonly string[]): ServeOptions {
+  let mode: ServeOptions['mode'] | undefined;
+  let port: number | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--http' || argument === '--stdio') {
+      const selected = argument.slice(2) as ServeOptions['mode'];
+      if (mode !== undefined) {
+        throw new UsageError('choose exactly one of --http or --stdio');
+      }
+      mode = selected;
+      continue;
+    }
+
+    if (argument === '--port') {
+      const value = args[index + 1];
+      if (value === undefined) throw new UsageError('--port requires a value');
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+        throw new UsageError('--port must be an integer between 1 and 65535');
+      }
+      port = parsed;
+      index += 1;
+      continue;
+    }
+
+    throw new UsageError(`unexpected argument '${String(argument)}'`);
+  }
+
+  if (mode === undefined) throw new UsageError('serve requires exactly one of --http or --stdio');
+  if (mode === 'stdio' && port !== undefined) {
+    throw new UsageError('--port is only valid with --http');
+  }
+  return port === undefined ? { mode } : { mode, port };
 }
 
 function renderInit(result: InitResult): string[] {
@@ -145,6 +227,18 @@ export function run(
   if (first === '--version' || first === '-V') {
     io.out(version);
     return { exitCode: EXIT_OK };
+  }
+
+  if (first === 'serve') {
+    try {
+      if (commands.serve === undefined) {
+        throw new UsageError('serve is not available in this command context');
+      }
+      commands.serve(parseServeOptions(argv.slice(1)), io);
+      return { exitCode: EXIT_OK };
+    } catch (error) {
+      return reportError(io, error);
+    }
   }
 
   if (argv.length > 1) {

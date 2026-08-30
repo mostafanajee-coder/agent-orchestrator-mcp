@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CliCommands, CliIo } from '../../src/cli.js';
+import type { CliCommands, CliIo, ServeOptions } from '../../src/cli.js';
 import {
   CLI_NAME,
   EXIT_INTERNAL,
@@ -172,12 +172,52 @@ describe('run: doctor', () => {
   });
 });
 
+describe('run: serve', () => {
+  it('parses the HTTP mode and port without writing protocol data to stdout', () => {
+    const { io, out, err } = capture();
+    let received: ServeOptions | undefined;
+    const result = run(
+      ['serve', '--http', '--port', '4321'],
+      io,
+      VERSION,
+      commands({ serve: (options) => { received = options; } }),
+    );
+
+    expect(result.exitCode).toBe(EXIT_OK);
+    expect(received).toEqual({ mode: 'http', port: 4321 });
+    expect(out).toEqual([]);
+    expect(err).toEqual([]);
+  });
+
+  it('parses stdio mode', () => {
+    const { io } = capture();
+    let received: ServeOptions | undefined;
+    run(['serve', '--stdio'], io, VERSION, commands({ serve: (options) => { received = options; } }));
+    expect(received).toEqual({ mode: 'stdio' });
+  });
+
+  it.each([
+    [['serve'], 'requires exactly one'],
+    [['serve', '--http', '--stdio'], 'exactly one'],
+    [['serve', '--stdio', '--port', '4321'], 'only valid'],
+    [['serve', '--http', '--port', '0'], 'between 1 and 65535'],
+  ])('rejects invalid serve options %j', (argv, message) => {
+    const { io, err } = capture();
+    const result = run(argv, io, VERSION, commands({ serve: () => undefined }));
+    expect(result.exitCode).toBe(EXIT_USAGE);
+    expect(err.join('\n')).toContain(message);
+  });
+});
+
 describe('renderHelp', () => {
   it('documents the implemented commands and exit codes', () => {
     const help = renderHelp(VERSION);
     expect(help).toContain(VERSION);
     expect(help).toContain('init');
     expect(help).toContain('doctor');
+    expect(help).toContain('serve');
+    expect(help).toContain('--http');
+    expect(help).toContain('--stdio');
     expect(help).toContain('--help');
     expect(help).toContain('--version');
     expect(help).toContain('0  success');
