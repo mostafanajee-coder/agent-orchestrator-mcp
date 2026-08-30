@@ -31,6 +31,11 @@ const initResult: InitResult = {
   createdDirectories: ['/state', '/state/secrets'],
   leaseKeyCreated: true,
   securityModel: 'fake model',
+  database: {
+    created: true,
+    schemaVersion: 2,
+    appliedVersions: [1, 2],
+  },
 };
 
 function doctorReport(ok: boolean): DoctorReport {
@@ -224,9 +229,9 @@ describe('renderHelp', () => {
     expect(help).toContain('3  security');
   });
 
-  it('states that this is Phase 1 and does not promise later-phase work', () => {
+  it('states that this is Phase 3 and does not promise later-phase work', () => {
     const help = renderHelp(VERSION);
-    expect(help).toContain('Phase 1');
+    expect(help).toContain('Phase 3');
     expect(help).toContain('later phases');
     expect(help).not.toContain('migrations and principal bootstrap are available');
   });
