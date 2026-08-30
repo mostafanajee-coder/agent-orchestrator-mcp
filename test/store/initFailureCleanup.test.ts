@@ -79,8 +79,8 @@ describe('fresh init failure cleanup', () => {
       const retry = initializeDatabaseForInit(context);
       expect(retry).toEqual({
         created: true,
-        schemaVersion: 3,
-        appliedVersions: [1, 2, 3],
+        schemaVersion: 4,
+        appliedVersions: [1, 2, 3, 4],
       });
     },
   );

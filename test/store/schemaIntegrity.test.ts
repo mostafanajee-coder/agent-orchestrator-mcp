@@ -44,16 +44,24 @@ describe('Phase 3 schema and integrity', () => {
 
   it('reports the current schema and approved PRAGMA policy', () => {
     const report = verifyDatabaseIntegrity(fixture.db);
-    expect(report.schemaVersion).toBe(3);
+    expect(report.schemaVersion).toBe(4);
     expect(report.tableCount).toBe(13);
-    expect(report.triggerCount).toBe(16);
-    expect(report.appliedVersions).toEqual([1, 2, 3]);
+    expect(report.triggerCount).toBe(19);
+    expect(report.appliedVersions).toEqual([1, 2, 3, 4]);
     expect(report.pragmaPolicy).toEqual({
       journalMode: 'wal',
       foreignKeys: 1,
       busyTimeout: 5000,
       synchronous: 1,
+      recursiveTriggers: 1,
     });
+  });
+
+  it('rejects an AOM connection with recursive_triggers disabled', () => {
+    fixture.db.pragma('recursive_triggers = OFF');
+    expect(() => verifyDatabaseIntegrity(fixture.db)).toThrow(
+      'The SQLite PRAGMA policy is not the approved Phase 3 policy',
+    );
   });
 
   it('preserves the exact actor_tokens columns without scopes or session_label', () => {

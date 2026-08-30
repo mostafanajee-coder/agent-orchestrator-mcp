@@ -26,6 +26,7 @@ function openTestDatabase(): void {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.pragma('synchronous = NORMAL');
+  db.pragma('recursive_triggers = ON');
 }
 
 function closeTestDatabase(): void {
@@ -67,12 +68,21 @@ function applyMigrationTwo(): void {
   ).run();
 }
 
+function applyMigrationThree(): void {
+  const migration = approvedMigrations().find((entry) => entry.version === 3);
+  if (migration === undefined) throw new Error('migration 003 missing');
+  db.exec(migration.sql);
+  db.prepare(
+    "INSERT INTO schema_migrations(version, applied_at) VALUES (3, '2026-08-30T00:00:00Z')",
+  ).run();
+}
+
 beforeEach(openTestDatabase);
 afterEach(closeTestDatabase);
 
 describe('migration discovery and exact ledger contract', () => {
   it('discovers exactly the numeric Phase 3 set in order', () => {
-    expect(approvedMigrations().map((migration) => migration.version)).toEqual([1, 2, 3]);
+    expect(approvedMigrations().map((migration) => migration.version)).toEqual([1, 2, 3, 4]);
     expect(approvedMigrations().every((migration) => !/\b(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(migration.sql))).toBe(
       true,
     );
@@ -86,7 +96,7 @@ describe('migration discovery and exact ledger contract', () => {
   });
 
   it('rejects an extra future migration from the binary set', () => {
-    writeFileSync(join(directory, '004_future.sql'), 'SELECT 1;');
+    writeFileSync(join(directory, '005_future.sql'), 'SELECT 1;');
     expect(() => runMigrations(db, { fresh: true, directory })).toThrow('exactly the approved known set');
   });
 
@@ -94,46 +104,56 @@ describe('migration discovery and exact ledger contract', () => {
     validateAppliedPrefix({ exists: true, versions: [1] }, false);
     validateAppliedPrefix({ exists: true, versions: [1, 2] }, false);
     validateAppliedPrefix({ exists: true, versions: [1, 2, 3] }, false);
+    validateAppliedPrefix({ exists: true, versions: [1, 2, 3, 4] }, false);
     expect(() => validateAppliedPrefix({ exists: true, versions: [] }, false)).toThrow('empty');
     expect(() => validateAppliedPrefix({ exists: true, versions: [2] }, false)).toThrow('contiguous prefix');
     expect(() => validateAppliedPrefix({ exists: true, versions: [1, 3] }, false)).toThrow('contiguous prefix');
-    expect(() => validateAppliedPrefix({ exists: true, versions: [1, 2, 4] }, false)).toThrow('unknown or future');
+    expect(() => validateAppliedPrefix({ exists: true, versions: [1, 2, 3, 5] }, false)).toThrow('unknown or future');
   });
 });
 
 describe('migration runner', () => {
   it('applies a fresh database atomically and verifies the current schema', () => {
     const result = runMigrations(db, { fresh: true });
-    expect(result).toEqual({ appliedVersions: [1, 2, 3], migrated: true });
-    expect(verifyDatabaseIntegrity(db).appliedVersions).toEqual([1, 2, 3]);
+    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4], migrated: true });
+    expect(verifyDatabaseIntegrity(db).appliedVersions).toEqual([1, 2, 3, 4]);
   });
 
   it('re-runs a current database without applying anything', () => {
     runMigrations(db, { fresh: true });
     const result = runMigrations(db, { fresh: false });
-    expect(result).toEqual({ appliedVersions: [1, 2, 3], migrated: false });
+    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4], migrated: false });
   });
 
-  it('upgrades an existing {1} database to {1,2}', () => {
+  it('upgrades an existing {1} database to {1,2,3,4}', () => {
     applyMigrationOne();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3]);
-    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4]);
   });
 
-  it('upgrades an existing {1,2} database to {1,2,3}', () => {
+  it('upgrades an existing {1,2} database to {1,2,3,4}', () => {
     applyMigrationOne();
     applyMigrationTwo();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3]);
-    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4]);
+  });
+
+  it('upgrades an existing schema-v3 database to schema-v4', () => {
+    applyMigrationOne();
+    applyMigrationTwo();
+    applyMigrationThree();
+    const result = runMigrations(db, { fresh: false });
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4]);
   });
 
   it.each([
     [[], 'empty'],
     [[2], 'contiguous prefix'],
     [[1, 3], 'contiguous prefix'],
-    [[1, 2, 4], 'unknown or future'],
+    [[1, 2, 3, 5], 'unknown or future'],
   ])('rejects invalid existing ledger %j', (versions, message) => {
     createLedger(versions);
     expect(() => runMigrations(db, { fresh: false })).toThrow(message);
@@ -147,12 +167,13 @@ describe('migration runner', () => {
   it('does not ledger a failed migration', () => {
     applyMigrationOne();
     applyMigrationTwo();
+    applyMigrationThree();
     const migrations = approvedMigrations();
-    const failed = migrations.map((migration) => migration.version === 3
+    const failed = migrations.map((migration) => migration.version === 4
       ? { ...migration, sql: 'THIS IS NOT VALID SQL;' }
       : migration);
     expect(() => runMigrations(db, { fresh: false, migrations: failed })).toThrow();
-    expect(readMigrationLedger(db).versions).toEqual([1, 2]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3]);
   });
 
   it('rolls back a failed immediate transaction', () => {

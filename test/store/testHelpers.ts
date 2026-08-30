@@ -38,6 +38,7 @@ export function createStoreFixture(): StoreFixture {
   runInit(context);
   const db = new Database(context.layout.database);
   db.pragma('foreign_keys = ON');
+  db.pragma('recursive_triggers = ON');
   return { workspace, root, layout: context.layout, security, context, db };
 }
 
