@@ -1,16 +1,15 @@
 # Phase 3 Plan — Store & Database Authority
 
-> **PLANNING — NOT IMPLEMENTED**
+> **IMPLEMENTED — PHASE 3 STORE & DATABASE AUTHORITY**
 >
-> This document is an implementation plan only. It does not add a dependency,
-> create a migration, open or create the database, change runtime behavior, or
-> expose a Phase 3 MCP tool.
+> Phase 3 is implemented on the implementation branch. Phase 4 authority/auth,
+> job, worker, and later runtime behavior remains unimplemented.
 
 Date: 2026-08-30
 Authoritative repository: `C:\AgentProjects\agent-orchestrator-mcp`
-Authoritative merged main: `7d4cb847f6d98dfba81163af508073f77ff56dba`
+Authoritative implementation base: `d255a5b2062f38c475cfb83c080e6bd98754505c`
 External benchmark: `C:\AgentProjects\aom-benchmark\AOM_EXTERNAL_BENCHMARK.md`
-Feasibility status: **APPROVED — READY FOR IMPLEMENTATION AUTHORIZATION**
+Implementation status: **IMPLEMENTED — READY FOR INDEPENDENT REVIEW**
 
 ## 1. Phase 3 objectives
 
@@ -202,7 +201,7 @@ whose meaning changes by caller:
 |---|---|---:|---:|---:|---|
 | `openDatabaseForInit(...)` | Missing or valid existing exact file | Yes | Yes | Yes, after file security is proven | Phase 3 schema only; no principal/system/token bootstrap. |
 | `openExistingDatabaseForServe(...)` | **Must already exist** as the exact trusted regular file | Yes | Yes, only approved pending migrations | Yes, after pre-open security checks | Keeps Phase 2 auth/`ping` behavior; does not require Phase 4 rows. |
-| `openDatabaseReadOnlyForDoctor(...)` | Existing file only; absent is reported, never created | No SQLite open | No | No | Reports filesystem/security state and explicit SQL-not-checked status; never bootstraps or repairs. |
+| `inspectDatabaseFilesForDoctor(...)` | Existing file only; absent is reported, never created | No SQLite open | No | No | Reports filesystem/security state and explicit SQL-not-checked status; never bootstraps or repairs. |
 
 `better-sqlite3` options/APIs for `readonly` and `fileMustExist`
 were empirically checked in the disposable spike recorded in §4.5. The mode
@@ -240,7 +239,7 @@ principal/token activation rows or exactly-one-enabled-principal service gate.
 
 #### Doctor mode
 
-`openDatabaseReadOnlyForDoctor` is an existing-path filesystem/security
+`inspectDatabaseFilesForDoctor` is an existing-path filesystem/security
 diagnostic only. It must not invoke `better-sqlite3` for the authoritative
 DB, run any SQL/PRAGMA, run migrations, change `schema_migrations`, or
 create/delete/modify `orchestrator.db`,
@@ -961,11 +960,11 @@ mutation to prove the protected behavior, not merely the ABORT.
 Every gate below is executable within Phase 3 and does not require active Phase
 4/5/6 behavior:
 
-1. `better-sqlite3` is the only new production dependency and is the exact
-   reviewed version in the lockfile; no dependency is added by this planning
-   change.
+1. `better-sqlite3` is the only new production dependency at the exact
+   reviewed version `13.0.3` in the lockfile; its matching
+   `@types/better-sqlite3` package is development-only.
 2. `openDatabaseForInit`, `openExistingDatabaseForServe`, and
-   `openDatabaseReadOnlyForDoctor` enforce their explicit modes. Init may create
+   `inspectDatabaseFilesForDoctor` enforce their explicit modes. Init may create
    the schema DB; serve is existing-only; doctor never invokes
    `better-sqlite3` on the authoritative DB, never writes/creates/migrates,
    and reports `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`.
@@ -1041,8 +1040,9 @@ None of these actions is part of a Phase 3 implementation WP.
 
 ## 17. Safe Phase 3 implementation work packages
 
-The following **10 Phase 3 work packages** end at structural STORE/DB
-authority. They contain no Phase 4 bootstrap/auth activation:
+The following **10 Phase 3 work packages** were implemented on this branch and
+end at structural STORE/DB authority. They contain no Phase 4 bootstrap/auth
+activation:
 
 1. **WP-0 — dependency/version/license lock:** after explicit authorization,
    add only the reviewed `better-sqlite3@13.0.3` dependency; record the
@@ -1087,57 +1087,58 @@ authority. They contain no Phase 4 bootstrap/auth activation:
 No work package creates a Phase 3 branch, commits, pushes, opens a PR, or merges
 anything automatically. Those actions require separate authorization.
 
-## 18. Principal-review checklist
+## 18. Phase 3 implementation evidence checklist
 
-Before implementation is authorized, the principal should confirm:
+The implementation evidence for this branch records:
 
-- [ ] The plan is marked `PLANNING — NOT IMPLEMENTED` and contains no code
-      change beyond this document.
-- [ ] The exact database path and Phase 1 security/open ordering are correct.
-- [ ] Init may create the schema DB only; serve is existing-only and owns deep
+- [x] The plan is marked `IMPLEMENTED — PHASE 3 STORE & DATABASE AUTHORITY`;
+      Phase 4 remains unimplemented.
+- [x] The exact database path and Phase 1 security/open ordering are enforced.
+- [x] Init may create the schema DB only; serve is existing-only and owns deep
       SQL integrity; doctor direct SQLite open is forbidden and it reports
       `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`.
-- [ ] Existing DB/sidecars are security-checked before writable open; doctor
+- [x] Existing DB/sidecars are security-checked before writable open; doctor
       performs only the same filesystem/security diagnosis and never opens
       SQLite. New DB/sidecars are hardened/verified before migration or WAL
       writes.
-- [ ] Doctor tests inject/instrument the DB opener and prove zero authoritative
+- [x] Doctor tests inject/instrument the DB opener and prove zero authoritative
       DB-opener calls, and before/after tests prove no DB/WAL/SHM hash, size, or
       mtime change, no new sidecar, and no DB creation.
-- [ ] The count of approved tables is 13; no `cycles`, `capabilities`,
+- [x] The count of approved tables is 13; no `cycles`, `capabilities`,
       workspace, registry, Redis, or cloud table was invented.
-- [ ] `decision_grants` and `authoritative_statuses` seeds exactly match §4.
-- [ ] T5/T6 freeze triggers are created after seed inserts in migration 002.
-- [ ] T1–T6 names, timing, predicates, and abort strings match the
+- [x] `decision_grants` and `authoritative_statuses` seeds exactly match §4.
+- [x] T5/T6 freeze triggers are created after seed inserts in migration 002.
+- [x] T1–T6 names, timing, predicates, and abort strings match the
       architecture.
-- [ ] The migration ledger accepts only the exact contiguous prefix of the
+- [x] The migration ledger accepts only the exact contiguous prefix of the
       known ordered set, and is reread after `BEGIN IMMEDIATE` before
       pending migrations are selected.
-- [ ] Supporting guards are classified: lease dimension consistency is a
+- [x] Supporting guards are classified: lease dimension consistency is a
       Phase 3 composite FK/UNIQUE; actor/token active immutability and
       capability semantics are explicitly deferred to Phase 4; lease
       consumption is deferred to Phase 6.
-- [ ] Invariant 16 is Phase 3 **at most one** principal; exactly one enabled
+- [x] Invariant 16 is Phase 3 **at most one** principal; exactly one enabled
       principal is explicitly a Phase 4 activation check.
-- [ ] The exact `actor_tokens` columns are preserved: no token scopes column,
+- [x] The exact `actor_tokens` columns are preserved: no token scopes column,
       and the persistent column name is `label`.
-- [ ] Production bootstrap, token issuance, persistent auth, and
+- [x] Production bootstrap, token issuance, persistent auth, and
       `ORCHESTRATOR_ACTOR_TOKEN` transition are confined to the Phase 4 hand-off.
-- [ ] SQLite-only durability and `BEGIN IMMEDIATE` are preserved.
-- [ ] The raw-SQL matrix has 33 Phase 3 executable cases and 5 future
+- [x] SQLite-only durability and `BEGIN IMMEDIATE` are preserved.
+- [x] The raw-SQL matrix has 33 Phase 3 executable cases and 5 future
       hand-off cases, without falsely assigning path/time/CAS/auth checks to
       Phase 3 SQLite.
-- [ ] No Phase 4+ MCP tools, worker runtime, retries, reaper, remote registry,
-      observability stack, or new dependency is included.
-- [ ] The 10 Phase 3 work packages end at structural store/DB authority, and
+- [x] No Phase 4+ MCP tools, worker runtime, retries, reaper, remote registry,
+      observability stack is included; only the approved SQLite dependency and
+      matching development typings were added.
+- [x] The 10 Phase 3 work packages end at structural store/DB authority, and
       the separate Phase 4 hand-off is design-only.
 
 ## Plan status
 
-This document is ready for principal review under the approved Revision 5
-doctor boundary. The §4.5 feasibility evidence records why direct SQLite
-inspection, immutable mode, and snapshot/copy workarounds are forbidden in the
-Phase 3 doctor. The existence of this wording still does not itself implement
-Phase 3.
+This document records the implemented Phase 3 behavior under the approved
+Revision 5 doctor boundary. The §4.5 feasibility evidence records why direct
+SQLite inspection, immutable mode, and snapshot/copy workarounds are forbidden
+in the Phase 3 doctor. Phase 4 authority/auth and later runtime behavior remain
+unimplemented.
 
-Current verdict: **PHASE 3 PLAN READY FOR IMPLEMENTATION AUTHORIZATION**.
+Current status: **PHASE 3 IMPLEMENTED — READY FOR INDEPENDENT REVIEW**.
