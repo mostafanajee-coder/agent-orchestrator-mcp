@@ -157,6 +157,11 @@ interface TransitionSpec {
   readonly to: WorkflowState;
   readonly grantsStatus: AuthoritativeStatus | null;
   readonly incrementsCycle: boolean;
+  readonly cycleLimitOutcome?: {
+    readonly to: WorkflowState;
+    readonly grantsStatus: AuthoritativeStatus | null;
+    readonly incrementsCycle: boolean;
+  };
 }
 
 const TRANSITIONS: Readonly<Record<DecisionKind, TransitionSpec>> = {
@@ -177,12 +182,22 @@ const TRANSITIONS: Readonly<Record<DecisionKind, TransitionSpec>> = {
     to: 'REPAIR',
     grantsStatus: null,
     incrementsCycle: true,
+    cycleLimitOutcome: {
+      to: 'STALLED',
+      grantsStatus: null,
+      incrementsCycle: false,
+    },
   },
   RETEST: {
     from: ['EVIDENCE_READY'],
     to: 'IN_PROGRESS',
     grantsStatus: null,
     incrementsCycle: true,
+    cycleLimitOutcome: {
+      to: 'STALLED',
+      grantsStatus: null,
+      incrementsCycle: false,
+    },
   },
   VERIFY_SELF: {
     from: ['EVIDENCE_READY'],
@@ -395,13 +410,12 @@ export function applyTransition(
     const normalNextCycle = transition.incrementsCycle ? job.cycle + 1 : job.cycle;
     const cycleLimitGuard =
       normalNextCycle > job.max_cycles
-      && (input.decision === 'FIX' || input.decision === 'RETEST')
-      && job.state === 'EVIDENCE_READY';
+      && transition.cycleLimitOutcome !== undefined;
     if (normalNextCycle > job.max_cycles && !cycleLimitGuard) {
       throw new DecisionError('INVALID_TRANSITION', 'The job has reached its cycle limit.');
     }
-    const selectedTransition: TransitionSpec = cycleLimitGuard
-      ? { ...transition, to: 'STALLED', incrementsCycle: false }
+    const selectedTransition: TransitionSpec = cycleLimitGuard && transition.cycleLimitOutcome !== undefined
+      ? { ...transition, ...transition.cycleLimitOutcome }
       : transition;
     const nextCycle = selectedTransition.incrementsCycle ? job.cycle + 1 : job.cycle;
     if (input.decision === 'DELIVER') {
