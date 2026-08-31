@@ -24,18 +24,29 @@ describe('Phase 4 matrix traceability', () => {
     const all = contents.map((entry) => entry.text).join('\n');
     expect(all).not.toMatch(/INSERT\s+OR\s+REPLACE|REPLACE\s+INTO|ON\s+CONFLICT/i);
 
+    const phase5NullInsertPath = 'src/domain/jobs.ts';
     for (const entry of contents) {
-      if (/authoritative_status\s*=/i.test(entry.text)) {
+      const assignments = [...entry.text.matchAll(/\bauthoritative_status\s*=(?!=)/gi)];
+      for (const assignment of assignments) {
+        // Phase 5 creates jobs with authoritative_status hard-coded to null;
+        // it never assigns an authoritative value. All other assignments must
+        // remain in the Phase 4 decision choke point.
+        const before = entry.text.slice(0, assignment.index);
+        const phase5NullInsert = entry.path === phase5NullInsertPath
+          && /authoritative_status:\s*null/.test(entry.text)
+          && /INSERT INTO jobs/i.test(before.slice(Math.max(0, before.length - 2_000)));
+        if (phase5NullInsert) continue;
         expect(entry.path).toBe('src/domain/decide.ts');
       }
     }
   });
 
-  it('REG-04 keeps Phase 5/6 tool names absent from the implementation source', () => {
+  it('REG-04 exposes the Phase 5 lifecycle names without leaking Phase 6+ tools', () => {
     const root = process.cwd();
     const files = sourceFiles(join(root, 'src'));
     const all = files.map((path) => readFileSync(path, 'utf8')).join('\n');
-    expect(all).not.toMatch(/job_create|job_get|job_list|qa_dispatch|run_report|audit_query/);
+    expect(all).toMatch(/job_create|job_get|job_list|job_start|job_resume/);
+    expect(all).not.toMatch(/qa_dispatch|run_report|audit_query/);
   });
 
   it('AUTH-05 keeps the legacy environment resolver out of the production CLI path', () => {

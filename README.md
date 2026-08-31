@@ -16,11 +16,16 @@ and protects the global state root, initializes the approved schema-v6 local SQL
 database-backed `actor_tokens` resolver and exposes the compatibility `ping` tool plus `codex_decide` only
 to a verified `codex` principal holding `job:decide`. Doctor remains filesystem/security-only and explicitly
 reports `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; init and serve startup own deep SQLite integrity,
-canonical schema, audit-chain, actor-state, and token checks. Job creation, worker execution, leases,
-evidence, artifacts, and other Phase 5/6 behavior remain out of scope.
+canonical schema, audit-chain, actor-state, and token checks.
 
-The approved design and the Phase 4 implementation plan are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md).
+**Phase 5 — Job lifecycle (implementation in progress on `codex/phase5-implementation`).** The authorized
+candidate adds durable `job_create`, `job_start`, `job_resume`, `job_get`, and `job_list` behavior with
+workspace admission, bounded pagination, idempotency, CAS, and the existing Codex authority boundary.
+Worker execution, leases, evidence/artifacts, resilience loops, and all Phase 6+ behavior remain out of scope.
+
+The approved design and phase plans are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
+[docs/PHASE5_PLAN.md](docs/PHASE5_PLAN.md).
 The empirical Codex/Inspector protocol observation is recorded in
 [docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 
@@ -113,11 +118,17 @@ Runtime state lives outside this repository, in one global root shared by every 
 
 ```
 <OS user profile>\.agent-orchestrator-mcp\     e.g. C:\Users\<user>\.agent-orchestrator-mcp
+  config.json  protected Phase 5 runtime settings (workspace roots and bounded defaults)
   data\        orchestrator.db, WAL/SHM sidecars when SQLite owns them
   artifacts\   per job / cycle / run
   secrets\     lease.key
   logs\
 ```
+
+`init` creates the protected `config.json` with the approved Windows workspace-root seeds and
+bounded lifecycle defaults. `serve` reads and validates that file before exposing the MCP surface;
+operators may add local workspace roots there without changing source code. On POSIX, no workspace
+roots are seeded by default; a local root must be configured explicitly before `job_create` can admit a job.
 
 On POSIX the root is `$XDG_STATE_HOME/agent-orchestrator-mcp`, falling back to
 `~/.local/state/agent-orchestrator-mcp`. There is deliberately **no override** — no flag,

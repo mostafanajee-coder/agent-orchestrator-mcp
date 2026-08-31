@@ -18,6 +18,9 @@ export const AUDIT_ACTION_VALUES = [
   'token.revoked',
   'auth.rejected',
   'startup.invariant_failed',
+  'job.create',
+  'job.start',
+  'job.resume',
   'codex.decide',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
@@ -132,7 +135,7 @@ function requiredText(value: string, field: string, secretValues: readonly strin
 
 function requiredAction(value: AuditAction): AuditAction {
   if (!(AUDIT_ACTION_VALUES as readonly string[]).includes(value)) {
-    throw new AuditError('action is not an approved Phase 4 audit action.');
+    throw new AuditError('action is not an approved audit action.');
   }
   return value;
 }

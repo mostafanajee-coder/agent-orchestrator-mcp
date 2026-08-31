@@ -157,6 +157,11 @@ interface TransitionSpec {
   readonly to: WorkflowState;
   readonly grantsStatus: AuthoritativeStatus | null;
   readonly incrementsCycle: boolean;
+  readonly cycleLimitOutcome?: {
+    readonly to: WorkflowState;
+    readonly grantsStatus: AuthoritativeStatus | null;
+    readonly incrementsCycle: boolean;
+  };
 }
 
 const TRANSITIONS: Readonly<Record<DecisionKind, TransitionSpec>> = {
@@ -177,12 +182,22 @@ const TRANSITIONS: Readonly<Record<DecisionKind, TransitionSpec>> = {
     to: 'REPAIR',
     grantsStatus: null,
     incrementsCycle: true,
+    cycleLimitOutcome: {
+      to: 'STALLED',
+      grantsStatus: null,
+      incrementsCycle: false,
+    },
   },
   RETEST: {
     from: ['EVIDENCE_READY'],
     to: 'IN_PROGRESS',
     grantsStatus: null,
     incrementsCycle: true,
+    cycleLimitOutcome: {
+      to: 'STALLED',
+      grantsStatus: null,
+      incrementsCycle: false,
+    },
   },
   VERIFY_SELF: {
     from: ['EVIDENCE_READY'],
@@ -392,10 +407,17 @@ export function applyTransition(
     if (!transition.from.includes(job.state)) {
       throw new DecisionError('INVALID_TRANSITION', 'The requested decision is not valid for the current job state.');
     }
-    const nextCycle = transition.incrementsCycle ? job.cycle + 1 : job.cycle;
-    if (nextCycle > job.max_cycles) {
+    const normalNextCycle = transition.incrementsCycle ? job.cycle + 1 : job.cycle;
+    const cycleLimitGuard =
+      normalNextCycle > job.max_cycles
+      && transition.cycleLimitOutcome !== undefined;
+    if (normalNextCycle > job.max_cycles && !cycleLimitGuard) {
       throw new DecisionError('INVALID_TRANSITION', 'The job has reached its cycle limit.');
     }
+    const selectedTransition: TransitionSpec = cycleLimitGuard && transition.cycleLimitOutcome !== undefined
+      ? { ...transition, ...transition.cycleLimitOutcome }
+      : transition;
+    const nextCycle = selectedTransition.incrementsCycle ? job.cycle + 1 : job.cycle;
     if (input.decision === 'DELIVER') {
       const manifest = db.prepare(
         "SELECT 1 AS present FROM artifacts WHERE job_id = ? AND cycle = ? AND kind = 'manifest' LIMIT 1",
@@ -425,22 +447,22 @@ export function applyTransition(
       input.rationale,
       evidenceJson,
       job.state,
-      transition.to,
+      selectedTransition.to,
       createdAt,
     );
 
-    const nextStatus = transition.grantsStatus ?? job.authoritative_status;
-    const nextDecidingDecisionId = transition.grantsStatus === null
+    const nextStatus = selectedTransition.grantsStatus ?? job.authoritative_status;
+    const nextDecidingDecisionId = selectedTransition.grantsStatus === null
       ? job.deciding_decision_id
       : decisionId;
     const update = db.prepare(
       'UPDATE jobs SET state = ?, authoritative_status = ?, deciding_decision_id = ?, cycle = ?, version = version + 1, state_reason = ?, updated_at = ? WHERE job_id = ? AND version = ?',
     ).run(
-      transition.to,
+      selectedTransition.to,
       nextStatus,
       nextDecidingDecisionId,
       nextCycle,
-      input.decision.toLowerCase(),
+      cycleLimitGuard ? 'max_cycles' : input.decision.toLowerCase(),
       createdAt,
       job.job_id,
       input.expectedVersion,
@@ -450,7 +472,7 @@ export function applyTransition(
     const result: DecisionData = {
       decisionId,
       jobId: job.job_id,
-      state: transition.to,
+      state: selectedTransition.to,
       authoritativeStatus: nextStatus,
       cycle: nextCycle,
       version: input.expectedVersion + 1,
@@ -466,11 +488,15 @@ export function applyTransition(
       cycle: nextCycle,
       capability: CAPABILITY,
       fromState: job.state,
-      toState: transition.to,
+      toState: selectedTransition.to,
       fromAuthStatus: job.authoritative_status,
       toAuthStatus: nextStatus,
       result: 'ok',
-      detail: { decision: input.decision, rationale: input.rationale },
+      detail: {
+        decision: input.decision,
+        rationale: input.rationale,
+        ...(cycleLimitGuard ? { reason: 'max_cycles' } : {}),
+      },
       timestamp: createdAt,
     });
 

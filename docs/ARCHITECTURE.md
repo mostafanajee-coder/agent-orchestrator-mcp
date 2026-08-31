@@ -1,8 +1,10 @@
 # Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
-> `main` is now the authoritative merged Phase 4 state. This document does not
-> authorize Phase 5/6 implementation, deployment, or unrelated changes.
+> `main` is the authoritative merged Phase 4 state. This document alone does
+> not authorize Phase 5/6 implementation, deployment, or unrelated changes;
+> the separate Phase 5 plan records the explicit Codex authorization and its
+> narrow implementation scope.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -107,9 +109,10 @@ the final canonical key and no separate prefix concatenation.
 
 The full Phase 4 plan, 12 work packages, 70-case executable matrix, security
 answers, review sequence, and explicit Phase 5/6 exclusions are recorded in
-`docs/PHASE4_PLAN.md`. Revision 8 remains **PROPOSED — READY FOR INDEPENDENT
-REVIEW** until an independent review and principal approval authorize
-implementation.
+`docs/PHASE4_PLAN.md`. Revision 8 is the approved Phase 4 baseline and its
+implementation is merged. Phase 5 planning and its explicit implementation
+authorization are recorded separately in `docs/PHASE5_PLAN.md`; that plan
+authorizes only the scoped Phase 5 implementation branch.
 
 ### Revision 7 / SQLite row-replacement integrity (this revision — approved architecture correction)
 
@@ -140,6 +143,37 @@ Canonical SQL fingerprints intentionally preserve SQL case and comments; only
 whitespace is normalized. Any reviewed DDL change must regenerate the compiled
 fingerprint in the same reviewed source change. A fail-closed representation
 drift is preferable to accepting weakened DDL.
+
+### Phase 5 planning amendment (proposed — implementation authorized on branch)
+
+The Phase 5 planning baseline and its authorized implementation branch add a
+proposed lifecycle staging amendment. It is not a new approved architecture
+revision and it does not retroactively alter the merged Phase 4 implementation
+on `main`. The amendment
+touches §1, §4, §6, §8, §14, §15, §17, §18, §19, §20, §21, and §23 only:
+
+- §4 defines one guard-selected outcome for each `(from_state, transition)`
+  key, so the existing `FIX`/`RETEST` verbs can select the normal or
+  cycle-limit outcome deterministically without duplicate keys;
+- §6 assigns normal cycle increment to the Phase 4 decision transaction,
+  keeps `resume` non-incrementing, and documents the proposed
+  `STALLED(max_cycles)` guard;
+- §8 proposes permanent V1 `job_start`/`job_resume` lifecycle operations and
+  the Phase 5 `job_get` collection restriction;
+- §14 adds the `job.resume` audit action;
+- §15 and §18 define the protected runtime `config.json` source for workspace
+  roots and bounded lifecycle defaults, with no invented POSIX roots;
+- §17 and §19 reconcile failed-CAS behavior as a no-durable-mutation result;
+- §20 and §21 distinguish the ten baseline tools from the two proposed Phase 5
+  additions and split invariant ownership; and
+- §1 and §23 identify `docs/PHASE5_PLAN.md` as a separate proposed planning
+  workstream that does not authorize implementation.
+
+The current merged Phase 4 code on `main` does not yet contain the proposed
+cycle-exhaustion branch. The explicit Phase 5 authorization permits one and
+only one narrowly scoped dependency amendment to the existing
+`applyTransition`/`codex_decide` choke point to implement that guard and its
+audit handling. No other Phase 4 source change is authorized by this addendum.
 
 ### Revision 6 / Phase 3 job-row and schema-verification correction (historical approved architecture correction)
 
@@ -295,7 +329,10 @@ Environment verified read-only on this machine: Node **v22.22.0**, npm 11.6.4, g
 
 A single long-lived local service (`agent-orchestrator-mcp`) that is:
 
-- **An MCP server** — the control plane. Codex is its client. Ten tools, one of which (`codex_decide`) is the only door to authoritative status.
+- **An MCP server** — the control plane. Codex is its client. The baseline V1
+  proposal lists ten tools, one of which (`codex_decide`) is the only door to
+  authoritative status; the proposed Phase 5 staging amendment adds two
+  non-authoritative lifecycle operations if independently approved.
 - **A job store** — one SQLite database (WAL) at a global user-profile location, the single system of record across all projects: jobs, cycles, worker runs, evidence, artifacts, decisions, and an append-only hash-chained audit log.
 - **A worker runtime** — spawns deterministic or LLM-backed worker processes, talks NDJSON over stdout, enforces timeouts/cancellation/retries, and normalizes everything into `WorkerReport`.
 
@@ -405,7 +442,18 @@ Five independent layers. Removing any one still leaves the invariant enforced.
 applyTransition(tx, job, transition, actorCtx) -> Job
 ```
 
-It consults a static `TRANSITIONS` table keyed by `(from_state, transition)` yielding `{ to, grantsStatus?, requiredCapability, allowedRoles, guards[] }`. Every transition that stamps an authoritative status requires `job:decide` and `role='principal'`. The repository layer exposes no raw state setter.
+It consults a static `TRANSITIONS` table keyed by `(from_state, transition)`.
+Each key yields one deterministic rule with an ordered guard selector: the
+selector evaluates the guards in fixed order and yields exactly one outcome of
+the form `{ to, grantsStatus?, requiredCapability, allowedRoles, guards[] }`.
+The ordinary one-outcome form remains valid; a guarded rule may select between
+already-reviewed outcomes without creating duplicate keys or allowing the
+caller to choose the outcome. In particular, the Phase 5 cycle-limit
+clarification selects the normal `FIX`/`RETEST` outcome while
+`cycle + 1 <= max_cycles`, and selects the existing non-authoritative `STALLED`
+outcome otherwise. Every transition that stamps an authoritative status
+requires `job:decide` and `role='principal'`. The repository layer exposes no
+raw state setter.
 
 **Layer 5 — Database.** The DB does not trust the application. Two immutable reference tables plus four triggers make an unjustified authoritative write impossible even from a `sqlite3` shell:
 
@@ -671,8 +719,9 @@ Rules:
 | `QA_RUNNING` | `runs_settled` | `EVIDENCE_READY` | system | — | — | all runs for the cycle terminal |
 | `IN_PROGRESS` / `QA_RUNNING` | `stall` | `STALLED` | system | — | — | timeout / orphan / stale / deadline |
 | `EVIDENCE_READY` | `decide:FIX` | `REPAIR` | **codex** | `job:decide` | — | `cycle+1 ≤ max_cycles` |
-| `REPAIR` | `resume` | `IN_PROGRESS` | codex | `job:create` | — | `cycle` incremented |
+| `REPAIR` | `resume` | `IN_PROGRESS` | codex | `job:create` | — | cycle was already incremented by the preceding `FIX`; resume preserves it and requires version CAS |
 | `EVIDENCE_READY` | `decide:RETEST` | `IN_PROGRESS` | **codex** | `job:decide` | — | `cycle+1 ≤ max_cycles`; `state_reason='retest'`; a fresh `qa_dispatch` is required |
+| `EVIDENCE_READY` | `decide:FIX` / `decide:RETEST` at cycle limit | `STALLED` | **codex** | `job:decide` | — | next cycle would exceed `max_cycles`; no cycle increment; `state_reason='max_cycles'`; explicit guard is audited |
 | `EVIDENCE_READY` | `decide:VERIFY_SELF` | `IN_PROGRESS` | **codex** | `job:decide` | — | — |
 | `EVIDENCE_READY` | `decide:IGNORE_FALSE_POSITIVE` | `EVIDENCE_READY` | **codex** | `job:decide` | — | records rationale; no state change |
 | `EVIDENCE_READY` / `IN_PROGRESS` / `STALLED` | `decide:APPROVE` | `APPROVED` | **codex** | `job:decide` | **APPROVED** | granting decision written first |
@@ -683,7 +732,27 @@ Rules:
 | any non-terminal | `decide:CANCEL` | `JOB_CANCELLED` | **codex** | `job:decide` | **JOB_CANCELLED** | terminal; kills live runs |
 | any non-terminal | `decide:STOP` | `STALLED` | **codex** | `job:decide` | — | halts dispatch, keeps job open |
 
-**Loop bounding.** `cycle` increments on `FIX`/`RETEST`. When `cycle == max_cycles`, `dispatch_qa`, `decide:FIX`, and `decide:RETEST` are refused by guard and the job moves to `STALLED(reason=max_cycles)`. From `STALLED` Codex may APPROVE, REJECT, CANCEL, or raise `max_cycles` via a `job:decide`-gated amendment — audited, and capped at a configured `hard_max_cycles` (default 10) it cannot exceed.
+**Loop bounding.** A normal `FIX` or `RETEST` increments `cycle` exactly once
+in the `codex_decide` transaction; `resume` preserves that value. When a
+`FIX`/`RETEST` request at the cycle limit would exceed `max_cycles`, the same
+authority choke point records a non-authoritative guard transition to
+`STALLED(reason=max_cycles)` without incrementing the cycle or creating worker
+rows. A later `dispatch_qa` at the limit is refused before worker/lease
+creation. From `STALLED`, Codex may APPROVE, REJECT, CANCEL, or raise
+`max_cycles` via a `job:decide`-gated amendment — audited, and capped at a
+configured `hard_max_cycles` (default 10) it cannot exceed. The cycle-limit
+guard is a proposed Phase 5 lifecycle clarification and is not implementation
+authorization. The explicit Phase 5 authorization is recorded in
+`docs/PHASE5_PLAN.md`; the dependency is active only on the implementation
+branch until a later merge.
+
+**`state_reason` vocabulary.** The field is diagnostic metadata and never an
+authorization input. The current Phase 5 values are `start`, `resume`,
+`max_cycles`, and the lowercase decision names `approve`, `reject`, `fix`,
+`retest`, `verify_self`, `ignore_false_positive`, `stop`, `package`,
+`deliver`, `complete`, and `cancel`. Later runtime phases may add documented
+operational reasons such as `timeout`, `orphaned_runs`, `stale`, and `deadline`;
+they may not reinterpret an existing value as authority.
 
 **No worker appears in the Actor column anywhere.** Workers write `worker_runs`, `evidence`, and `artifacts`; they never call `applyTransition`.
 
@@ -708,7 +777,12 @@ Rules:
 
 ## 8. Proposed MCP Tool Surface
 
-Ten tools. Every authoritative act is one tool (`codex_decide`) so there is exactly one authorization gate and one audit shape. Request-and-dispatch is one tool because it is one atomic intent.
+The baseline V1 surface below defines ten tools. Every authoritative act is one
+tool (`codex_decide`) so there is exactly one authorization gate and one audit
+shape. Request-and-dispatch is one tool because it is one atomic intent. A
+separate Phase 5 planning amendment proposes two non-authoritative lifecycle
+operations; if approved, the Phase 5 activated surface will contain those two
+additional entries. They are not active in the current merged Phase 4 state.
 
 Common: every mutating tool accepts `idempotency_key` and an optional `session_hint`. Every tool returns `{ ok, data | error: { code, message, details } }` and carries a server-generated `request_id`. Schemas are Zod v4; JSON Schema derived.
 
@@ -726,6 +800,28 @@ Common: every mutating tool accepts `idempotency_key` and an optional `session_h
 **3. `job_list`** — Find jobs **across all projects**.
 - Caller: codex, observer · Capability: `job:read`
 - In: `{ state?, authoritative_status?, workspace?, updated_since?, limit?, cursor? }` · Out: `{ jobs[], next_cursor? }`
+
+### Phase 5 staging amendment (proposed — implementation authorized on branch)
+
+The Phase 5 plan proposes `job_start` and `job_resume` as explicit lifecycle
+operations under `job:create`. Both require `expected_version`, use the common
+idempotency envelope, and remain non-authoritative. `job_start` moves only
+`CREATED → IN_PROGRESS`; `job_resume` moves only `REPAIR → IN_PROGRESS` and
+does not increment `cycle`. These are permanent V1 lifecycle operations if the
+Phase 5 plan is approved, not temporary fixtures. During Phase 5 activation,
+`job_get` is exposed only to verified Codex/observer callers; no worker caller
+or lease-scoped read path is activated.
+
+During Phase 5 activation, `job_create` also returns `version: 1` so a caller
+can use the required CAS contract. `stale_after_s` is server-owned and comes
+from a bounded configured default rather than a request field. `job_get`
+accepts `include: ["decisions"]` only; `runs`, `evidence`, and `artifacts` are
+unconditionally deferred to their owner phases and return the reviewed
+`UNSUPPORTED_COLLECTION` error. The original ten-tool list remains the full
+later V1 target description; these staging rules govern Phase 5 only. The
+required independent review and Codex authorization are recorded in
+`docs/PHASE5_PLAN.md`; the additions are active only on the implementation
+branch until a later merge.
 
 **4. `qa_dispatch`** — Request QA and dispatch workers as one atomic act.
 - Caller: codex · Capability: `qa:request`
@@ -1059,7 +1155,7 @@ Each retry is **its own `worker_runs` row** (`attempt` incremented) — partial 
 
 Every entry answers **who / which session / what / when / which job / what result**: `actor_id`, `actor_role`, `session_token_id`, `request_id`, `session_hint`, `action`, `job_id`, `cycle`, `capability`, `subject_type`+`subject_id`, `from_state`/`to_state`, `from_auth_status`/`to_auth_status`, `result`, redacted `detail_json`, `ts`.
 
-**Audited actions:** `bootstrap.completed`, `token.issued`, `token.revoked`, `auth.rejected`, `job.create`, `job.start`, `qa.dispatch`, `run.start`, `run.report`, `run.duplicate_rejected`, `run.timeout`, `run.orphaned`, `evidence.add`, `artifact.register`, `codex.decide`, `system.stall`, `lease.issued`, `lease.consumed`, `lease.rejected`, `config.reload`, `startup.invariant_failed`.
+**Audited actions:** `bootstrap.completed`, `token.issued`, `token.revoked`, `auth.rejected`, `job.create`, `job.start`, `job.resume`, `qa.dispatch`, `run.start`, `run.report`, `run.duplicate_rejected`, `run.timeout`, `run.orphaned`, `evidence.add`, `artifact.register`, `codex.decide`, `system.stall`, `lease.issued`, `lease.consumed`, `lease.rejected`, `config.reload`, `startup.invariant_failed`.
 
 For Phase 4, an `auth.rejected` row uses the internal `system` attribution
 with null session fields and no credential material. Rejected-auth writes are
@@ -1165,7 +1261,10 @@ failure. A normal retry starts from the known failed-init artifact boundary.
    AOM-owned connections report `recursive_triggers=ON`.
 3. **Exactly one enabled principal actor exists, with the exact internal `system` actor and no system-linked token.** Zero → "run `init`"; more than one is impossible by index, but the check reports it rather than assuming.
 4. Every configured worker's capability set is in the catalogue; every configured workspace root exists and is not a drive root.
-5. Lease HMAC key present and readable, or generated and hardened on first run.
+5. The protected Phase 5 `config.json` exists, parses against its schema, and
+   supplies the workspace roots and bounded lifecycle defaults before either
+   transport is exposed.
+6. Lease HMAC key present and readable, or generated and hardened on first run.
 
 **Bootstrap.** Under the proposed Revision 8 hand-off, `init` is the only command permitted to run with zero principals. It creates the state root, hardens `secrets\`, applies and verifies the approved migrations, creates the exact `codex` principal and internal `system` actor, issues its first token (printed once), and exits. `serve` never bootstraps.
 
@@ -1212,7 +1311,7 @@ Either the runs, the leases, and `QA_RUNNING` all exist, or none of them do. The
 
 `RETEST` deliberately does **not** auto-dispatch: it returns the job to `IN_PROGRESS` at `cycle+1` with `state_reason='retest'`, and Codex must issue a fresh `qa_dispatch`. Implicit re-dispatch would hide which worker set actually ran in the new cycle.
 
-**Optimistic concurrency across Codex sessions.** `jobs.version` increments on every state change; `codex_decide` and `qa_dispatch` require `expected_version` and fail with `STATE_CONFLICT` (returning the current job) if it moved. Two concurrent sessions cannot both decide the same cycle; the loser re-reads and retries. Session identity is recorded on both the winning and the losing attempt.
+**Optimistic concurrency across Codex sessions.** `jobs.version` increments on every state change; `codex_decide` and `qa_dispatch` require `expected_version` and fail with `STATE_CONFLICT` (returning the current job) if it moved. Two concurrent sessions cannot both decide the same cycle; the loser re-reads and retries. The accepted winning action records its verified session identity; a failed CAS is intentionally not an accepted mutation and writes no decision, state, cycle, audit, or idempotency row.
 
 **Idempotency.** Optional `idempotency_key` on every mutating tool → unique `(actor_id, key)`. Same key + same request hash returns the stored response; different hash → `IDEMPOTENCY_CONFLICT`. Note the key is scoped to the *actor*, so two Codex sessions sharing the principal share a key namespace — keys must be UUIDs, which the schema enforces by format.
 
@@ -1228,6 +1327,7 @@ Either the runs, the leases, and `QA_RUNNING` all exist, or none of them do. The
 
 ```
 <OS profile>\.agent-orchestrator-mcp\
+├── config.json                   # protected Phase 5 runtime configuration
 ├── data\
 │   └── orchestrator.db            # ONE database for all projects
 ├── artifacts\
@@ -1352,11 +1452,14 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 17. **The service refuses to serve with zero enabled principals**, and `init` is the only path that creates one.
 18. **Two Codex session tokens map to the same principal**, both may act, and each decision records the correct `session_token_id` — answering "which session decided this?"
 19. **Session identity confers no extra authority**: a session token cannot do anything the actor cannot.
-20. **Concurrent sessions cannot both decide a cycle** — the second gets `STATE_CONFLICT` and the loss is audited.
+20. **Concurrent sessions cannot both decide a cycle** — the second gets `STATE_CONFLICT` and no durable mutation is committed; failed CAS attempts are intentionally not audit rows.
 
 **Lifecycle**
 
-21. **Max QA cycles are enforced** — the `max_cycles+1`-th dispatch is refused and the job lands in `STALLED(max_cycles)`.
+21. **Max QA cycles are enforced** — a `FIX`/`RETEST` request that would
+    exceed `max_cycles` selects the non-authoritative `STALLED(max_cycles)` guard
+    without incrementing the cycle, while a `max_cycles+1`-th dispatch is
+    refused before worker/lease creation.
 22. **`hard_max_cycles` cannot be exceeded**, even by the principal.
 23. **`qa_dispatch` is atomic** — a forced failure while inserting the second run leaves no runs, no leases, and `state` unchanged.
 24. **`RETEST` does not auto-dispatch** — the job is `IN_PROGRESS` at `cycle+1` with no runs until an explicit dispatch.
@@ -1387,7 +1490,10 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
    `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; it does not open the
    authoritative DB or report SQL migration/principal counts. Deep SQLite
    integrity is verified by `init` and `serve` startup.
-4. `npx @modelcontextprotocol/inspector node dist/index.js --stdio` — `tools/list` shows the ten tools; call `job_create` and `job_get` by hand.
+4. `npx @modelcontextprotocol/inspector node dist/index.js --stdio` — the
+   current baseline `tools/list` shows the ten baseline tools; the Phase 5
+   verification packet must additionally prove only the approved lifecycle
+   additions and must not expose Phase 6–9 tools.
 5. Start HTTP mode; `curl` with no token → 401; bad `Origin` → 403; worker token → `tools/list` **does not contain `codex_decide`**.
 6. Issue a *second* Codex token (`token issue --label codex-session-b`); register both in two Codex sessions via `bearer_token_env_var`; confirm both can act and that `audit_query` distinguishes them.
 7. Scripted job against the fixture worker: create (in `C:\AgentProjects\...`) → dispatch → report(PASS) → confirm `authoritative_status` is NULL → `codex_decide(REJECT)` → `audit_query` explains the chain.
@@ -1415,7 +1521,9 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 - One SQLite store, migrations, all tables and **triggers T1–T8** (including the frozen `decision_grants` and `authoritative_statuses` reference tables and durable job roots)
 - Actors, `actor_tokens` (multi-session), capabilities, dispatch leases, print-once tokens
 - Job state machine and transition table exactly as §6, including the atomic `qa_dispatch` transaction
-- The ten MCP tools of §8
+- The ten baseline MCP tools of §8, plus the two Phase 5 lifecycle operations
+  `job_start` and `job_resume` once the Phase 5 plan is independently reviewed
+  and implementation is explicitly authorized
 - HTTP (loopback + bearer + Origin/Host guards) **and** stdio over one core
 - Generic NDJSON process-worker adapter + shared `ProcessRuntime` + fixture workers
 - Both worker ingress paths (spawned NDJSON, and `run_report` with a lease)
@@ -1464,7 +1572,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **2** | MCP spine | Both entry points, one trivial `ping` tool, localhost guards, bearer gate, `actor_tokens` resolution | Inspector connects; invariant 37; **observed Codex protocol era recorded** |
 | **3** | Store & DB authority | Migrations `001`–`004`, all tables, seeds, **triggers T1–T8** (freeze triggers created *after* the seed inserts), canonical schema verification, repositories, init/serve SQL integrity checks, and doctor filesystem/security diagnosis | Invariants 7–15, **15a–15j** plus F-1 replacement cases (raw SQL), 16; failed-init cleanup/build-copy/transaction gates; doctor explicitly reports SQL integrity not checked by design |
 | **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, decision-scoped idempotency/CAS, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
-| **5** | Job lifecycle | `job_create` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29; integration to `APPROVED` with no workers |
+| **5** | Job lifecycle | Protected `config.json`, `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34 |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, path jail, hashing, trust classes, size caps | Invariant 30 |
 | **8** | Resilience | Reaper, crash recovery, cancellation, graceful shutdown, `STALLED` paths, `audit_query` | Invariants 27, 35 |
@@ -1535,5 +1643,6 @@ Scope remains honest: V1 is the authority core plus one generic worker adapter. 
 The Phase 3 merge is complete. The Revision 8 amendment and
 `docs/PHASE4_PLAN.md` are governing artifacts originating at `65008a97`; the
 Phase 4 implementation is complete and merged in `main` at
-`ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. Phase 5 planning may begin only
-after a separate post-merge closure and planning authorization decision.
+`ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. The Phase 5 planning baseline and
+its authorization are recorded in `docs/PHASE5_PLAN.md`; implementation is in
+progress on `codex/phase5-implementation` and remains unmerged.
