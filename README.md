@@ -18,7 +18,8 @@ reports `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; init and serve startup own dee
 canonical schema, audit-chain, actor-state, and token checks. Job creation, worker execution, leases,
 evidence, artifacts, and other Phase 5/6 behavior remain out of scope.
 
-The approved design and the full phase plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The approved design and the Phase 4 implementation plan are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md).
 The empirical Codex/Inspector protocol observation is recorded in
 [docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 

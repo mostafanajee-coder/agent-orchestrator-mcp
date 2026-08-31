@@ -6,10 +6,10 @@ import {
   DECISION_VALUES,
   AUTHORITATIVE_STATUS_VALUES,
   WORKFLOW_STATE_VALUES,
-  applyDecision,
+  applyTransition,
   type DecisionErrorCode,
   type DecisionInput,
-} from '../../authority/decision.js';
+} from '../../domain/decide.js';
 import { hasCapability } from '../../authority/capabilities.js';
 import type { AuditWriter } from '../../authority/audit.js';
 import type { SqliteDatabase } from '../../store/db.js';
@@ -123,7 +123,7 @@ export function registerCodexDecide(
         requestId: requestIdFromContext(context.mcpReq.id),
       };
       try {
-        const result = applyDecision(options.db, options.audit, actor, decisionInput);
+        const result = applyTransition(options.db, options.audit, actor, decisionInput);
         const output: CodexDecideOutputValue = {
           ok: true,
           decision_id: result.decisionId,

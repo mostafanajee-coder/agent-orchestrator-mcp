@@ -90,7 +90,7 @@ beforeEach(openTestDatabase);
 afterEach(closeTestDatabase);
 
 describe('migration discovery and exact ledger contract', () => {
-  it('discovers exactly the numeric Phase 3 set in order', () => {
+  it('REG-01 discovers exactly the numeric Phase 4 set in order', () => {
     expect(approvedMigrations().map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(approvedMigrations().every((migration) => !/\b(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(migration.sql))).toBe(
       true,
@@ -158,7 +158,7 @@ describe('migration runner', () => {
     expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it('refuses migration 005 when a pre-existing audit sequence is non-positive', () => {
+  it('O1-01/O1-03 refuses migration 005 when a pre-existing audit sequence is non-positive', () => {
     applyMigrationOne();
     applyMigrationTwo();
     applyMigrationThree();

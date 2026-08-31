@@ -87,10 +87,6 @@ interface SequenceRow {
   readonly seq?: unknown;
 }
 
-interface HashRow {
-  readonly hash?: unknown;
-}
-
 interface SqlAuditRow {
   readonly seq: unknown;
   readonly ts: unknown;
@@ -194,17 +190,6 @@ function nextSequence(db: SqliteDatabase): number {
   return current + 1;
 }
 
-function previousHash(db: SqliteDatabase): string {
-  const row = db.prepare(
-    'SELECT hash FROM audit_log ORDER BY seq DESC LIMIT 1',
-  ).get() as HashRow | undefined;
-  if (row === undefined) return AUDIT_GENESIS_HASH;
-  if (typeof row.hash !== 'string' || !HEX_DIGEST.test(row.hash)) {
-    throw new AuditError('The previous audit hash is invalid.');
-  }
-  return row.hash;
-}
-
 function canonicalHashInput(row: AuditRow): string {
   return JSON.stringify({
     seq: row.seq,
@@ -262,13 +247,8 @@ export class AuditWriter {
     if (!this.db.inTransaction) {
       throw new AuditError('Audit append requires an active transaction.');
     }
-    const existingChain = verifyAuditChain(this.db);
-    if (!existingChain.valid) {
-      throw new AuditError(
-        'The existing audit chain is invalid at sequence ' + String(existingChain.firstInvalidSeq ?? 'unknown') + '.',
-      );
-    }
-    const seq = nextSequence(this.db);
+    const tail = auditTail(this.db);
+    const seq = tail.seq;
     const timestamp = input.timestamp ?? new Date(this.clock()).toISOString();
     if (!RFC3339_UTC.test(timestamp) || !Number.isFinite(Date.parse(timestamp))) {
       throw new AuditError('timestamp must be a valid RFC3339 UTC value.');
@@ -312,7 +292,7 @@ export class AuditWriter {
       toAuthStatus: boundedText(input.toAuthStatus, 'toAuthStatus'),
       result: input.result,
       detailJson: detailJson(input.detail, this.secretValues),
-      prevHash: previousHash(this.db),
+      prevHash: tail.prevHash,
       hash: '',
     };
     const hash = createHash('sha256').update(canonicalHashInput(row), 'utf8').digest('hex');
@@ -395,6 +375,34 @@ function auditRowFromSql(row: SqlAuditRow): AuditRow {
     prevHash: String(row.prev_hash),
     hash: String(row.hash),
   };
+}
+
+/** Validates only the current tail; the complete chain is checked at startup. */
+function auditTail(db: SqliteDatabase): { readonly seq: number; readonly prevHash: string } {
+  const currentNext = nextSequence(db);
+  const raw = db.prepare(
+    'SELECT seq, ts, actor_id, actor_role, session_token_id, request_id, session_hint, action, job_id, cycle, capability, subject_type, subject_id, from_state, to_state, from_auth_status, to_auth_status, result, detail_json, prev_hash, hash FROM audit_log ORDER BY seq DESC LIMIT 1',
+  ).get() as SqlAuditRow | undefined;
+  if (raw === undefined) {
+    if (currentNext !== 1) throw new AuditError('The audit sequence state has no matching tail row.');
+    return { seq: 1, prevHash: AUDIT_GENESIS_HASH };
+  }
+
+  const row = auditRowFromSql(raw);
+  if (
+    !Number.isSafeInteger(row.seq)
+    || row.seq <= 0
+    || row.seq + 1 !== currentNext
+    || !HEX_DIGEST.test(row.prevHash)
+    || !HEX_DIGEST.test(row.hash)
+    || (row.seq === 1 && row.prevHash !== AUDIT_GENESIS_HASH)
+    || !(AUDIT_ACTION_VALUES as readonly string[]).includes(row.action)
+  ) {
+    throw new AuditError('The current audit tail is invalid.');
+  }
+  const expectedHash = createHash('sha256').update(canonicalHashInput(row), 'utf8').digest('hex');
+  if (row.hash !== expectedHash) throw new AuditError('The current audit tail hash is invalid.');
+  return { seq: currentNext, prevHash: row.hash };
 }
 
 export function verifyAuditChain(db: SqliteDatabase): AuditChainReport {

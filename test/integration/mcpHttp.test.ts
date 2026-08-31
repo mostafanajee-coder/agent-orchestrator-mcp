@@ -71,7 +71,7 @@ async function rawHttpRequest(
   });
 }
 
-describe('real loopback Streamable HTTP transport', () => {
+describe('REG-03/AUTH-08 real loopback Streamable HTTP compatibility transport', () => {
   let server: Server;
   let endpoint: string;
   let loggerMessages: string[];

@@ -1,13 +1,115 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 7)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline)
 
-> **Status:** approved. This is the design of record; the implementation follows the phase plan in §21.
-> Implementation is at **Phase 3 (Store & DB authority)**. Phase 4 and later sections are design intent, not
-> shipped behaviour. The design sections state required behavior; the Phase 3
-> implementation status is recorded in the plan and README.
+> **Status:** Revision 7 remains the approved Phase 3 baseline on `main`. Revision 8 is the approved Phase 4 planning baseline frozen at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; the authorized implementation candidate is `codex/phase4-implementation` and is not merged.
+> Phase 4 source implementation is authorized on that branch by a subsequent Codex
+> gate. This document does not authorize merge, push, deployment, or Phase 5/6 work.
+> The Revision 8 proposal also amends the shared design sections §4, §14, §16,
+> and §21 where explicitly identified below.
 
 ---
 
 ## Revision Delta
+
+### Revision 8 / Phase 4 authority and auth activation (approved implementation baseline)
+
+Revision 8 is the approved amendment governing the Phase 4 implementation
+candidate. It preserves the Revision 7 Phase 3 baseline and authorizes only the
+scoped Phase 4 work on `codex/phase4-implementation`; it does not authorize
+merge, push, deployment, or Phase 5/6 behavior.
+
+The proposed Phase 4 target is schema version 6, reached by two new reviewed
+migrations:
+
+- `005_audit_sequence_guard_correction.sql` resolves O-1 before any audit
+  writer exists by replacing only the existing audit replacement condition with
+  the positive-sequence form equivalent to `NEW.seq > 0`. It must fail closed
+  on pre-existing nonpositive audit sequence rows and record its version
+  atomically. O1-02 verifies normal omitted AUTOINCREMENT inserts and existing
+  positive identities in an isolated throwaway database; the migration itself
+  does not write a verification row. Its compiled canonical fingerprint is
+  updated in the reviewed source change, not by runtime migration SQL.
+- `006_actor_token_immutability.sql` adds schema guards for actor identity/role/
+  capability/creation fields and token identity/binding/digest/label/expiry/
+  creation fields. Revoke and `last_used_at` lifecycle updates remain possible;
+  a disabled token cannot be re-enabled. Historical migrations 001–004 are
+  never rewritten.
+
+The canonical fingerprint registry becomes version-keyed for schema versions 4,
+5, and 6. A v4 database is checked against v4 definitions before migration 005,
+against v5 definitions after migration 005, and against v6 definitions after
+migration 006; the final init/serve check uses v6. These expected definitions
+are compiled source data updated in the reviewed migration changes, never by
+runtime migration SQL.
+
+Phase 4 retains the literal V1 actor IDs `codex` (the one principal) and
+`system` (the internal actor), but authority is actor/role/capability based and
+not tied to an executable name. Many verified `actor_tokens` sessions map to
+the same `codex` actor, leaving a future approved ChatGPT MCP client on the
+same authentication model without a second principal or authority system.
+The exact static public capability catalogue remains
+`job:create`, `job:read`, `job:decide`, `qa:request`, `work:report`,
+`evidence:add`, and `artifact:register`; `system` has `capabilities_json=[]`
+and no bearer token. The startup gate rejects any additional `system`-role
+actor and any `actor_tokens` row mapped to `system`.
+`work:report` remains worker-only; the principal is not granted a
+lease-backed worker-report path.
+
+`init` is the only explicit production bootstrap path. It atomically creates
+the exact principal/system rows and the first digest-only token on a valid
+empty schema, prints the token once after commit, and is idempotent on a valid
+already-bootstrapped state. Ambiguous or partial actor/token states fail
+closed; `serve` never bootstraps credentials. Local CLI token issue/list/revoke
+is proposed; token administration is not an MCP tool, token scopes are not a
+database field, and the Phase 2 environment variable is only token delivery.
+
+The persistent resolver validates the database token, actor, role,
+capabilities, disabled state, expiry, and immutable session label. It has no
+Phase 2 fallback. Startup requires exactly one enabled `codex` principal, the
+exact enabled `system` actor, valid role-compatible capabilities, valid token
+rows, and the Phase 3 schema/migration/canonical gates before HTTP bind or
+stdio protocol output.
+The resolver also rejects a system-role actor before any client transport
+context is created.
+
+Transport compatibility is wire-only. The existing HTTP wire contract keeps a
+fixed `mcp` transport marker; the adapter exposes that marker alongside the
+verified actor capabilities as non-authoritative SDK wire metadata. It is not
+stored as a token scope, does not grant a capability, and does not create an
+authentication fallback. Application authorization uses only the verified
+actor capabilities.
+
+`expires_at = NULL` means no scheduled expiry. A non-NULL value is an
+immutable RFC3339 UTC timestamp ending in `Z`; a token is expired when
+`expires_at <= current_utc_time`. Expired and revoked token rows remain
+available indefinitely in V1 for attribution and audit history, with no prune
+path in this phase. The resolver rejects them permanently; retention never
+restores authentication validity.
+
+`codex_decide` remains the narrow Phase 4 authority tool and uses the existing
+fixture/production job rows; `job_create`, job query tools, workers, leases in
+active use, evidence/artifact tools, and broader lifecycle remain Phase 5/6.
+The sole application authority writer uses the static `TRANSITIONS` table,
+mandatory rationale, expected-version CAS, verified `session_token_id`,
+`BEGIN IMMEDIATE`, T1–T4, and an atomic decision/state/status/audit unit.
+Phase 4 owns decision-scoped idempotency and expected-version CAS for
+`codex_decide` only; broader job/lifecycle idempotency and CAS remain Phase 5.
+
+After O-1, active Phase 4 audit writing may use the existing `audit_log` table:
+append-only AUTOINCREMENT rows, fixed canonical JSON/hash-chain input, genesis
+hash, redacted bounded details, verified session attribution, and no update,
+delete, conflict-resolution, or self-repair path. The audit writer is disabled
+until migration 005 and its tests pass.
+
+Revision 8 adds `bootstrap.completed`, `token.issued`, and `token.revoked` to
+the Phase 4 audit action catalogue. The stored hash is
+`SHA-256(canonical_json(row_without_hash))`, with `prev_hash` included once as
+the final canonical key and no separate prefix concatenation.
+
+The full Phase 4 plan, 12 work packages, 70-case executable matrix, security
+answers, review sequence, and explicit Phase 5/6 exclusions are recorded in
+`docs/PHASE4_PLAN.md`. Revision 8 remains **PROPOSED — READY FOR INDEPENDENT
+REVIEW** until an independent review and principal approval authorize
+implementation.
 
 ### Revision 7 / SQLite row-replacement integrity (this revision — approved architecture correction)
 
@@ -39,7 +141,7 @@ whitespace is normalized. Any reviewed DDL change must regenerate the compiled
 fingerprint in the same reviewed source change. A fail-closed representation
 drift is preferable to accepting weakened DDL.
 
-### Revision 6 / Phase 3 job-row and schema-verification correction (this revision — approved architecture correction)
+### Revision 6 / Phase 3 job-row and schema-verification correction (historical approved architecture correction)
 
 Revision 6 preserves the Revision 5 doctor boundary and all T1–T6 semantics. It
 adds the narrow D-1/D-2/D-3/D-4/D-5/D-6 corrections approved for the Phase 3
@@ -66,7 +168,7 @@ implementation:
   `src/store/repositories.ts` module. Phase 4 design remains intact and is not
   activated by these corrections.
 
-### Revision 5 / Phase 3 doctor ownership (this revision — approved architecture correction)
+### Revision 5 / Phase 3 doctor ownership (historical approved architecture correction)
 
 Phase 3 adopts a **FAIL-CLOSED / NO-DIRECT-SQL DOCTOR** contract for the
 authoritative WAL database. `doctor` never opens
@@ -285,9 +387,13 @@ The orchestrator is the control plane; MCP is not forced to be the internal work
 
 ## 4. Codex Authority Model — exact enforcement mechanism
 
+> **Revision 8 proposed amendment:** The persistent resolver, transport-marker,
+> and internal-system rules in this section apply only after Phase 4 approval;
+> the implemented Phase 3 runtime remains the Revision 7 behavior.
+
 Five independent layers. Removing any one still leaves the invariant enforced.
 
-**Layer 1 — Transport identity.** Every request carries a bearer token. `verifyAccessToken(token)` hashes it (SHA-256) and looks it up in **`actor_tokens`**, which is many-to-one onto `actors`. It returns `AuthInfo { clientId: actor_id, scopes: capabilities[], tokenId, sessionLabel }`. Several Codex sessions may each hold their own token; all resolve to the **single** principal actor. Tokens are never stored in plaintext, never logged, never returned by any tool. On stdio the same lookup happens once at startup from `ORCHESTRATOR_ACTOR_TOKEN`. Unknown, expired, or disabled token → 401, audited as `auth.rejected`.
+**Layer 1 — Transport identity.** Every request carries a bearer token. `verifyAccessToken(token)` hashes it (SHA-256) and looks it up in **`actor_tokens`**, which is many-to-one onto `actors`. It returns a verified actor context; the SDK-facing `AuthInfo.scopes` carries the fixed `mcp` transport marker plus actor capabilities for wire compatibility, while application authorization uses the explicit actor capabilities only. Several Codex sessions may each hold their own token; all resolve to the **single** principal actor. Tokens are never stored in plaintext, never logged, never returned by any tool. On stdio the same lookup happens once at startup from `ORCHESTRATOR_ACTOR_TOKEN`. Unknown, expired, or disabled token → 401, audited as `auth.rejected`.
 
 **Layer 2 — Tool visibility.** The SDK builds a fresh `McpServer` per request from a factory receiving `authInfo`. Tools the actor lacks capabilities for are **not registered** — `tools/list` for a worker does not contain `codex_decide` at all.
 
@@ -507,9 +613,9 @@ What this blocks, at the SQL layer, with no application code involved:
 
 **The structural separation.** `worker_runs.worker_verdict ∈ {PASS, FAIL, INCONCLUSIVE, NONE}` is advisory metadata on a worker row. `jobs.authoritative_status ∈ {APPROVED, READY_FOR_DELIVERY, JOB_COMPLETED, REJECTED, JOB_CANCELLED}` is authoritative. **No function reads the first and writes the second** — asserted by a source-scanning test.
 
-**Exactly one principal.** The unique partial index guarantees *at most* one. Startup adds the missing half: `serve` runs `SELECT count(*) FROM actors WHERE role='principal' AND disabled=0` and **refuses to serve unless the result is exactly 1**, exiting with an actionable message. Bootstrap: `init` is the only command that may run with zero principals; it creates the `codex` actor and issues its first token. Disabling the principal is therefore a deliberate kill switch — the service will not serve without one, by design (fail-closed, not fail-open).
+**Exactly one principal.** The unique partial index guarantees *at most* one. Startup adds the missing half: `serve` runs `SELECT count(*) FROM actors WHERE role='principal' AND disabled=0` and **refuses to serve unless the result is exactly 1**, exiting with an actionable message. Under the proposed Revision 8 hand-off, `init` is the only command that may run with zero principals; it creates the exact `codex` principal and internal `system` actor and issues the first token after the schema reaches the approved Phase 4 version. Disabling the principal is therefore a deliberate kill switch — the service will not serve without one, by design (fail-closed, not fail-open).
 
-**What the `system` actor may do:** write audit rows, mark worker runs terminal, and move a job to `STALLED`. It has no token row in `actor_tokens`, so it is unreachable over any transport.
+**What the `system` actor may do:** write audit rows, mark worker runs terminal, and move a job to `STALLED`. It has no token row in `actor_tokens`, and the proposed Revision 8 resolver and startup gate reject any system-linked token, so it is unreachable over any transport.
 
 ---
 
@@ -825,11 +931,12 @@ CREATE INDEX ix_audit_job     ON audit_log(job_id, seq);
 CREATE INDEX ix_audit_session ON audit_log(session_token_id, seq);
 ```
 
-Plus triggers T1–T8 from §4. Migrations are numbered `.sql` files applied in a
-runner-owned transaction at startup; the approved set is exactly
-`[1, 2, 3, 4]`, and the service refuses to start if the DB is newer than the
-binary or any canonical table/index/trigger definition differs from the
-approved schema.
+Plus triggers T1–T8 from §4. The Phase 3 baseline migration set was exactly
+`[1, 2, 3, 4]`. Revision 8 extends the approved runtime migration set to
+`[1, 2, 3, 4, 5, 6]`, with version-keyed canonical definitions for v4, v5, and
+v6. Migrations are applied in a runner-owned transaction at startup; the
+service refuses to start if the DB is newer than the binary or any canonical
+table/index/trigger definition differs from the approved version.
 
 ---
 
@@ -946,13 +1053,29 @@ Each retry is **its own `worker_runs` row** (`attempt` incremented) — partial 
 
 ## 14. Audit Model
 
+> **Revision 8 proposed amendment:** The Phase 4 audit actions, hash
+> construction, and rejected-auth bound in this section are planning text only;
+> the Phase 3 audit schema remains the approved Revision 7 baseline.
+
 Every entry answers **who / which session / what / when / which job / what result**: `actor_id`, `actor_role`, `session_token_id`, `request_id`, `session_hint`, `action`, `job_id`, `cycle`, `capability`, `subject_type`+`subject_id`, `from_state`/`to_state`, `from_auth_status`/`to_auth_status`, `result`, redacted `detail_json`, `ts`.
 
-**Audited actions:** `auth.rejected`, `job.create`, `job.start`, `qa.dispatch`, `run.start`, `run.report`, `run.duplicate_rejected`, `run.timeout`, `run.orphaned`, `evidence.add`, `artifact.register`, `codex.decide`, `system.stall`, `lease.issued`, `lease.consumed`, `lease.rejected`, `config.reload`, `startup.invariant_failed`.
+**Audited actions:** `bootstrap.completed`, `token.issued`, `token.revoked`, `auth.rejected`, `job.create`, `job.start`, `qa.dispatch`, `run.start`, `run.report`, `run.duplicate_rejected`, `run.timeout`, `run.orphaned`, `evidence.add`, `artifact.register`, `codex.decide`, `system.stall`, `lease.issued`, `lease.consumed`, `lease.rejected`, `config.reload`, `startup.invariant_failed`.
+
+For Phase 4, an `auth.rejected` row uses the internal `system` attribution
+with null session fields and no credential material. Rejected-auth writes are
+rate-limited or aggregated under a configured bounded cap so unknown clients
+cannot grow the append-only ledger without limit.
+This is a Phase 4 audit-writer-internal in-memory bound, separate from the
+Phase 9 transport rate limiter; it resets on process restart and requires no
+new durable table. Phase 9 retains ownership of network/request rate limiting.
 
 **Session attribution.** `session_token_id` is **verified** — it is the token row the request authenticated with, not a self-declared value — so "which Codex session made this decision?" is answered by joining `decisions.session_token_id → actor_tokens.label`. `session_hint` is an optional client-supplied string recorded alongside it and always treated as untrusted labelling. Neither field confers or restricts authority; both are attribution only, preserving the single-principal invariant.
 
-**Tamper evidence:** `hash = sha256(prev_hash || canonical_json(row))`, chained by `seq`. `audit_query { verify_chain: true }` recomputes and reports the first break. Append-only is enforced by trigger T5 and T8 as well as by the absence of any update/delete/replace statement in the codebase (source-scanning test).
+**Tamper evidence:** `hash = sha256(canonical_json(row_without_hash))`, where
+`prev_hash` is included once as the final canonical key, chained by `seq`.
+`audit_query { verify_chain: true }` recomputes and reports the first break.
+Append-only is enforced by trigger T5 and T8 as well as by the absence of any
+update/delete/replace statement in the codebase (source-scanning test).
 
 **"Why did Codex approve this job?"** — one query: the `decisions` rows for the job (each with mandatory `rationale`, `evidence_refs`, and session attribution), joined to the evidence they cite and the worker runs that produced it, in audit order. No transcripts required.
 
@@ -1018,6 +1141,10 @@ The same verification is applied to `data\orchestrator.db` — the database cont
 
 ## 16. Failure & Recovery Strategy
 
+> **Revision 8 proposed amendment:** The system-actor startup checks and
+> bootstrap details below are Phase 4 design intent; they are not part of the
+> implemented Phase 3 runtime.
+
 **Init and serve own SQL integrity.** `init` may securely create the
 database, apply migrations, and run every required SQLite integrity/schema check
 before it returns. `serve` opens an existing database only, performs
@@ -1031,16 +1158,16 @@ DB/WAL/SHM paths created by that fresh attempt are removed; cleanup errors are
 reported as secondary detail and never replace the original initialization
 failure. A normal retry starts from the known failed-init artifact boundary.
 
-**Serve startup invariants**, checked before serving a single request; any failure exits non-zero with an actionable message and an `startup.invariant_failed` audit row:
+**Serve startup invariants**, checked before serving a single request; any failure exits non-zero with an actionable message and an `startup.invariant_failed` audit row when a valid database/system actor can record it; otherwise the failure is bounded stderr only:
 
 1. State root exists and its ACL verifies (§15.1).
 2. Migrations applied; `PRAGMA quick_check` clean; DB not newer than the binary;
    AOM-owned connections report `recursive_triggers=ON`.
-3. **Exactly one enabled principal actor exists.** Zero → "run `init`"; more than one is impossible by index, but the check reports it rather than assuming.
+3. **Exactly one enabled principal actor exists, with the exact internal `system` actor and no system-linked token.** Zero → "run `init`"; more than one is impossible by index, but the check reports it rather than assuming.
 4. Every configured worker's capability set is in the catalogue; every configured workspace root exists and is not a drive root.
 5. Lease HMAC key present and readable, or generated and hardened on first run.
 
-**Bootstrap.** `init` is the only command permitted to run with zero principals. It creates the state root, hardens `secrets\`, applies migrations, creates the `codex` principal, issues its first token (printed once), and exits. `serve` never bootstraps.
+**Bootstrap.** Under the proposed Revision 8 hand-off, `init` is the only command permitted to run with zero principals. It creates the state root, hardens `secrets\`, applies and verifies the approved migrations, creates the exact `codex` principal and internal `system` actor, issues its first token (printed once), and exits. `serve` never bootstraps.
 
 **Crash recovery at boot.** `worker_runs` in `PENDING`/`RUNNING` are marked `ORPHANED` with an audit entry; a job in `QA_RUNNING` with no live runs → `STALLED(reason=orphaned_runs)`. **Recovery never approves and never fails a job.**
 
@@ -1324,6 +1451,10 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 
 ## 21. Implementation Phases
 
+> **Revision 8 implementation baseline:** The Phase 4 row below describes the
+> authorized Phase 4 scope on `codex/phase4-implementation`. It does not
+> authorize merge, push, deployment, or Phase 5/6 work.
+
 Each phase is independently verifiable and leaves the repo green.
 
 | # | Phase | Deliverable | Verified by |
@@ -1332,8 +1463,8 @@ Each phase is independently verifiable and leaves the repo green.
 | **1** | State root & secrets | State-root resolution, directory creation, **Windows ACL apply + verify + fail-closed**, POSIX modes, lease-key generation, `doctor` | Invariants 31, 32; manual ACL tamper drill |
 | **2** | MCP spine | Both entry points, one trivial `ping` tool, localhost guards, bearer gate, `actor_tokens` resolution | Inspector connects; invariant 37; **observed Codex protocol era recorded** |
 | **3** | Store & DB authority | Migrations `001`–`004`, all tables, seeds, **triggers T1–T8** (freeze triggers created *after* the seed inserts), canonical schema verification, repositories, init/serve SQL integrity checks, and doctor filesystem/security diagnosis | Invariants 7–15, **15a–15j** plus F-1 replacement cases (raw SQL), 16; failed-init cleanup/build-copy/transaction gates; doctor explicitly reports SQL integrity not checked by design |
-| **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
-| **5** | Job lifecycle | `job_create` (+ workspace allowlist), `job_get`, `job_list`, cycles, idempotency, CAS | Invariants 21, 22, 24, 29; integration to `APPROVED` with no workers |
+| **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, decision-scoped idempotency/CAS, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
+| **5** | Job lifecycle | `job_create` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34 |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, path jail, hashing, trust classes, size caps | Invariant 30 |
 | **8** | Resilience | Reaper, crash recovery, cancellation, graceful shutdown, `STALLED` paths, `audit_query` | Invariants 27, 35 |
@@ -1359,8 +1490,9 @@ Only what genuinely blocks or materially changes implementation. *(State locatio
 
 ## 23. FINAL RECOMMENDATION
 
-**Revision 7 is the approved architecture for Phase 3 implementation
-authorization.** Revision 5 remains the historical doctor-boundary correction;
+**Revision 7 remains the approved architecture for the merged Phase 3 baseline.**
+Revision 8 is the approved Phase 4 implementation baseline on the separate
+implementation branch. Revision 5 remains the historical doctor-boundary correction;
 Revision 6 remains the historical job-row/schema correction; Revision 7
 preserves both and adds the narrow SQLite row-replacement integrity correction
 described above.
@@ -1388,10 +1520,11 @@ closing SQLite and keeps the original failure visible.
 
 Revision 7 closes F-1: SQLite `REPLACE` cannot erase and recreate an existing
 `jobs`, `decisions`, or `audit_log` identity, even when an external connection
-sets `recursive_triggers=OFF`. The current approved migration ledger is
+sets `recursive_triggers=OFF`. The Revision 7 Phase 3 baseline ledger is
 `[1, 2, 3, 4]`, canonical verification covers T1–T8, and AOM-owned writable
-connections enable `recursive_triggers` as defense in depth. Phase 4 remains a
-design-only hand-off.
+connections enable `recursive_triggers` as defense in depth. Revision 8 adds
+migrations 005/006 and the v6 authority/auth implementation on the separate
+Phase 4 branch.
 
 The Windows security model is Windows-native — inheritance-stripped, current-user-SID-only DACLs, verified after creation and on every startup, failing closed — with `chmod` correctly demoted to the POSIX implementation, and DPAPI evaluated and deferred on a stated cost/benefit basis rather than by omission. State lives in one global root so the orchestrator can coordinate across projects, while workspace access is a narrow, config-driven allowlist that never includes a drive root.
 
@@ -1399,6 +1532,7 @@ Multiple Codex sessions are supported with **verified** session attribution and 
 
 Scope remains honest: V1 is the authority core plus one generic worker adapter. `agy` and the browser worker are designed, external, and deferred, with the agy CLI contract explicitly flagged as unverified.
 
-**Recommended next step:** independently re-review the Phase 3 F-1 remediation
-against this Revision 7 boundary; do not begin Phase 4 until that review and
-principal confirmation are complete.
+The Phase 3 merge is complete. The Revision 8 amendment and
+`docs/PHASE4_PLAN.md` are frozen governing artifacts from `65008a97`; the
+Phase 4 implementation candidate is now under independent review. No merge,
+push, deployment, or Phase 5/6 work is authorized by this document.

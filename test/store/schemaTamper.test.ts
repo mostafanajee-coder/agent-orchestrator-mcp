@@ -103,7 +103,7 @@ describe('canonical index and table definitions', () => {
   });
 });
 
-describe('serve tamper gate', () => {
+describe('START-06/REG-01 serve tamper gate', () => {
   it('rejects a tampered same-name trigger before HTTP bind', () => {
     tamperTrigger('trg_auth_status_requires_granting_decision');
     prepareDoctorForServe();

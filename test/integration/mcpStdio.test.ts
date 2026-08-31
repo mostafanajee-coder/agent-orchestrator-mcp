@@ -63,7 +63,7 @@ afterEach(async () => {
   }
 });
 
-describe('official stdio transport over the shared MCP core', () => {
+describe('REG-03/AUTH-08 official stdio compatibility transport over the shared MCP core', () => {
   it('authenticates once at startup and keeps stdout protocol-only', async () => {
     const input = new PassThrough();
     const output = new PassThrough();

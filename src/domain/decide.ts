@@ -4,9 +4,9 @@ import type { SqliteDatabase } from '../store/db.js';
 import { withImmediateTransaction } from '../store/db.js';
 import type { VerifiedActorAuthInfo } from '../mcp/auth.js';
 
-import { assertRoleCapabilities, canonicalCapabilitiesJson, hasCapability } from './capabilities.js';
-import type { Capability } from './capabilities.js';
-import type { AuditWriter } from './audit.js';
+import { assertRoleCapabilities, canonicalCapabilitiesJson, hasCapability } from '../authority/capabilities.js';
+import type { Capability } from '../authority/capabilities.js';
+import type { AuditWriter } from '../authority/audit.js';
 
 export const DECISION_VALUES = [
   'APPROVE',
@@ -367,7 +367,7 @@ function replayIfPresent(
   }
 }
 
-export function applyDecision(
+export function applyTransition(
   db: SqliteDatabase,
   audit: AuditWriter,
   actor: VerifiedActorAuthInfo,

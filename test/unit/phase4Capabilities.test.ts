@@ -8,7 +8,7 @@ import {
 } from '../../src/authority/capabilities.js';
 
 describe('Phase 4 capability catalogue', () => {
-  it('keeps the reviewed seven-value catalogue and canonical ordering', () => {
+  it('CAP-01 keeps the reviewed seven-value catalogue and canonical ordering', () => {
     expect(CAPABILITY_VALUES).toEqual([
       'job:create',
       'job:read',
@@ -22,7 +22,7 @@ describe('Phase 4 capability catalogue', () => {
     expect(canonicalCapabilitiesJson(['job:read', 'job:decide'])).toBe('["job:decide","job:read"]');
   });
 
-  it('rejects malformed, duplicate, unknown, and role-incompatible capabilities', () => {
+  it('CAP-02/CAP-03/CAP-04/CAP-05 rejects malformed and role-incompatible capabilities', () => {
     expect(() => parseCapabilities('{')).toThrow('valid JSON');
     expect(() => parseCapabilities('["job:read","job:read"]')).toThrow('duplicate-free');
     expect(() => parseCapabilities('["not-a-capability"]')).toThrow('duplicate-free');

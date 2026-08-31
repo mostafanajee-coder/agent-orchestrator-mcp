@@ -1,9 +1,9 @@
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AuditWriter, verifyAuditChain } from '../../src/authority/audit.js';
+import { AUDIT_DETAIL_MAX_BYTES, AuditWriter, verifyAuditChain } from '../../src/authority/audit.js';
 import { bootstrapProduction } from '../../src/authority/bootstrap.js';
-import { applyDecision, DecisionError } from '../../src/authority/decision.js';
+import { applyTransition, DecisionError } from '../../src/domain/decide.js';
 import { validatePhase4State } from '../../src/authority/state.js';
 import { openPhase4ManagementRuntime, openPhase4Runtime } from '../../src/authority/runtime.js';
 import { runTokenCommand } from '../../src/commands/tokens.js';
@@ -54,7 +54,7 @@ async function responsePayload(response: Response): Promise<Record<string, unkno
 }
 
 describe('Phase 4 bootstrap and persistent authority', () => {
-  it('bootstraps exactly one principal, one system actor, and a digest-only token', () => {
+  it('BOOT-02/BOOT-03 bootstraps exactly one principal, one system actor, and a digest-only token', () => {
     const audit = new AuditWriter(fixture.db);
     const first = bootstrapProduction(fixture.db, audit, () => Date.parse('2026-08-31T00:00:00Z'));
 
@@ -81,7 +81,7 @@ describe('Phase 4 bootstrap and persistent authority', () => {
     expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log').get()).toEqual({ count: 1 });
   });
 
-  it('rejects a partial authority state without auto-repair', () => {
+  it('BOOT-04 rejects a partial authority state without auto-repair', () => {
     fixture.db.prepare(
       'INSERT INTO actors(actor_id, role, display_name, capabilities_json, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     ).run('codex', 'principal', 'Codex', '["job:decide"]', 0, '2026-08-31T00:00:00Z');
@@ -93,7 +93,7 @@ describe('Phase 4 bootstrap and persistent authority', () => {
     expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log').get()).toEqual({ count: 0 });
   });
 
-  it('resolves the database token to trusted actor/session data and never falls back', () => {
+  it('TOKEN-04/AUTH-05 resolves the database token to trusted actor/session data and never falls back', () => {
     const audit = new AuditWriter(fixture.db);
     const bootstrapped = bootstrapProduction(fixture.db, audit).initialToken;
     if (bootstrapped === undefined) throw new Error('bootstrap did not return the test token');
@@ -115,7 +115,24 @@ describe('Phase 4 bootstrap and persistent authority', () => {
     expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log WHERE action = ?').get('auth.rejected')).toEqual({ count: 1 });
   });
 
-  it('rejects disabled and expired rows while retaining them for history', () => {
+  it('SESSION-01/SESSION-02 resolves multiple distinct tokens to the same codex actor', () => {
+    const audit = new AuditWriter(fixture.db);
+    const firstToken = bootstrapProduction(fixture.db, audit).initialToken;
+    if (firstToken === undefined) throw new Error('bootstrap did not return the first test token');
+    const secondToken = 'second-codex-session-token';
+    fixture.db.prepare(
+      'INSERT INTO actor_tokens(token_id, actor_id, token_sha256, label, disabled, expires_at, last_used_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run('token-second', 'codex', hashAccessToken(secondToken), 'codex-second', 0, null, null, '2026-08-31T00:00:00Z');
+    const resolver = createPersistentTokenResolver(fixture.db);
+    const first = resolver.verifyAccessTokenSync(firstToken);
+    const second = resolver.verifyAccessTokenSync(secondToken);
+    expect(first.actorId).toBe('codex');
+    expect(second.actorId).toBe('codex');
+    expect(first.tokenId).not.toBe(second.tokenId);
+    expect(first.sessionLabel).not.toBe(second.sessionLabel);
+  });
+
+  it('TOKEN-06/TOKEN-07 rejects disabled and expired rows while retaining them for history', () => {
     const audit = new AuditWriter(fixture.db);
     const initial = bootstrapProduction(fixture.db, audit).initialToken;
     if (initial === undefined) throw new Error('bootstrap did not return the test token');
@@ -134,7 +151,7 @@ describe('Phase 4 bootstrap and persistent authority', () => {
     expect(fixture.db.prepare('SELECT count(*) AS count FROM actor_tokens').get()).toEqual({ count: 3 });
   });
 
-  it('redacts configured and credential-shaped values and rejects non-positive audit sequences', () => {
+  it('AUDIT-01/AUDIT-02/AUDIT-05/O1-03 redacts values and rejects non-positive audit sequences', () => {
     const secret = 'raw-secret-value';
     const audit = new AuditWriter(
       fixture.db,
@@ -167,7 +184,45 @@ describe('Phase 4 bootstrap and persistent authority', () => {
     expect(verifyAuditChain(fixture.db)).toMatchObject({ valid: false, firstInvalidSeq: -1 });
   });
 
-  it('rejects system-linked tokens and permits a valid authority state with no usable token only for administration', () => {
+  it('AUDIT-04 detects a tampered tail hash without self-repair', () => {
+    const audit = new AuditWriter(fixture.db);
+    audit.append({
+      actorId: 'system',
+      actorRole: 'system',
+      requestId: 'audit-first',
+      action: 'auth.rejected',
+      result: 'denied',
+      timestamp: '2026-08-31T00:00:00Z',
+    });
+    fixture.db.prepare(
+      "INSERT INTO audit_log(seq, ts, actor_id, actor_role, request_id, action, result, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(2, '2026-08-31T00:00:01Z', 'system', 'system', 'audit-tampered', 'auth.rejected', 'denied', '0'.repeat(64), '1'.repeat(64));
+    expect(verifyAuditChain(fixture.db)).toMatchObject({ valid: false, firstInvalidSeq: 2 });
+  });
+
+  it('AUDIT-06 bounds detail size and rejected-auth ledger growth', () => {
+    const audit = new AuditWriter(
+      fixture.db,
+      () => Date.parse('2026-08-31T00:00:00Z'),
+      2,
+    );
+    expect(() => audit.append({
+      actorId: 'system',
+      actorRole: 'system',
+      requestId: 'oversized-detail',
+      action: 'auth.rejected',
+      result: 'denied',
+      detail: 'x'.repeat(AUDIT_DETAIL_MAX_BYTES + 1),
+      timestamp: '2026-08-31T00:00:00Z',
+    })).toThrow('Audit detail exceeds');
+    expect(audit.recordRejectedAuth('rejected-1')).toBe(true);
+    expect(audit.recordRejectedAuth('rejected-2')).toBe(true);
+    expect(audit.recordRejectedAuth('rejected-3')).toBe(false);
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log WHERE action = ?').get('auth.rejected')).toEqual({ count: 2 });
+    expect(verifyAuditChain(fixture.db)).toEqual({ valid: true });
+  });
+
+  it('TOKEN-09/START-04 rejects system-linked tokens and permits no usable token only for administration', () => {
     const audit = new AuditWriter(fixture.db);
     bootstrapProduction(fixture.db, audit);
     fixture.db.prepare(
@@ -179,7 +234,7 @@ describe('Phase 4 bootstrap and persistent authority', () => {
 });
 
 describe('Phase 4 local token lifecycle', () => {
-  it('issues, lists, and revokes a second token without exposing its digest', () => {
+  it('SESSION-01/SESSION-02/TOKEN-02/TOKEN-03/TOKEN-12 issues, lists, and revokes a second token without exposing its digest', () => {
     const initial = bootstrapProduction(fixture.db, new AuditWriter(fixture.db)).initialToken;
     if (initial === undefined) throw new Error('bootstrap did not return the test token');
     fixture.db.close();
@@ -212,7 +267,7 @@ describe('Phase 4 local token lifecycle', () => {
     expect(repeated).toEqual({ action: 'revoke', tokenId: issued.tokenId, revoked: false });
   });
 
-  it('enforces one-way token revocation and immutable binding fields', () => {
+  it('TOKEN-10/TOKEN-11/TOKEN-12 enforces one-way token revocation and immutable binding fields', () => {
     const initial = bootstrapProduction(fixture.db, new AuditWriter(fixture.db)).initialToken;
     if (initial === undefined) throw new Error('bootstrap did not return the test token');
     expect(() => fixture.db.prepare(
@@ -227,7 +282,7 @@ describe('Phase 4 local token lifecycle', () => {
     );
   });
 
-  it('opens the serving runtime only for a fully valid state, while management can issue into a zero-token state', () => {
+  it('START-01/START-02/START-05 opens serving only for valid state and permits zero-token administration', () => {
     bootstrapProduction(fixture.db, new AuditWriter(fixture.db));
     fixture.db.close();
     const runtime = openPhase4Runtime(fixture.context);
@@ -256,10 +311,39 @@ describe('Phase 4 local token lifecycle', () => {
       closeStoreFixture(actorsOnly);
     }
   });
+
+  it('START-01 rejects a zero-principal database before runtime exposure', () => {
+    fixture.db.close();
+    expect(() => openPhase4Runtime(fixture.context)).toThrow('exactly one enabled codex principal');
+  });
+
+  it('START-02 rejects a disabled sole principal without auto-enabling it', () => {
+    bootstrapProduction(fixture.db, new AuditWriter(fixture.db));
+    fixture.db.prepare("UPDATE actors SET disabled = 1 WHERE actor_id = 'codex'").run();
+    fixture.db.close();
+    expect(() => openPhase4Runtime(fixture.context)).toThrow('exactly one enabled codex principal');
+  });
+
+  it('START-03/START-04 rejects a missing system actor without auto-creating it', () => {
+    bootstrapProduction(fixture.db, new AuditWriter(fixture.db));
+    fixture.db.prepare("DELETE FROM actors WHERE actor_id = 'system'").run();
+    fixture.db.close();
+    expect(() => openPhase4Runtime(fixture.context)).toThrow('exactly one enabled system actor');
+  });
+
+  it('START-05 rejects a role-incompatible capability set before serving', () => {
+    const insert = fixture.db.prepare(
+      'INSERT INTO actors(actor_id, role, display_name, capabilities_json, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    insert.run('codex', 'principal', 'Codex', '["job:read"]', 0, '2026-08-31T00:00:00Z');
+    insert.run('system', 'system', 'System', '[]', 0, '2026-08-31T00:00:00Z');
+    fixture.db.close();
+    expect(() => openPhase4Runtime(fixture.context)).toThrow('principal must have job:decide');
+  });
 });
 
 describe('Phase 4 codex_decide tool', () => {
-  it('registers only for the verified principal and applies an audited CAS decision', async () => {
+  it('REG-04/DECIDE-01/DECIDE-08/SESSION-04 registers only for verified principal and applies audited CAS', async () => {
     const insertActor = fixture.db.prepare(
       'INSERT INTO actors(actor_id, role, display_name, capabilities_json, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     );
@@ -351,6 +435,10 @@ describe('Phase 4 codex_decide tool', () => {
       const replayPayload = await responsePayload(replay);
       expect(replayPayload.result).toMatchObject({ structuredContent: { ok: true } });
       expect(fixture.db.prepare('SELECT count(*) AS count FROM decisions').get()).toEqual({ count: 1 });
+      expect(fixture.db.prepare('SELECT session_token_id FROM decisions').get()).toEqual({ session_token_id: 'decision-token' });
+      expect(fixture.db.prepare('SELECT session_hint FROM decisions').get()).toEqual({ session_hint: 'untrusted-client-hint' });
+      expect(fixture.db.prepare('SELECT label FROM actor_tokens WHERE token_id = ?').get('decision-token')).toEqual({ label: 'decision-session' });
+      expect(fixture.db.prepare('SELECT session_token_id FROM audit_log WHERE action = ?').get('codex.decide')).toEqual({ session_token_id: 'decision-token' });
       expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log WHERE action = ?').get('codex.decide')).toEqual({ count: 1 });
       expect(verifyAuditChain(fixture.db)).toEqual({ valid: true });
     } finally {
@@ -358,7 +446,7 @@ describe('Phase 4 codex_decide tool', () => {
     }
   });
 
-  it('records IGNORE_FALSE_POSITIVE and then allows an audited approval over worker FAIL evidence', async () => {
+  it('DECIDE-01/DECIDE-07/SESSION-03 records IGNORE_FALSE_POSITIVE then approves over worker FAIL evidence', async () => {
     const insertActor = fixture.db.prepare(
       'INSERT INTO actors(actor_id, role, display_name, capabilities_json, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     );
@@ -374,7 +462,7 @@ describe('Phase 4 codex_decide tool', () => {
     const audit = new AuditWriter(fixture.db);
     const auth = createPersistentTokenResolver(fixture.db).verifyAccessTokenSync(token);
 
-    const ignored = applyDecision(fixture.db, audit, auth, {
+    const ignored = applyTransition(fixture.db, audit, auth, {
       jobId: 'job-1',
       cycle: 0,
       decision: 'IGNORE_FALSE_POSITIVE',
@@ -383,7 +471,7 @@ describe('Phase 4 codex_decide tool', () => {
       requestId: 'ignore-request',
     });
     expect(ignored).toMatchObject({ state: 'EVIDENCE_READY', version: 2 });
-    const approved = applyDecision(fixture.db, audit, auth, {
+    const approved = applyTransition(fixture.db, audit, auth, {
       jobId: 'job-1',
       cycle: 0,
       decision: 'APPROVE',
@@ -396,7 +484,7 @@ describe('Phase 4 codex_decide tool', () => {
     expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log WHERE action = ?').get('codex.decide')).toEqual({ count: 2 });
   });
 
-  it('rejects stale versions and invalid transitions without durable mutation', () => {
+  it('DECIDE-05/DECIDE-06/O2-02 rejects stale versions and invalid transitions without mutation', () => {
     const insertActor = fixture.db.prepare(
       'INSERT INTO actors(actor_id, role, display_name, capabilities_json, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     );
@@ -410,14 +498,14 @@ describe('Phase 4 codex_decide tool', () => {
     const audit = new AuditWriter(fixture.db);
     const auth = createPersistentTokenResolver(fixture.db).verifyAccessTokenSync(token);
 
-    expect(() => applyDecision(fixture.db, audit, auth, {
+    expect(() => applyTransition(fixture.db, audit, auth, {
       jobId: 'job-1',
       cycle: 0,
       decision: 'APPROVE',
       rationale: 'stale request',
       expectedVersion: 99,
     })).toThrowError(new DecisionError('STATE_CONFLICT', 'The job version changed before the decision was applied.'));
-    expect(() => applyDecision(fixture.db, audit, auth, {
+    expect(() => applyTransition(fixture.db, audit, auth, {
       jobId: 'job-1',
       cycle: 0,
       decision: 'PACKAGE',
@@ -430,5 +518,37 @@ describe('Phase 4 codex_decide tool', () => {
       state: 'EVIDENCE_READY',
       version: 1,
     });
+  });
+
+  it('DECIDE-04 rolls back decision and job mutation when the audit tail is invalid', () => {
+    const insertActor = fixture.db.prepare(
+      'INSERT INTO actors(actor_id, role, display_name, capabilities_json, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    insertActor.run('codex', 'principal', 'Codex', '["job:decide"]', 0, '2026-08-31T00:00:00Z');
+    insertActor.run('system', 'system', 'System', '[]', 0, '2026-08-31T00:00:00Z');
+    const token = 'rollback-decision-token';
+    fixture.db.prepare(
+      'INSERT INTO actor_tokens(token_id, actor_id, token_sha256, label, disabled, expires_at, last_used_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run('rollback-token', 'codex', hashAccessToken(token), 'rollback-session', 0, null, null, '2026-08-31T00:00:00Z');
+    seedJob(fixture.db);
+    fixture.db.prepare(
+      "INSERT INTO audit_log(seq, ts, actor_id, actor_role, request_id, action, result, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(1, '2026-08-31T00:00:00Z', 'system', 'system', 'tampered-audit', 'auth.rejected', 'denied', '0'.repeat(64), '1'.repeat(64));
+    const audit = new AuditWriter(fixture.db);
+    const auth = createPersistentTokenResolver(fixture.db).verifyAccessTokenSync(token);
+
+    expect(() => applyTransition(fixture.db, audit, auth, {
+      jobId: 'job-1',
+      cycle: 0,
+      decision: 'APPROVE',
+      rationale: 'must roll back because audit is invalid',
+      expectedVersion: 1,
+    })).toThrow('current audit tail');
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM decisions').get()).toEqual({ count: 0 });
+    expect(fixture.db.prepare('SELECT state, version FROM jobs WHERE job_id = ?').get('job-1')).toEqual({
+      state: 'EVIDENCE_READY',
+      version: 1,
+    });
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log').get()).toEqual({ count: 1 });
   });
 });

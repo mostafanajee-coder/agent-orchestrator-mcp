@@ -58,6 +58,7 @@ export async function startAuthenticatedStdioServer(options: {
   readonly token: string;
   readonly version: string;
   readonly onerror?: (error: Error) => void;
+  readonly transport?: Transport;
   readonly verifyStartup: () => void;
   readonly authority?: Phase4AuthorityToolOptions;
 }): Promise<StdioServerHandle> {
@@ -67,6 +68,7 @@ export async function startAuthenticatedStdioServer(options: {
     authInfo,
     version: options.version,
     ...(options.onerror === undefined ? {} : { onerror: options.onerror }),
+    ...(options.transport === undefined ? {} : { transport: options.transport }),
     ...(options.authority === undefined ? {} : { authority: options.authority }),
   });
 }
