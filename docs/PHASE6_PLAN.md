@@ -1,8 +1,8 @@
 # AOM — PHASE 6 WORKER RUNTIME PLAN
 
-> This is a documentation-only planning artifact. It defines the proposed
-> Phase 6 worker-runtime boundary; it does not implement, activate, or
-> authorize Phase 6 source work.
+> This document records the reviewed Phase 6 planning baseline and its current
+> implementation boundary. The separate Codex authorization recorded below
+> permits only the scoped source work on the implementation branch.
 
 Date: 2026-08-31
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
@@ -12,14 +12,14 @@ Phase 5 reviewed implementation head: `4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`
 Phase 5 merge commit: `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea`
 Governing architecture: `docs/ARCHITECTURE.md` Revision 8, with the proposed
 Revision 9 delta recorded in that document
-Implementation authorization: **NO**
+Implementation authorization: **YES — Codex authorization recorded on the implementation branch**
 
 ## 0. Governance and authority
 
 Codex remains the principal architecture and implementation authority. This
-document prepares a Phase 6 planning baseline only. Independent review may
-identify blockers or required corrections, but it is not permission to edit
-the repository or implement the plan.
+document records the Phase 6 planning baseline and governance boundary.
+Independent review may identify blockers or required corrections, but it is
+not itself permission to edit the repository or implement the plan.
 
 The required sequence is:
 
@@ -38,18 +38,19 @@ Codex Phase 6 planning
   -> merge and post-merge closure
 ```
 
-This plan does not authorize any of the following:
+This plan and the separate Codex decision authorize only the scoped Phase 6
+implementation on `codex/phase6-implementation`. They do not authorize any of
+the following:
 
-- source-code changes or worker-process execution;
-- database migrations, schema changes, or runtime activation;
-- new MCP tool registration;
+- database migrations or schema changes;
+- Phase 7, Phase 8, Phase 9, or post-V1 behavior;
+- remote worker or external integration work;
 - deployment, remote synchronization, push, pull request, or merge;
 - evidence or artifact writes;
 - crash recovery, reaper loops, autonomous retries, or later-phase work.
 
-The exact planning snapshot SHA will be recorded in the final local handoff
-after the documentation commit. Until then, this branch is a working planning
-copy derived from the published Phase 5 `main`.
+The implementation branch is derived from the published Phase 5 `main`; the
+approved planning documents were carried forward before source work began.
 
 ## 1. Verified baseline and inherited contracts
 
@@ -890,27 +891,23 @@ The reviewer must classify each finding as blocking, non-blocking, or rejected,
 and must distinguish facts verified from the snapshot from assumptions that
 remain unverified. The reviewer must not issue implementation authorization.
 
-After review, Codex will adjudicate every finding, correct the documents if
-necessary, and issue one explicit decision:
+After review, Codex adjudicated every finding, closed F-01 through the
+documentation correction, and issued the following separate decision for the
+implementation branch:
 
 ```text
 AUTHORIZE PHASE 6 IMPLEMENTATION: YES
 ```
 
-or:
-
-```text
-AUTHORIZE PHASE 6 IMPLEMENTATION: NO
-```
-
-## 17. Current planning verdict
+## 17. Current implementation status
 
 ```text
 PHASE 5 BASELINE: COMPLETE AND PUBLISHED
-PHASE 6 PLANNING BASELINE: CORRECTED FOR F-01 ON codex/phase6-authority-plan
-PHASE 6 INDEPENDENT ARCHITECTURE REVIEW: TARGETED RE-REVIEW REQUIRED
-PHASE 6 IMPLEMENTATION AUTHORIZED: NO
-PHASE 6 STARTED: NO
+PHASE 6 PLANNING BASELINE: REVIEWED AND ADJUDICATED
+PHASE 6 IMPLEMENTATION AUTHORIZED: YES — Codex decision recorded
+PHASE 6 IMPLEMENTATION: IN PROGRESS ON codex/phase6-implementation
+PHASE 6 IMPLEMENTATION BRANCH: NOT MERGED
+PHASE 7 STARTED: NO
 ```
 
-**PHASE 6 CORRECTED PLANNING BASELINE READY FOR TARGETED INDEPENDENT RE-REVIEW**
+**PHASE 6 IMPLEMENTATION AUTHORIZED — SOURCE WORK IN PROGRESS**

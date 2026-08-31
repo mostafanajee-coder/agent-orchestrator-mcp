@@ -21,6 +21,17 @@ export const AUDIT_ACTION_VALUES = [
   'job.create',
   'job.start',
   'job.resume',
+  'qa.dispatch',
+  'run.start',
+  'run.report',
+  'run.failed',
+  'run.timeout',
+  'run.cancelled',
+  'run.duplicate_rejected',
+  'lease.issued',
+  'lease.consumed',
+  'lease.rejected',
+  'system.runs_settled',
   'codex.decide',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];

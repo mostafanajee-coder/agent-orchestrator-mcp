@@ -6,12 +6,18 @@ import type { TokenCommandOptions, TokenCommandResult } from './commands/tokens.
 import { runTokenCommand } from './commands/tokens.js';
 import { createCommandContext } from './commands/context.js';
 import { loadPhase5Config } from './config/phase5.js';
+import { loadPhase6WorkerRegistry, validatePhase6WorkerActors } from './config/phase6.js';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
 import { readEnvironmentToken } from './mcp/auth.js';
 import { openPhase4Runtime } from './authority/runtime.js';
-import { MCP_HTTP_DEFAULT_PORT, MCP_HTTP_HOST, startHttpServer } from './mcp/http.js';
+import { MCP_HTTP_DEFAULT_PORT, MCP_HTTP_HOST, MCP_HTTP_PATH, startHttpServer } from './mcp/http.js';
 import { startStdioServer } from './mcp/stdio.js';
 import { readPackageVersion } from './version.js';
+import { readLeaseKey } from './secrets/leaseKey.js';
+import { ProcessRuntime } from './workers/processRuntime.js';
+import type { Phase6WorkerToolOptions } from './mcp/tools/phase6.js';
+import type { Phase4Runtime } from './authority/runtime.js';
+import { cancelRunsForJob } from './domain/runs.js';
 
 export const CLI_NAME = 'agent-orchestrator-mcp';
 export { EXIT_OK, EXIT_INTERNAL, EXIT_SECURITY, EXIT_USAGE } from './errors.js';
@@ -29,6 +35,27 @@ export interface CliResult {
 export interface ServeOptions {
   readonly mode: 'http' | 'stdio';
   readonly port?: number;
+}
+
+function createPhase6Runtime(
+  commandContext: ReturnType<typeof createCommandContext>,
+  runtime: Phase4Runtime,
+  reportEndpoint?: string,
+): { readonly options: Phase6WorkerToolOptions; readonly processRuntime: ProcessRuntime } {
+  const registry = loadPhase6WorkerRegistry(commandContext);
+  validatePhase6WorkerActors(runtime.db, registry);
+  const leaseKey = readLeaseKey(commandContext.layout.leaseKey, commandContext.security);
+  const processRuntime = new ProcessRuntime({
+    db: runtime.db,
+    audit: runtime.audit,
+    registry,
+    leaseKey,
+    ...(reportEndpoint === undefined ? {} : { reportEndpoint }),
+  });
+  return {
+    options: { db: runtime.db, audit: runtime.audit, registry, leaseKey, processRuntime },
+    processRuntime,
+  };
 }
 
 /** Command implementations, injected so the CLI can be tested without touching disk. */
@@ -50,18 +77,29 @@ export const defaultCommands: CliCommands = {
     if (options.mode === 'stdio') {
       try {
         const phase5Config = loadPhase5Config(commandContext);
+        const phase6 = createPhase6Runtime(commandContext, runtime);
+        const authority = {
+          db: runtime.db,
+          audit: runtime.audit,
+          onJobCancelled: (jobId: string, requestId: string): void => {
+            phase6.processRuntime.cancelJob(jobId);
+            cancelRunsForJob(runtime.db, runtime.audit, jobId, requestId, phase6.options);
+          },
+        };
         const authInfo = runtime.resolver.verifyAccessTokenSync(readEnvironmentToken());
         const handle = startStdioServer({
           version,
           authInfo,
-          authority: runtime,
+          authority,
           jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
+          workers: phase6.options,
           verifyStartup: () => undefined,
           onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
         });
         const close = handle.close.bind(handle);
         handle.close = async () => {
           try {
+            phase6.processRuntime.close();
             await close();
           } finally {
             runtime.close();
@@ -84,11 +122,26 @@ export const defaultCommands: CliCommands = {
     let server: ReturnType<typeof startHttpServer>;
     try {
       const phase5Config = loadPhase5Config(commandContext);
+      const reportEndpoint = options.port === undefined || options.port === 0
+        ? undefined
+        : `http://${MCP_HTTP_HOST}:${String(options.port)}${MCP_HTTP_PATH}`;
+      const phase6 = createPhase6Runtime(commandContext, runtime, reportEndpoint);
+      const authority = {
+        db: runtime.db,
+        audit: runtime.audit,
+        onJobCancelled: (jobId: string, requestId: string): void => {
+          phase6.processRuntime.cancelJob(jobId);
+          cancelRunsForJob(runtime.db, runtime.audit, jobId, requestId, phase6.options);
+        },
+      };
       server = startHttpServer({
         ...httpOptions,
+        authority,
         jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
+        workers: phase6.options,
         ...(options.port === undefined ? {} : { port: options.port }),
       });
+      server.once('close', phase6.processRuntime.close.bind(phase6.processRuntime));
     } catch (cause) {
       runtime.close();
       throw cause;
@@ -123,7 +176,7 @@ export function renderHelp(version: string): string {
     '  init             Prepare state, initialize schema, and bootstrap Phase 4 authority',
     '  doctor           Report state and DB-file security. Read-only; repairs nothing',
     '  token            Issue, list, or revoke local persistent actor tokens',
-    '  serve            Serve the Phase 5 MCP spine (--http or --stdio)',
+    '  serve            Serve the Phase 5/6 MCP spine (--http or --stdio)',
     '',
     'Token options:',
     '  token issue --label LABEL [--expires-at UTC_TIMESTAMP]',
@@ -146,9 +199,9 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 5 implementation candidate. Persistent auth, Codex authority, job lifecycle, audit, and ping.',
+    '  Phase 6 implementation branch. Persistent auth, Codex authority, job lifecycle, worker runs, and ping.',
     '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
-    '  Worker execution, leases, evidence, artifacts, resilience, and later phases remain out of scope.',
+    '  Evidence, artifacts, resilience, remote workers, and later phases remain out of scope.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
 }

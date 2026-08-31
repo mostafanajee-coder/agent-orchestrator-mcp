@@ -7,6 +7,7 @@ import { ensureLeaseKey } from '../secrets/leaseKey.js';
 import { assertPathIsSafe } from '../security/pathSafety.js';
 import { initializeDatabaseForInit, type DatabaseInitResult } from '../store/init.js';
 import { ensurePhase5Config } from '../config/phase5.js';
+import { ensurePhase6WorkerRegistry } from '../config/phase6.js';
 import type { CommandContext } from './context.js';
 
 export interface InitResult {
@@ -73,6 +74,9 @@ export function runInit(context: CommandContext, options: InitOptions = {}): Ini
   // file. Create it only after database initialization succeeds so a failed
   // fresh init does not leave a misleading partial runtime configuration.
   ensurePhase5Config(context);
+  // Keep the Phase 6 registry disabled by default; the operator must enable a
+  // fully bound worker definition before dispatch can select it.
+  ensurePhase6WorkerRegistry(context);
 
   return {
     stateRoot: layout.root,

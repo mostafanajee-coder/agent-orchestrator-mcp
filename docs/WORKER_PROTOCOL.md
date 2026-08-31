@@ -1,14 +1,13 @@
 # AOM — PHASE 6 WORKER PROTOCOL
 
-> Proposed normative contract for Phase 6 only. This document is planning
-> material; it does not activate a worker, register an MCP tool, or authorize
-> implementation.
+> Normative Phase 6 contract for the authorized implementation branch. This
+> document does not authorize later phases, merge, deployment, or remote use.
 
 Version: **1**
 Owner: Phase 6 worker-runtime planning
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
 Governing plan: `docs/PHASE6_PLAN.md`
-Implementation authorization: **NO**
+Implementation authorization: **YES — scoped to codex/phase6-implementation**
 
 ## 1. Purpose and boundary
 
@@ -348,7 +347,7 @@ worker-supplied execution policy.
 
 ## 12. Implementation and review gate
 
-This contract becomes implementable only after:
+This contract became implementable only after:
 
 1. the Phase 6 plan and proposed Revision 9 are independently reviewed;
 2. Codex adjudicates every finding;
@@ -356,8 +355,10 @@ This contract becomes implementable only after:
 4. Codex records `AUTHORIZE PHASE 6 IMPLEMENTATION: YES`; and
 5. an implementation branch is frozen from the approved `main` base.
 
-Until all five conditions are satisfied:
+The conditions above are satisfied for the current implementation branch.
+They do not authorize later-phase behavior or merge. Until the separate final
+implementation review and merge gate succeed:
 
 ```text
-PHASE 6 IMPLEMENTATION AUTHORIZED: NO
+PHASE 6 IMPLEMENTATION AUTHORIZED: YES — BRANCH ONLY
 ```

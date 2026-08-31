@@ -70,6 +70,7 @@ export interface StateLayout {
   readonly secrets: string;
   readonly logs: string;
   readonly configFile: string;
+  readonly workersFile: string;
   readonly leaseKey: string;
 }
 
@@ -226,6 +227,7 @@ export function stateLayout(root: string, platform: NodeJS.Platform): StateLayou
     secrets: path.join(root, 'secrets'),
     logs: path.join(root, 'logs'),
     configFile: path.join(root, 'config.json'),
+    workersFile: path.join(root, 'workers.json'),
     leaseKey: path.join(root, 'secrets', 'lease.key'),
   };
 }

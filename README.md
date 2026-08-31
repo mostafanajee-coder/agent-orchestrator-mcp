@@ -26,8 +26,10 @@ merged at `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed head
 existing Codex authority boundary. Worker execution, leases, evidence/artifacts, resilience loops, and all
 Phase 6+ behavior remain outside the Phase 5 implementation.
 
-**Phase 6 — Worker runtime (planning only).** The Phase 6 documentation baseline is being prepared on
-`codex/phase6-authority-plan`. No Phase 6 source implementation, database migration, or new MCP tool is active.
+**Phase 6 — Worker runtime (implementation in progress on `codex/phase6-implementation`).** Codex has
+authorized the scoped worker registry, bounded process protocol, run/lease lifecycle, `qa_dispatch`,
+`run_report`, and `run_status` surface on this branch. No Phase 6 change is merged into `main` yet.
+Evidence/artifact handling, recovery loops, remote workers, and all Phase 7+ behavior remain out of scope.
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
@@ -126,6 +128,7 @@ Runtime state lives outside this repository, in one global root shared by every 
 ```
 <OS user profile>\.agent-orchestrator-mcp\     e.g. C:\Users\<user>\.agent-orchestrator-mcp
   config.json  protected Phase 5 runtime settings (workspace roots and bounded defaults)
+  workers.json protected Phase 6 worker registry (disabled starter entry until configured)
   data\        orchestrator.db, WAL/SHM sidecars when SQLite owns them
   artifacts\   per job / cycle / run
   secrets\     lease.key
@@ -133,7 +136,8 @@ Runtime state lives outside this repository, in one global root shared by every 
 ```
 
 `init` creates the protected `config.json` with the approved Windows workspace-root seeds and
-bounded lifecycle defaults. `serve` reads and validates that file before exposing the MCP surface;
+bounded lifecycle defaults, plus a disabled starter `workers.json` registry. Before exposing the
+Phase 6 MCP surface, `serve` reads and validates both protected configuration files;
 operators may add local workspace roots there without changing source code. On POSIX, no workspace
 roots are seeded by default; a local root must be configured explicitly before `job_create` can admit a job.
 
@@ -222,13 +226,15 @@ protection status.
 ## Layout
 
 ```
-src/config/     state-root resolution, cloud-sync detection
+src/config/     state-root resolution, cloud-sync detection, Phase 5/6 configuration
 src/security/   ACL and permission providers, SDDL policy, safe process execution
 src/secrets/    lease key lifecycle
 src/store/      secure DB modes, migrations, schema, integrity, repositories
 src/authority/  Phase 4 bootstrap, capabilities, audit, runtime, and decisions
+src/domain/     job and Phase 6 run lifecycle domains
+src/workers/    bounded protocol, leases, and local process runtime
 src/commands/   init, doctor, and local token administration
-src/mcp/        shared MCP factory, ping, codex_decide, auth, HTTP, and stdio entry points
+src/mcp/        shared MCP factory, Phase 4/5/6 tools, auth, HTTP, and stdio entry points
 test/unit/      unit tests
 test/store/     migrations, schema, raw-SQL authority, doctor, startup gates
 test/integration/ real loopback HTTP and stdio transport acceptance tests

@@ -54,6 +54,8 @@ export type CodexDecideOutputValue = z.infer<typeof CodexDecideOutput>;
 export interface Phase4AuthorityToolOptions {
   readonly db: SqliteDatabase;
   readonly audit: AuditWriter;
+  /** Optional Phase 6 hook for stopping live runs after a committed CANCEL. */
+  readonly onJobCancelled?: (jobId: string, requestId: string) => void;
 }
 
 function verifiedAuthority(
@@ -133,6 +135,14 @@ export function registerCodexDecide(
           cycle: result.cycle,
           version: result.version,
         };
+        if (result.authoritativeStatus === 'JOB_CANCELLED' && options.onJobCancelled !== undefined) {
+          try {
+            options.onJobCancelled(result.jobId, decisionInput.requestId ?? 'mcp-request');
+          } catch {
+            // The authoritative decision has already committed. Runtime
+            // cancellation is best-effort and cannot rewrite that decision.
+          }
+        }
         return {
           content: [{ type: 'text', text: JSON.stringify(output) }],
           structuredContent: output,

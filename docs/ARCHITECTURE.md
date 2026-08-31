@@ -1658,13 +1658,14 @@ is not implementation authorization.
 
 ## 24. Revision 9 / Phase 6 worker runtime proposal
 
-**Status: proposed planning delta — implementation not authorized.**
+**Status: Phase 6 implementation authorized on `codex/phase6-implementation`;
+not merged into `main`.**
 
 Revision 9 is the Phase 6 planning amendment derived from the published Phase
 5 baseline `530e2441636e6517096b1319c4510b1e56626592`. It is governed by
-`docs/PHASE6_PLAN.md` and `docs/WORKER_PROTOCOL.md`. It does not activate a
-worker runtime, add an MCP tool, change the database schema, or authorize
-source implementation.
+`docs/PHASE6_PLAN.md` and `docs/WORKER_PROTOCOL.md`. The separate Codex
+authorization permits the scoped source implementation on the implementation
+branch; this proposal does not authorize Phase 7+ behavior or merge.
 
 ### 24.1 Purpose and ownership
 
@@ -1726,7 +1727,8 @@ responsibilities, even though their structural tables already exist.
 
 ### 24.4 Proposed tool delta
 
-The following MCP operations are proposed for independent review only:
+The following MCP operations are approved for the scoped Phase 6 implementation
+branch, but are not yet active on `main`:
 
 | Tool | Caller | Purpose |
 |---|---|---|
@@ -1735,8 +1737,9 @@ The following MCP operations are proposed for independent review only:
 | `run_status` | verified principal or observer with `job:read` | Read bounded run status |
 
 No worker-administration, arbitrary process-launch, evidence, artifact,
-recovery, or second-decision tool is proposed. The tools are not registered in
-the current Phase 5-complete `main`.
+recovery, or second-decision tool is approved. The tools are not registered in
+the current Phase 5-complete `main`; they are registered only on the Phase 6
+implementation branch.
 
 ### 24.5 Proposed process and protocol boundary
 
@@ -1777,19 +1780,14 @@ worker event may be recorded as an authoritative decision.
 
 ### 24.7 Phase boundary and authorization
 
-Revision 9 does not authorize implementation. Before source work begins, the
-Phase 6 plan, worker protocol, and this proposed architecture delta require
-independent architecture review and Codex adjudication. A separate explicit
-decision must then record either:
+The Phase 6 plan, worker protocol, and this architecture delta received
+independent review and Codex adjudication. Codex has recorded the following
+separate implementation decision for the implementation branch:
 
 ```text
 AUTHORIZE PHASE 6 IMPLEMENTATION: YES
 ```
 
-or:
-
-```text
-AUTHORIZE PHASE 6 IMPLEMENTATION: NO
-```
-
-Until the first decision is explicitly issued, Phase 6 remains planning-only.
+This decision authorizes only the scoped work on
+`codex/phase6-implementation`. The Phase 6 implementation remains unmerged
+until its independent implementation review and Codex final merge gate.

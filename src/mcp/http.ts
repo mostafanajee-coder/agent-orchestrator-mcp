@@ -21,6 +21,7 @@ import { createSdkTokenVerifier, type AccessTokenResolver } from './auth.js';
 import { createMcpServerFactory } from './server.js';
 import type { Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
+import type { Phase6WorkerToolOptions } from './tools/phase6.js';
 
 export const MCP_HTTP_HOST = '127.0.0.1';
 export const MCP_HTTP_PATH = '/mcp';
@@ -39,6 +40,7 @@ export interface HttpServerOptions {
   readonly logger?: HttpLogger;
   readonly authority?: Phase4AuthorityToolOptions;
   readonly jobs?: Phase5JobToolOptions;
+  readonly workers?: Phase6WorkerToolOptions;
   /** Fail-closed startup gate; it runs before this server binds. */
   readonly verifyStartup: () => void;
 }
@@ -191,6 +193,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
       version: options.version,
       ...(options.authority === undefined ? {} : { authority: options.authority }),
       ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
+      ...(options.workers === undefined ? {} : { workers: options.workers }),
     }),
     {
       legacy: 'stateless',

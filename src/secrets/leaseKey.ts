@@ -5,6 +5,7 @@ import {
   fsyncSync,
   lstatSync,
   openSync,
+  readFileSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
@@ -73,8 +74,8 @@ function assertExistingKeyIsSafe(path: string, security: SecurityProvider): void
     );
   }
 
-  // lstat rather than opening the file: the size is all that is needed, and
-  // the secret is never opened for reading anywhere in this module.
+  // lstat rather than opening the file: the size is all that is needed for
+  // this pre-read safety check.
   const problem = sizeProblem(lstatSync(path).size);
   if (problem !== undefined) {
     throw new SecurityError(
@@ -202,4 +203,31 @@ export function inspectLeaseKey(path: string, security: SecurityProvider): Lease
   if (problem !== undefined) problems.push(problem);
 
   return { present: true, secure: problems.length === 0, sizeBytes, problems };
+}
+
+/**
+ * Reads the lease key only after path, protection, and exact-size checks have
+ * passed. Callers must keep the returned bytes in memory and must never log or
+ * persist them. The key-management APIs above remain responsible for
+ * creation and filesystem protection; this narrow reader is owned by the
+ * Phase 6 lease signer.
+ */
+export function readLeaseKey(path: string, security: SecurityProvider): Buffer {
+  assertExistingKeyIsSafe(path, security);
+  let key: Buffer;
+  try {
+    key = readFileSync(path);
+  } catch (cause) {
+    throw new SecurityError(
+      `The lease key at ${path} could not be read after protection verification.`,
+      cause instanceof Error ? cause.message : 'Inspect the protected lease-key file and retry.',
+    );
+  }
+  if (key.byteLength !== LEASE_KEY_BYTES) {
+    throw new SecurityError(
+      `The lease key at ${path} changed to an invalid size while being read.`,
+      'Regenerate the lease key through the approved init path and retry.',
+    );
+  }
+  return Buffer.from(key);
 }
