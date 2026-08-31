@@ -2,8 +2,9 @@
 
 > **APPROVED REVISION 8 IMPLEMENTATION BASELINE — PHASE 4 IMPLEMENTATION AUTHORIZED**
 >
-> This document is the frozen Revision 8 planning baseline. A subsequent Codex
-> authorization permits the scoped implementation on `codex/phase4-implementation`.
+> This document carries the frozen Revision 8 planning baseline originating at
+> `65008a97`. A subsequent Codex authorization permits the scoped implementation
+> on `codex/phase4-implementation`.
 > It does not authorize merge, push, deployment, or Phase 5/6 work.
 
 Date: 2026-08-31
@@ -18,10 +19,10 @@ Implementation authorized by subsequent Codex gate: **YES**
 
 Codex is the principal architecture authority and the sole authority actor in
 V1. Claude/Opus/Sonnet material is review evidence, not an authorization to
-implement. This plan is the Phase 4 architecture and implementation-planning
-artifact only.
+merge. This document records the Phase 4 architecture, implementation scope,
+and governance baseline.
 
-This plan deliberately does not:
+The original planning snapshot deliberately did not itself:
 
 - implement Phase 4 source code;
 - create migrations 005 or 006;
@@ -30,10 +31,13 @@ This plan deliberately does not:
 - rewrite migrations 001–004 or merged Phase 3 history;
 - alter the Phase 3 merge commit or begin Phase 5/6 work.
 
-The only proposed repository changes in this planning turn are this document,
-the Revision 8 proposal section in `docs/ARCHITECTURE.md`, README status/link
-clarifications, and the Phase 3 status/hand-off clarifications in
-`docs/PHASE3_PLAN.md`, all on a documentation-only branch.
+At the time of the original planning turn, the only proposed repository changes
+were this document, the Revision 8 proposal section in
+`docs/ARCHITECTURE.md`, README status/link clarifications, and the Phase 3
+status/hand-off clarifications in `docs/PHASE3_PLAN.md`, all on a
+documentation-only branch. The subsequent Codex authorization created the
+separate implementation branch; that branch remains limited to Phase 4 and
+does not authorize merge, push, deployment, or Phase 5/6 work.
 
 ## 1. Frozen Phase 4 base
 
@@ -883,11 +887,12 @@ A later Phase 4 implementation must report, at minimum:
 
 ## 22. Planning status and requested decision
 
-Proposed Architecture Revision 8 is internally coherent and preserves the
-merged Revision 7 boundary. The target schema version is 6, with proposed
-migrations 005 and 006. O-1 is a pre-audit activation gate; O-2 is an explicit
-no-conflict-resolution-write rule. No unresolved architecture choice blocks
-independent review, but implementation must not begin until this plan and the
-Revision 8 amendment receive independent review and principal approval.
+Architecture Revision 8 is internally coherent and preserves the merged
+Revision 7 boundary. The target schema version is 6, with migrations 005 and
+006. O-1 is a pre-audit activation gate; O-2 is an explicit
+no-conflict-resolution-write rule. The plan received independent review and
+subsequent Codex implementation authorization. The current implementation
+branch remains subject to targeted re-review and a separate Codex principal
+final review before merge.
 
-Current status: **PHASE 4 IMPLEMENTATION IN PROGRESS — FROZEN PLAN BASELINE**.
+Current status: **PHASE 4 CORRECTIVE IMPLEMENTATION COMPLETE — AWAITING CODEX PRINCIPAL FINAL REVIEW**.

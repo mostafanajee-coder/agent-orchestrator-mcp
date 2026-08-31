@@ -1,6 +1,6 @@
 # Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline)
 
-> **Status:** Revision 7 remains the approved Phase 3 baseline on `main`. Revision 8 is the approved Phase 4 planning baseline frozen at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; the authorized implementation candidate is `codex/phase4-implementation` and is not merged.
+> **Status:** Revision 7 remains the approved Phase 3 baseline on `main`. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; this branch carries that baseline plus explicitly recorded status and ledger clarifications. The authorized implementation candidate is `codex/phase4-implementation` and is not merged.
 > Phase 4 source implementation is authorized on that branch by a subsequent Codex
 > gate. This document does not authorize merge, push, deployment, or Phase 5/6 work.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
