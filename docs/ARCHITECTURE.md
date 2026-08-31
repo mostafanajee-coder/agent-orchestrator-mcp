@@ -1644,5 +1644,9 @@ The Phase 3 merge is complete. The Revision 8 amendment and
 `docs/PHASE4_PLAN.md` are governing artifacts originating at `65008a97`; the
 Phase 4 implementation is complete and merged in `main` at
 `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. The Phase 5 planning baseline and
-its authorization are recorded in `docs/PHASE5_PLAN.md`; implementation is in
-progress on `codex/phase5-implementation` and remains unmerged.
+its authorization are recorded in `docs/PHASE5_PLAN.md`; the independently
+reviewed implementation was merged locally into `main` at
+`7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed head
+`4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`. No push was performed, so the
+remote `origin/main` remains unchanged. Phase 6 and later phases have not
+started.

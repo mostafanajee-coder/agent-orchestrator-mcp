@@ -857,7 +857,7 @@ When this plan is frozen, the independent reviewer receives exactly:
 The reviewer must classify each finding as blocking, non-blocking, or rejected,
 and must not treat a planning review as permission to implement.
 
-## 16. Current planning verdict
+## 16. Planning authorization record (at implementation start)
 
 ```text
 PHASE 5 PLAN STARTED
@@ -865,4 +865,28 @@ PHASE 5 IMPLEMENTATION AUTHORIZED: YES
 INDEPENDENT RE-REVIEW RESULT: READY FOR CODEX IMPLEMENTATION-AUTHORIZATION GATE
 CODEX AUTHORIZATION: RECORDED; IMPLEMENTATION IN PROGRESS ON codex/phase5-implementation
 IMPLEMENTATION LIMITS: NO MIGRATIONS, NO PHASE 6+, NO PUSH, NO PR, NO MERGE, NO DEPLOYMENT
+```
+
+## 17. Post-implementation merge closure
+
+The independently reviewed implementation at
+`4ba475005a0f6d0b9504e7dc82d71d88f23a27e8` received the verdict
+`APPROVED FOR CODEX FINAL MERGE GATE`. Codex then completed the final merge
+locally, without push, PR, deployment, or Phase 6 work, at merge commit
+`7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea`.
+
+The D-12 dependency amendment was the only Phase 4 source dependency included
+in the authorized Phase 5 scope. The required P5-23 post-merge annotation was
+added to `docs/PHASE4_PLAN.md`, recording the authorizing decision
+`AUTHORIZE PHASE 5 IMPLEMENTATION: YES`. Phase 6 and all later phases remain
+not started.
+
+Current local closure status:
+
+```text
+PHASE 5 IMPLEMENTATION COMPLETE AND MERGED LOCALLY
+PHASE 5 INDEPENDENT IMPLEMENTATION REVIEW: APPROVED FOR CODEX FINAL MERGE GATE
+PHASE 5 MERGE: COMPLETED LOCALLY AT 7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea
+REMOTE PUSH: NOT PERFORMED
+PHASE 6 STARTED: NO
 ```

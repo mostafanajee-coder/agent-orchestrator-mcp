@@ -18,10 +18,12 @@ to a verified `codex` principal holding `job:decide`. Doctor remains filesystem/
 reports `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; init and serve startup own deep SQLite integrity,
 canonical schema, audit-chain, actor-state, and token checks.
 
-**Phase 5 — Job lifecycle (implementation in progress on `codex/phase5-implementation`).** The authorized
-candidate adds durable `job_create`, `job_start`, `job_resume`, `job_get`, and `job_list` behavior with
-workspace admission, bounded pagination, idempotency, CAS, and the existing Codex authority boundary.
-Worker execution, leases, evidence/artifacts, resilience loops, and all Phase 6+ behavior remain out of scope.
+**Phase 5 — Job lifecycle (merged locally into `main`; not pushed).** The reviewed implementation was merged
+locally at `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed head
+`4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`. It provides durable `job_create`, `job_start`, `job_resume`,
+`job_get`, and `job_list` behavior with workspace admission, bounded pagination, idempotency, CAS, and the
+existing Codex authority boundary. Worker execution, leases, evidence/artifacts, resilience loops, and all
+Phase 6+ behavior remain out of scope.
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and

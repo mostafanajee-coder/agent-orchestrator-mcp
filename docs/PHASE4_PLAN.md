@@ -901,3 +901,11 @@ review, and merge verification through PR #7. Phase 4 is now closed; Phase 5
 planning requires a separate authorization decision.
 
 Current status: **PHASE 4 IMPLEMENTATION COMPLETE AND MERGED — PHASE 5 NOT AUTHORIZED**.
+
+Post-Phase 5 merge annotation (P5-23): The Phase 5 implementation, including
+the single D-12 dependency amendment to the existing
+`applyTransition`/`codex_decide` authority choke point, was explicitly
+authorized by Codex with `AUTHORIZE PHASE 5 IMPLEMENTATION: YES` and merged
+locally into `main` at `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed
+head `4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`. No other Phase 4 behavior was
+authorized by that decision.
