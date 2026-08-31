@@ -5,6 +5,7 @@ import {
 } from '@modelcontextprotocol/server';
 
 import { actorAuthInfoFromSdk, type ActorAuthInfo } from './auth.js';
+import { registerCodexDecide, type Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 import { registerPing, type McpTransportKind, SERVICE_NAME } from './tools/ping.js';
 
 export interface McpServerFactoryOptions {
@@ -12,9 +13,11 @@ export interface McpServerFactoryOptions {
   readonly version: string;
   /** Used by stdio, whose SDK factory context has no HTTP auth envelope. */
   readonly staticAuthInfo?: ActorAuthInfo;
+  /** Phase 4 authority backing; the tool is hidden unless auth has job:decide. */
+  readonly authority?: Phase4AuthorityToolOptions;
 }
 
-/** Builds the common Phase 2 server surface for one transport/era. */
+/** Builds the common compatibility and Phase 4 server surface for one transport/era. */
 export function buildMcpServer(
   options: McpServerFactoryOptions,
   context: McpRequestContext,
@@ -25,6 +28,9 @@ export function buildMcpServer(
     { capabilities: { tools: {} } },
   );
   registerPing(server, options.transport, authInfo, context.era);
+  if (options.authority !== undefined) {
+    registerCodexDecide(server, options.authority, authInfo);
+  }
   return server;
 }
 

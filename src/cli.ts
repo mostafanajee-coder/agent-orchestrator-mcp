@@ -2,12 +2,14 @@ import type { DoctorReport } from './commands/doctor.js';
 import { runDoctor } from './commands/doctor.js';
 import type { InitResult } from './commands/init.js';
 import { runInit } from './commands/init.js';
+import type { TokenCommandOptions, TokenCommandResult } from './commands/tokens.js';
+import { runTokenCommand } from './commands/tokens.js';
 import { createCommandContext } from './commands/context.js';
-import { assertServeReady } from './commands/startup.js';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
-import { createEnvironmentTokenResolver } from './mcp/auth.js';
+import { readEnvironmentToken } from './mcp/auth.js';
+import { openPhase4Runtime } from './authority/runtime.js';
 import { MCP_HTTP_DEFAULT_PORT, MCP_HTTP_HOST, startHttpServer } from './mcp/http.js';
-import { startEnvironmentStdioServer } from './mcp/stdio.js';
+import { startStdioServer } from './mcp/stdio.js';
 import { readPackageVersion } from './version.js';
 
 export const CLI_NAME = 'agent-orchestrator-mcp';
@@ -32,31 +34,58 @@ export interface ServeOptions {
 export interface CliCommands {
   readonly init: () => InitResult;
   readonly doctor: () => DoctorReport;
+  readonly token?: (options: TokenCommandOptions) => TokenCommandResult;
   readonly serve?: (options: ServeOptions, io: CliIo) => void;
 }
 
 export const defaultCommands: CliCommands = {
   init: () => runInit(createCommandContext()),
   doctor: () => runDoctor(createCommandContext()),
+  token: (options) => runTokenCommand(createCommandContext(), options),
   serve: (options, io) => {
     const version = readPackageVersion();
+    const runtime = openPhase4Runtime(createCommandContext());
     if (options.mode === 'stdio') {
-      startEnvironmentStdioServer({
-        version,
-        verifyStartup: () => assertServeReady(createCommandContext()),
-        onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
-      });
+      try {
+        const authInfo = runtime.resolver.verifyAccessTokenSync(readEnvironmentToken());
+        const handle = startStdioServer({
+          version,
+          authInfo,
+          authority: runtime,
+          verifyStartup: () => undefined,
+          onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
+        });
+        const close = handle.close.bind(handle);
+        handle.close = async () => {
+          try {
+            await close();
+          } finally {
+            runtime.close();
+          }
+        };
+      } catch (cause) {
+        runtime.close();
+        throw cause;
+      }
       return;
     }
 
     const httpOptions = {
-      resolver: createEnvironmentTokenResolver(),
+      resolver: runtime.resolver,
       version,
-      verifyStartup: () => assertServeReady(createCommandContext()),
+      authority: runtime,
+      verifyStartup: () => undefined,
       logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
       ...(options.port === undefined ? {} : { port: options.port }),
     };
-    const server = startHttpServer(httpOptions);
+    let server: ReturnType<typeof startHttpServer>;
+    try {
+      server = startHttpServer(httpOptions);
+    } catch (cause) {
+      runtime.close();
+      throw cause;
+    }
+    server.once('close', runtime.close);
     server.on('listening', () => {
       const address = server.address();
       const port = typeof address === 'object' && address !== null ? address.port : options.port;
@@ -65,6 +94,7 @@ export const defaultCommands: CliCommands = {
       );
     });
     server.on('error', () => {
+      runtime.close();
       io.err(`${CLI_NAME}: MCP HTTP server error`);
       process.exitCode = EXIT_INTERNAL;
     });
@@ -82,9 +112,15 @@ export function renderHelp(version: string): string {
     `  ${CLI_NAME} <command> [options]`,
     '',
     'Commands:',
-    '  init             Prepare the state root and initialize the Phase 3 schema',
+    '  init             Prepare state, initialize schema, and bootstrap Phase 4 authority',
     '  doctor           Report state and DB-file security. Read-only; repairs nothing',
-    '  serve            Serve the Phase 2 MCP spine (--http or --stdio)',
+    '  token            Issue, list, or revoke local persistent actor tokens',
+    '  serve            Serve the Phase 4 MCP spine (--http or --stdio)',
+    '',
+    'Token options:',
+    '  token issue --label LABEL [--expires-at UTC_TIMESTAMP]',
+    '  token list',
+    '  token revoke --token-id TOKEN_ID',
     '',
     'Serve options:',
     `  --http           Streamable HTTP on ${MCP_HTTP_HOST} (default port ${String(MCP_HTTP_DEFAULT_PORT)})`,
@@ -102,9 +138,9 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 3. SQLite schema/structural integrity with the Phase 2 MCP ping surface.',
+    '  Phase 4. Persistent actor_tokens auth, Codex authority, audit, and ping.',
     '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
-    '  Production actor_tokens auth, jobs, workers, and authority arrive in later phases.',
+    '  Job creation, worker execution, leases, evidence, and artifacts remain later phases.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
 }
@@ -146,6 +182,60 @@ function parseServeOptions(args: readonly string[]): ServeOptions {
   return port === undefined ? { mode } : { mode, port };
 }
 
+function parseTokenOptions(args: readonly string[]): TokenCommandOptions {
+  const action = args[0];
+  if (action === 'list') {
+    if (args.length !== 1) throw new UsageError('token list does not accept options');
+    return { action: 'list' };
+  }
+
+  if (action === 'issue') {
+    let label: string | undefined;
+    let expiresAt: string | undefined;
+    for (let index = 1; index < args.length; index += 1) {
+      const argument = args[index];
+      if (argument === '--label') {
+        if (label !== undefined) throw new UsageError('--label may be specified only once');
+        const value = args[index + 1];
+        if (value === undefined) throw new UsageError('--label requires a value');
+        label = value;
+        index += 1;
+        continue;
+      }
+      if (argument === '--expires-at') {
+        if (expiresAt !== undefined) throw new UsageError('--expires-at may be specified only once');
+        const value = args[index + 1];
+        if (value === undefined) throw new UsageError('--expires-at requires a value');
+        expiresAt = value;
+        index += 1;
+        continue;
+      }
+      throw new UsageError(`unexpected token issue argument '${String(argument)}'`);
+    }
+    if (label === undefined) throw new UsageError('token issue requires --label');
+    return expiresAt === undefined ? { action: 'issue', label } : { action: 'issue', label, expiresAt };
+  }
+
+  if (action === 'revoke') {
+    let tokenId: string | undefined;
+    for (let index = 1; index < args.length; index += 1) {
+      const argument = args[index];
+      if (argument !== '--token-id') {
+        throw new UsageError(`unexpected token revoke argument '${String(argument)}'`);
+      }
+      if (tokenId !== undefined) throw new UsageError('--token-id may be specified only once');
+      const value = args[index + 1];
+      if (value === undefined) throw new UsageError('--token-id requires a value');
+      tokenId = value;
+      index += 1;
+    }
+    if (tokenId === undefined) throw new UsageError('token revoke requires --token-id');
+    return { action: 'revoke', tokenId };
+  }
+
+  throw new UsageError('token requires issue, list, or revoke');
+}
+
 function renderInit(result: InitResult): string[] {
   const lines = [
     `State root:      ${result.stateRoot}`,
@@ -167,11 +257,37 @@ function renderInit(result: InitResult): string[] {
   lines.push(
     'Database:        schema ready (version ' + String(result.database.schemaVersion) + ')',
   );
+  if (result.database.bootstrap?.initialToken !== undefined) {
+    lines.push('Initial token:   ' + result.database.bootstrap.initialToken + ' (print once)');
+  }
   lines.push('');
   lines.push(
-    'init complete. State root, lease key, and Phase 3 schema are ready; production authority remains Phase 4.',
+    result.database.bootstrap?.bootstrapped === true
+      ? 'init complete. Phase 4 production authority was bootstrapped; the initial token was printed once.'
+      : 'init complete. State root, lease key, schema, and production authority are ready.',
   );
   return lines;
+}
+
+function renderTokenResult(result: TokenCommandResult): string[] {
+  if (result.action === 'issue') {
+    return [
+      `Token ID:       ${result.tokenId ?? 'unknown'}`,
+      `Label:          ${result.label ?? 'unknown'}`,
+      `Expires at:     ${result.expiresAt ?? 'never'}`,
+      `Token:          ${result.plaintext ?? '[unavailable]'} (print once; not stored)`,
+    ];
+  }
+  if (result.action === 'revoke') {
+    return [
+      result.revoked === true
+        ? `Token revoked:  ${result.tokenId ?? 'unknown'}`
+        : `Token already revoked: ${result.tokenId ?? 'unknown'}`,
+    ];
+  }
+  const tokens = result.tokens ?? [];
+  if (tokens.length === 0) return ['No actor tokens.'];
+  return tokens.map((token) => JSON.stringify(token));
 }
 
 function renderDoctor(report: DoctorReport): string[] {
@@ -244,6 +360,20 @@ export function run(
         throw new UsageError('serve is not available in this command context');
       }
       commands.serve(parseServeOptions(argv.slice(1)), io);
+      return { exitCode: EXIT_OK };
+    } catch (error) {
+      return reportError(io, error);
+    }
+  }
+
+  if (first === 'token') {
+    try {
+      if (commands.token === undefined) {
+        throw new UsageError('token is not available in this command context');
+      }
+      for (const line of renderTokenResult(commands.token(parseTokenOptions(argv.slice(1))))) {
+        io.out(line);
+      }
       return { exitCode: EXIT_OK };
     } catch (error) {
       return reportError(io, error);

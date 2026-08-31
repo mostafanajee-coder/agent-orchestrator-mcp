@@ -33,6 +33,8 @@ describe('migration build assets', () => {
       '002_authority_reference_seed_and_triggers.sql',
       '003_job_row_integrity_and_schema_verification.sql',
       '004_row_replacement_integrity.sql',
+      '005_audit_sequence_guard_correction.sql',
+      '006_actor_token_immutability.sql',
     ]);
   });
 });

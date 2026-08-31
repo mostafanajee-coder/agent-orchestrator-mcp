@@ -80,7 +80,7 @@ describe('secure database open modes', () => {
         (call) => call.path === context.layout.database,
       ));
       runMigrations(opened.db, { fresh: true });
-      expect(verifyDatabaseIntegrity(opened.db).schemaVersion).toBe(4);
+      expect(verifyDatabaseIntegrity(opened.db).schemaVersion).toBe(6);
       expect(opened.db.pragma('recursive_triggers', { simple: true })).toBe(1);
     } finally {
       closeDatabase(opened.db);

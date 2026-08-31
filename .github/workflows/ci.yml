@@ -21,5 +21,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      # better-sqlite3 13 ships N-API prebuilt binaries; avoid an unnecessary
+      # hosted-Windows node-gyp fallback when npm sees its binding.gyp file.
+      - run: npm ci --ignore-scripts
       - run: npm run ci

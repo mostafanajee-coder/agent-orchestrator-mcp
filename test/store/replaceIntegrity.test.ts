@@ -185,7 +185,7 @@ describe('decisions reject SQLite row replacement with recursive_triggers OFF', 
   );
 });
 
-describe('audit_log rejects SQLite row replacement with recursive_triggers OFF', () => {
+describe('AUDIT-07/O2-02 audit_log rejects replacement and self-repair with recursive_triggers OFF', () => {
   it('allows two normal AUTOINCREMENT inserts without an explicit seq', () => {
     db().exec(
       'CREATE TEMP TABLE audit_seq_probe(value); ' +

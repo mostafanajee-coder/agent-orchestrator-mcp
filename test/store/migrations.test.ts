@@ -77,12 +77,21 @@ function applyMigrationThree(): void {
   ).run();
 }
 
+function applyMigrationFour(): void {
+  const migration = approvedMigrations().find((entry) => entry.version === 4);
+  if (migration === undefined) throw new Error('migration 004 missing');
+  db.exec(migration.sql);
+  db.prepare(
+    "INSERT INTO schema_migrations(version, applied_at) VALUES (4, '2026-08-30T00:00:00Z')",
+  ).run();
+}
+
 beforeEach(openTestDatabase);
 afterEach(closeTestDatabase);
 
 describe('migration discovery and exact ledger contract', () => {
-  it('discovers exactly the numeric Phase 3 set in order', () => {
-    expect(approvedMigrations().map((migration) => migration.version)).toEqual([1, 2, 3, 4]);
+  it('REG-01 discovers exactly the numeric Phase 4 set in order', () => {
+    expect(approvedMigrations().map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(approvedMigrations().every((migration) => !/\b(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(migration.sql))).toBe(
       true,
     );
@@ -108,44 +117,56 @@ describe('migration discovery and exact ledger contract', () => {
     expect(() => validateAppliedPrefix({ exists: true, versions: [] }, false)).toThrow('empty');
     expect(() => validateAppliedPrefix({ exists: true, versions: [2] }, false)).toThrow('contiguous prefix');
     expect(() => validateAppliedPrefix({ exists: true, versions: [1, 3] }, false)).toThrow('contiguous prefix');
-    expect(() => validateAppliedPrefix({ exists: true, versions: [1, 2, 3, 5] }, false)).toThrow('unknown or future');
+    expect(() => validateAppliedPrefix({ exists: true, versions: [1, 2, 3, 5] }, false)).toThrow('contiguous prefix');
   });
 });
 
 describe('migration runner', () => {
   it('applies a fresh database atomically and verifies the current schema', () => {
     const result = runMigrations(db, { fresh: true });
-    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4], migrated: true });
-    expect(verifyDatabaseIntegrity(db).appliedVersions).toEqual([1, 2, 3, 4]);
+    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4, 5, 6], migrated: true });
+    expect(verifyDatabaseIntegrity(db).appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('re-runs a current database without applying anything', () => {
     runMigrations(db, { fresh: true });
     const result = runMigrations(db, { fresh: false });
-    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4], migrated: false });
+    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4, 5, 6], migrated: false });
   });
 
-  it('upgrades an existing {1} database to {1,2,3,4}', () => {
+  it('upgrades an existing {1} database to {1,2,3,4,5,6}', () => {
     applyMigrationOne();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3, 4]);
-    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it('upgrades an existing {1,2} database to {1,2,3,4}', () => {
+  it('upgrades an existing {1,2} database to {1,2,3,4,5,6}', () => {
     applyMigrationOne();
     applyMigrationTwo();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3, 4]);
-    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it('upgrades an existing schema-v3 database to schema-v4', () => {
+  it('upgrades an existing schema-v3 database to schema-v6', () => {
     applyMigrationOne();
     applyMigrationTwo();
     applyMigrationThree();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3, 4]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('O1-01/O1-03 refuses migration 005 when a pre-existing audit sequence is non-positive', () => {
+    applyMigrationOne();
+    applyMigrationTwo();
+    applyMigrationThree();
+    applyMigrationFour();
+    db.prepare(
+      "INSERT INTO audit_log(seq, ts, actor_id, actor_role, request_id, action, result, prev_hash, hash) VALUES (-1, '2026-08-30T00:00:00Z', 'system', 'system', 'negative', 'auth.rejected', 'denied', ?, ?)",
+    ).run('0'.repeat(64), '1'.repeat(64));
+    expect(() => runMigrations(db, { fresh: false })).toThrow('non-positive existing sequence');
     expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4]);
   });
 
@@ -153,7 +174,7 @@ describe('migration runner', () => {
     [[], 'empty'],
     [[2], 'contiguous prefix'],
     [[1, 3], 'contiguous prefix'],
-    [[1, 2, 3, 5], 'unknown or future'],
+    [[1, 2, 3, 5], 'contiguous prefix'],
   ])('rejects invalid existing ledger %j', (versions, message) => {
     createLedger(versions);
     expect(() => runMigrations(db, { fresh: false })).toThrow(message);

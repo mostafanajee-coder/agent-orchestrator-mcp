@@ -10,14 +10,15 @@ import {
   validateAppliedPrefix,
 } from './migrations.js';
 import {
-  CANONICAL_SCHEMA_DEFINITIONS,
+  canonicalSchemaDefinitionsForVersion,
   fingerprintSchemaSql,
+  type CanonicalSchemaVersion,
 } from './schemaDefinitions.js';
 
 export interface IntegrityReport {
-  readonly schemaVersion: 4;
+  readonly schemaVersion: CanonicalSchemaVersion;
   readonly tableCount: 13;
-  readonly triggerCount: 19;
+  readonly triggerCount: number;
   readonly appliedVersions: readonly number[];
   readonly pragmaPolicy: typeof SQLITE_PRAGMA_POLICY;
 }
@@ -230,6 +231,17 @@ export const EXPECTED_TRIGGERS = [
   'trg_audit_no_replace',
 ] as const;
 
+export const EXPECTED_TRIGGERS_BY_VERSION = {
+  4: EXPECTED_TRIGGERS,
+  5: EXPECTED_TRIGGERS,
+  6: [
+    ...EXPECTED_TRIGGERS,
+    'trg_actors_identity_immutable',
+    'trg_actor_tokens_binding_immutable',
+    'trg_actor_tokens_no_reenable',
+  ],
+} as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
+
 function fail(message: string, remedy = 'Restore the approved schema and retry.'): never {
   throw new SecurityError(message, remedy);
 }
@@ -251,21 +263,25 @@ function verifyCanonicalDefinitions(
     ).get(type, name) as { readonly sql?: unknown } | undefined;
     if (typeof row?.sql !== 'string' || fingerprintSchemaSql(row.sql) !== expectedFingerprint) {
       fail(
-        'The approved ' + type + ' definition for ' + name + ' does not match the canonical Phase 3 definition.',
+        'The approved ' + type + ' definition for ' + name + ' does not match the canonical definition.',
         'Restore the exact approved schema before serving.',
       );
     }
   }
 }
 
-function verifyTables(db: SqliteDatabase): void {
+function verifyTables(db: SqliteDatabase, version: CanonicalSchemaVersion): void {
   const tables = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
   ).all().map((row) => (row as SchemaNameRow).name);
   if (!equalNames(tables, EXPECTED_TABLES)) {
     fail('The database does not contain exactly the approved 13-table schema.');
   }
-  verifyCanonicalDefinitions(db, 'table', CANONICAL_SCHEMA_DEFINITIONS.tables);
+  verifyCanonicalDefinitions(
+    db,
+    'table',
+    canonicalSchemaDefinitionsForVersion(version)?.tables ?? {},
+  );
 }
 
 function verifyColumns(db: SqliteDatabase): void {
@@ -278,14 +294,18 @@ function verifyColumns(db: SqliteDatabase): void {
   }
 }
 
-function verifyIndexes(db: SqliteDatabase): void {
+function verifyIndexes(db: SqliteDatabase, version: CanonicalSchemaVersion): void {
   const indexes = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
   ).all().map((row) => (row as SchemaNameRow).name);
   if (!equalNames(indexes, EXPECTED_INDEXES)) {
     fail('The database does not contain exactly the approved named index set.');
   }
-  verifyCanonicalDefinitions(db, 'index', CANONICAL_SCHEMA_DEFINITIONS.indexes);
+  verifyCanonicalDefinitions(
+    db,
+    'index',
+    canonicalSchemaDefinitionsForVersion(version)?.indexes ?? {},
+  );
 
   const partial = db.prepare(
     "SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = 'ux_actors_single_principal'",
@@ -312,14 +332,19 @@ function verifyIndexes(db: SqliteDatabase): void {
   }
 }
 
-function verifyTriggers(db: SqliteDatabase): void {
+function verifyTriggers(db: SqliteDatabase, version: CanonicalSchemaVersion): void {
   const triggers = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'trigger'",
   ).all().map((row) => (row as SchemaNameRow).name);
-  if (!equalNames(triggers, EXPECTED_TRIGGERS)) {
-    fail('The database does not contain exactly the approved T1–T8 trigger set.');
+  const expected = EXPECTED_TRIGGERS_BY_VERSION[version];
+  if (!equalNames(triggers, expected)) {
+    fail('The database does not contain exactly the approved trigger set for schema version ' + String(version) + '.');
   }
-  verifyCanonicalDefinitions(db, 'trigger', CANONICAL_SCHEMA_DEFINITIONS.triggers);
+  verifyCanonicalDefinitions(
+    db,
+    'trigger',
+    canonicalSchemaDefinitionsForVersion(version)?.triggers ?? {},
+  );
 }
 
 function verifySeeds(db: SqliteDatabase): void {
@@ -395,30 +420,28 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     const policy = verifyPragmaPolicy(db);
     const ledger = readMigrationLedger(db);
     validateAppliedPrefix(ledger, false, KNOWN_MIGRATION_VERSIONS);
-    if (
-      ledger.versions.length !== KNOWN_MIGRATION_VERSIONS.length ||
-      ledger.versions.some((version, index) => version !== KNOWN_MIGRATION_VERSIONS[index])
-    ) {
-      fail('The database is not at the current Phase 3 schema version.');
+    const schemaVersion = ledger.versions[ledger.versions.length - 1];
+    if (schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6) {
+      fail('The database has an unsupported schema version.');
     }
-    verifyTables(db);
+    verifyTables(db, schemaVersion);
     verifyColumns(db);
-    verifyIndexes(db);
-    verifyTriggers(db);
+    verifyIndexes(db, schemaVersion);
+    verifyTriggers(db, schemaVersion);
     verifySqlHealth(db);
     verifySeeds(db);
     verifyLeaseRelation(db);
     return {
-      schemaVersion: 4,
+      schemaVersion,
       tableCount: EXPECTED_TABLES.length,
-      triggerCount: EXPECTED_TRIGGERS.length,
+      triggerCount: EXPECTED_TRIGGERS_BY_VERSION[schemaVersion].length,
       appliedVersions: ledger.versions,
       pragmaPolicy: policy,
     };
   } catch (cause) {
     if (cause instanceof SecurityError) throw cause;
     throw new SecurityError(
-      'Phase 3 database integrity verification failed.',
+      'Database integrity verification failed.',
       cause instanceof Error ? cause.message : 'Inspect the database and retry.',
     );
   }

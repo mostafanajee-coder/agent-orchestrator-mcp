@@ -7,8 +7,12 @@ import {
   withImmediateTransaction,
   type SqliteDatabase,
 } from './db.js';
+import {
+  canonicalSchemaDefinitionsForVersion,
+  fingerprintSchemaSql,
+} from './schemaDefinitions.js';
 
-export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3, 4] as const;
+export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3, 4, 5, 6] as const;
 
 export interface Migration {
   readonly version: number;
@@ -100,7 +104,7 @@ function validateMigrationSet(migrations: readonly Migration[]): void {
     versions.some((version, index) => version !== KNOWN_MIGRATION_VERSIONS[index])
   ) {
     fail(
-      'The binary migration set is not exactly the approved known set [1,2,3,4].',
+      'The binary migration set is not exactly the approved known set [1,2,3,4,5,6].',
       'Remove unknown, missing, or future migration files before serving.',
     );
   }
@@ -242,6 +246,32 @@ const T8_TRIGGER_NAMES = [
   'trg_jobs_no_replace',
 ] as const;
 
+function verifyCanonicalDefinitionsForVersion(
+  db: SqliteDatabase,
+  version: number,
+): void {
+  const definitions = canonicalSchemaDefinitionsForVersion(version);
+  if (definitions === undefined) return;
+
+  const sqliteTypes = { tables: 'table', indexes: 'index', triggers: 'trigger' } as const;
+  for (const [group, entries] of Object.entries(definitions) as Array<[
+    keyof typeof sqliteTypes,
+    Readonly<Record<string, string>>,
+  ]>) {
+    for (const [name, expectedFingerprint] of Object.entries(entries)) {
+      const row = db.prepare(
+        'SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?',
+      ).get(sqliteTypes[group], name) as { readonly sql?: unknown } | undefined;
+      if (typeof row?.sql !== 'string' || fingerprintSchemaSql(row.sql) !== expectedFingerprint) {
+        fail(
+          'The schema definition for ' + name + ' does not match canonical version ' + String(version) + '.',
+          'Restore the approved schema for version ' + String(version) + ' and retry.',
+        );
+      }
+    }
+  }
+}
+
 const EXPECTED_T1_TO_T7_TRIGGER_COUNT =
   T1_TO_T6_TRIGGER_NAMES.length + T7_TRIGGER_NAMES.length;
 const EXPECTED_T1_TO_T8_TRIGGER_COUNT =
@@ -309,6 +339,18 @@ function verifyMigrationFourInsideTransaction(db: SqliteDatabase): void {
   }
 }
 
+function verifyMigrationFiveInsideTransaction(db: SqliteDatabase): void {
+  const invalid = db.prepare(
+    'SELECT seq FROM audit_log WHERE seq <= 0 ORDER BY seq LIMIT 1',
+  ).get() as { readonly seq?: unknown } | undefined;
+  if (invalid !== undefined) {
+    fail(
+      'Migration 005 cannot activate the corrected audit sequence guard over a non-positive existing sequence.',
+      'Restore the authoritative audit ledger through the approved recovery process; no audit row was modified.',
+    );
+  }
+}
+
 export function runMigrations(
   db: SqliteDatabase,
   options: MigrationRunOptions,
@@ -321,6 +363,10 @@ export function runMigrations(
     const appliedOne = withImmediateTransaction(db, () => {
       const ledger = readMigrationLedgerInternal(db);
       validateAppliedPrefix(ledger, options.fresh);
+      const currentVersion = ledger.versions[ledger.versions.length - 1];
+      if (currentVersion !== undefined && currentVersion >= 4) {
+        verifyCanonicalDefinitionsForVersion(db, currentVersion);
+      }
       const next = migrations.find((migration) => !ledger.versions.includes(migration.version));
       if (next === undefined) return false;
 
@@ -336,6 +382,8 @@ export function runMigrations(
       if (next.version === 2) verifyMigrationTwoInsideTransaction(db);
       if (next.version === 3) verifyMigrationThreeInsideTransaction(db);
       if (next.version === 4) verifyMigrationFourInsideTransaction(db);
+      if (next.version === 5) verifyMigrationFiveInsideTransaction(db);
+      if (next.version >= 4) verifyCanonicalDefinitionsForVersion(db, next.version);
 
       db.prepare(
         'INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)',
