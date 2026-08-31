@@ -450,7 +450,8 @@ defaults:
 
 - `job_create`: `{ operation, title, spec.objective,
   spec.acceptance_criteria, spec.context|null, canonical_workspace,
-  max_cycles, deadline_at|null }`;
+  max_cycles|null, deadline_at|null }`, where `max_cycles|null` is the
+  caller-supplied value and the server's effective default is excluded;
 - `job_start`/`job_resume`: `{ operation, job_id, expected_version }`.
 
 Keys are serialized in this documented order before hashing. A session hint
@@ -609,9 +610,12 @@ preconditions explicit and testable.
 
 ## 12. Adjudicated review corrections and closed decisions
 
-The independent review returned `NEEDS DOCUMENTATION CORRECTION`. Codex accepts
-P5-01 through P5-10 and P5-13 as valid corrections, rejects P5-11, P5-12, and
-P5-14 as non-findings, and records the following final planning decisions.
+The first independent review returned `NEEDS DOCUMENTATION CORRECTION`. Codex
+accepted P5-01 through P5-10 and P5-13 as valid corrections and rejected P5-11,
+P5-12, and P5-14 as non-findings. The targeted re-review returned `READY FOR
+CODEX IMPLEMENTATION-AUTHORIZATION GATE`, closed P5-15 through P5-21, and
+identified only the non-blocking P5-22 through P5-24 items. Codex records their
+disposition below.
 
 ### D-1 — Public start/resume surface (RESOLVED)
 
@@ -739,6 +743,27 @@ count and the proposed additions are distinguished explicitly.
 The configured workspace roots themselves are rejected unconditionally. A job
 must name an admitted child directory under an existing configured root.
 
+### D-19 — Caller-supplied `max_cycles` in the idempotency hash (RESOLVED)
+
+`job_create` hashes the caller-supplied `max_cycles` value, represented as
+`null` when omitted. The server's effective default and clamped value are not
+hash members, so a configuration change cannot invalidate an identical caller
+request. The effective value is still validated, stored, and returned.
+
+### D-20 — Future Phase 4 closure annotation (DEFERRED BY DESIGN)
+
+P5-23 is accepted as a future documentation action, not a current blocker.
+When the narrowly scoped D-12 dependency is actually implemented and merged,
+`PHASE4_PLAN.md` must receive a one-line post-merge annotation naming the
+authorizing Phase 5 decision. No change to the closed Phase 4 record is made in
+this planning snapshot.
+
+### D-21 — Second-review adjudication record (RESOLVED)
+
+P5-22 is accepted and closed by D-19. P5-24 is accepted and closed by the
+updated preamble of this section. P5-23 remains explicitly tracked as D-20 and
+does not block the current authorization gate.
+
 ## 13. Explicit non-goals and later ownership
 
 | Area | Owner | Phase 5 treatment |
@@ -756,9 +781,11 @@ must name an admitted child directory under an existing configured root.
 
 Implementation may be authorized only when all of the following are true:
 
-1. D-1 through D-18 are resolved in the final reviewed plan, including the
-   corresponding `ARCHITECTURE.md` annotations for cycle outcomes, cycle
-   ownership, the `job.resume` audit action, and CAS-loss auditing.
+1. D-1 through D-19 and D-21 are resolved in the final reviewed plan, including
+   the corresponding `ARCHITECTURE.md` annotations for cycle outcomes, cycle
+   ownership, the `job.resume` audit action, and CAS-loss auditing. D-20 is
+   explicitly tracked as a post-implementation documentation obligation and
+   does not block this gate.
 2. The frozen planning snapshot is documentation-only and its exact base/head
    are recorded.
 3. Independent architecture review reports no unresolved blocking finding, or
@@ -802,7 +829,7 @@ and must not treat a planning review as permission to implement.
 ```text
 PHASE 5 PLAN STARTED
 PHASE 5 IMPLEMENTATION AUTHORIZED: NO
-INDEPENDENT REVIEW RESULT: NEEDS DOCUMENTATION CORRECTION
-CODEX ADJUDICATION: CORRECTIONS ACCEPTED; D-1 THROUGH D-18 RESOLVED IN THIS SNAPSHOT
-NEXT GOVERNANCE STEP: RE-FREEZE AND SUBMIT THIS CORRECTED DOCUMENTATION SNAPSHOT FOR TARGETED INDEPENDENT RE-REVIEW
+INDEPENDENT RE-REVIEW RESULT: READY FOR CODEX IMPLEMENTATION-AUTHORIZATION GATE
+CODEX ADJUDICATION: P5-22 AND P5-24 ACCEPTED; P5-23 TRACKED AS D-20; NO BLOCKER REMAINS
+NEXT GOVERNANCE STEP: VERIFY THE REPOSITORY SNAPSHOT AND RECORD THE SEPARATE CODEX IMPLEMENTATION-AUTHORIZATION DECISION
 ```
