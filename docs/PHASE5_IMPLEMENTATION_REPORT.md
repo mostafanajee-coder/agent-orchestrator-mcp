@@ -124,19 +124,20 @@ build: PASS
 - Phase 5 implementation authorization: **YES**.
 - Implementation branch: **local only**; no push was performed.
 - Pull request: **not created**.
-- Merge: **not performed at review time**; subsequently completed locally at
+- Merge: **not performed at review time**; subsequently completed at
   `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed head
   `4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`.
-- Remote push and PR: **not performed**.
-- Phase 6 and later phases: **not started**.
+- Remote push: **completed**; `origin/main` is
+  `530e2441636e6517096b1319c4510b1e56626592`. No PR was created.
+- Phase 6 and later phases: **not implemented or started**.
 - P5-23: **completed** in `docs/PHASE4_PLAN.md` by recording the authorizing
   decision `AUTHORIZE PHASE 5 IMPLEMENTATION: YES` for the D-12 dependency.
 
 ## 7. Handoff verdict
 
 ```text
-PHASE 5 IMPLEMENTATION COMPLETE AND MERGED LOCALLY
+PHASE 5 IMPLEMENTATION COMPLETE AND PUBLISHED
 PHASE 5 IMPLEMENTATION REVIEW: APPROVED FOR CODEX FINAL MERGE GATE
-PHASE 5 MERGE: COMPLETED LOCALLY
+PHASE 5 MERGE: COMPLETED AND PUBLISHED
 PHASE 6 STARTED: NO
 ```

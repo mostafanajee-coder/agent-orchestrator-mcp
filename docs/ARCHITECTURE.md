@@ -1,4 +1,4 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Proposal)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
 > `main` is the authoritative merged Phase 4 state. This document alone does
@@ -144,12 +144,12 @@ whitespace is normalized. Any reviewed DDL change must regenerate the compiled
 fingerprint in the same reviewed source change. A fail-closed representation
 drift is preferable to accepting weakened DDL.
 
-### Phase 5 planning amendment (proposed — implementation authorized on branch)
+### Phase 5 planning amendment (implemented and merged — historical planning record)
 
-The Phase 5 planning baseline and its authorized implementation branch add a
-proposed lifecycle staging amendment. It is not a new approved architecture
-revision and it does not retroactively alter the merged Phase 4 implementation
-on `main`. The amendment
+The Phase 5 planning baseline and its authorized implementation branch added a
+lifecycle staging amendment. It was independently reviewed, approved for the
+final merge gate, and published in `main`; it did not retroactively alter the
+approved Phase 4 boundary. The amendment
 touches §1, §4, §6, §8, §14, §15, §17, §18, §19, §20, §21, and §23 only:
 
 - §4 defines one guard-selected outcome for each `(from_state, transition)`
@@ -169,11 +169,10 @@ touches §1, §4, §6, §8, §14, §15, §17, §18, §19, §20, §21, and §23 o
 - §1 and §23 identify `docs/PHASE5_PLAN.md` as a separate proposed planning
   workstream that does not authorize implementation.
 
-The current merged Phase 4 code on `main` does not yet contain the proposed
-cycle-exhaustion branch. The explicit Phase 5 authorization permits one and
-only one narrowly scoped dependency amendment to the existing
-`applyTransition`/`codex_decide` choke point to implement that guard and its
-audit handling. No other Phase 4 source change is authorized by this addendum.
+The published Phase 5 implementation contains the one narrowly scoped
+cycle-exhaustion dependency amendment to the existing
+`applyTransition`/`codex_decide` choke point and its audit handling. No other
+Phase 4 source change was authorized by that Phase 5 decision.
 
 ### Revision 6 / Phase 3 job-row and schema-verification correction (historical approved architecture correction)
 
@@ -801,18 +800,19 @@ Common: every mutating tool accepts `idempotency_key` and an optional `session_h
 - Caller: codex, observer · Capability: `job:read`
 - In: `{ state?, authoritative_status?, workspace?, updated_since?, limit?, cursor? }` · Out: `{ jobs[], next_cursor? }`
 
-### Phase 5 staging amendment (proposed — implementation authorized on branch)
+### Phase 5 lifecycle amendment (implemented and merged)
 
-The Phase 5 plan proposes `job_start` and `job_resume` as explicit lifecycle
+The Phase 5 plan approved `job_start` and `job_resume` as explicit lifecycle
 operations under `job:create`. Both require `expected_version`, use the common
 idempotency envelope, and remain non-authoritative. `job_start` moves only
 `CREATED → IN_PROGRESS`; `job_resume` moves only `REPAIR → IN_PROGRESS` and
-does not increment `cycle`. These are permanent V1 lifecycle operations if the
-Phase 5 plan is approved, not temporary fixtures. During Phase 5 activation,
-`job_get` is exposed only to verified Codex/observer callers; no worker caller
-or lease-scoped read path is activated.
+does not increment `cycle`. These are permanent V1 lifecycle operations, not
+temporary fixtures. The published Phase 5 implementation exposes `job_get` only
+to verified Codex/observer callers; no worker caller or lease-scoped read path
+is activated.
 
-During Phase 5 activation, `job_create` also returns `version: 1` so a caller
+The published Phase 5 implementation also returns `version: 1` from
+`job_create` so a caller
 can use the required CAS contract. `stale_after_s` is server-owned and comes
 from a bounded configured default rather than a request field. `job_get`
 accepts `include: ["decisions"]` only; `runs`, `evidence`, and `artifacts` are
@@ -820,8 +820,8 @@ unconditionally deferred to their owner phases and return the reviewed
 `UNSUPPORTED_COLLECTION` error. The original ten-tool list remains the full
 later V1 target description; these staging rules govern Phase 5 only. The
 required independent review and Codex authorization are recorded in
-`docs/PHASE5_PLAN.md`; the additions are active only on the implementation
-branch until a later merge.
+`docs/PHASE5_PLAN.md`; the additions are active in the published Phase 5
+baseline.
 
 **4. `qa_dispatch`** — Request QA and dispatch workers as one atomic act.
 - Caller: codex · Capability: `qa:request`
@@ -1559,9 +1559,11 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 
 ## 21. Implementation Phases
 
-> **Revision 8 implementation baseline:** The Phase 4 row below describes the
-> authorized Phase 4 scope on `codex/phase4-implementation`. It does not
-> authorize merge, push, deployment, or Phase 5/6 work.
+> **Historical Revision 8 implementation baseline:** The Phase 4 row below
+> describes the authorized Phase 4 scope on `codex/phase4-implementation`.
+> Phase 5 was subsequently planned, independently reviewed, implemented, and
+> published under its separate authorization record. Revision 9 below is the
+> current Phase 6 planning proposal and does not authorize implementation.
 
 Each phase is independently verifiable and leaves the repo green.
 
@@ -1645,8 +1647,137 @@ The Phase 3 merge is complete. The Revision 8 amendment and
 Phase 4 implementation is complete and merged in `main` at
 `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. The Phase 5 planning baseline and
 its authorization are recorded in `docs/PHASE5_PLAN.md`; the independently
-reviewed implementation was merged locally into `main` at
+reviewed implementation was merged at
 `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed head
-`4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`. No push was performed, so the
-remote `origin/main` remains unchanged. Phase 6 and later phases have not
-started.
+`4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`, and the closure record was
+published in `main` at `530e2441636e6517096b1319c4510b1e56626592`. Phase 6 is
+currently planning-only; its proposed Revision 9 delta is recorded below and
+is not implementation authorization.
+
+---
+
+## 24. Revision 9 / Phase 6 worker runtime proposal
+
+**Status: proposed planning delta — implementation not authorized.**
+
+Revision 9 is the Phase 6 planning amendment derived from the published Phase
+5 baseline `530e2441636e6517096b1319c4510b1e56626592`. It is governed by
+`docs/PHASE6_PLAN.md` and `docs/WORKER_PROTOCOL.md`. It does not activate a
+worker runtime, add an MCP tool, change the database schema, or authorize
+source implementation.
+
+### 24.1 Purpose and ownership
+
+Phase 6 proposes the smallest local worker-runtime layer around the existing
+job lifecycle. Workers may execute bounded tasks and return advisory results;
+they may not make an authoritative job decision. `codex_decide` remains the
+single authority path, and the internal `system` actor may perform only the
+mechanical non-authoritative settlement required to close a run set.
+
+### 24.2 Proposed worker registry
+
+Phase 6 proposes a separate protected state-root registry at
+`<state_root>\workers.json`. The existing Phase 5 `config.json` remains the
+owner of Phase 5 workspace and cycle settings. The registry is server-owned
+configuration and has no MCP administration tool.
+
+Each enabled entry names a unique `worker_id`, a worker actor, the `process`
+adapter, a local delivery mode, an operator-owned executable/argument policy,
+an approved working-directory policy, an environment allowlist, and bounded
+runtime/output limits. A dispatch request supplies only a registered
+`worker_id` and bounded task parameters; it never supplies an executable,
+shell command, environment, or arbitrary directory.
+
+The registry must be loaded and validated before the Phase 6 transport surface
+is exposed. Worker actor bindings, capabilities, adapter names, path policy,
+and bounds are all server-owned and fail closed when invalid.
+
+### 24.3 Proposed lifecycle and state boundary
+
+The Phase 6 lifecycle is:
+
+```text
+IN_PROGRESS or REPAIR
+  -> qa_dispatch transaction
+  -> QA_RUNNING
+  -> one or more worker runs
+  -> terminal run settlement
+  -> EVIDENCE_READY
+  -> Codex consideration through codex_decide
+```
+
+The existing schema-v6 `worker_runs` and `leases` structures are reused in the
+planning baseline. `QA_RUNNING` and `EVIDENCE_READY` remain non-authoritative.
+When all runs for the current job/cycle are terminal, the runtime performs one
+mechanical `QA_RUNNING` to `EVIDENCE_READY` transition. A worker PASS, FAIL,
+timeout, cancellation, or malformed result never stamps an authoritative
+status.
+
+Restart-time orphan recovery, reaper loops, and job-level recovery remain
+Phase 8 responsibilities. Evidence and artifact writes remain Phase 7
+responsibilities, even though their structural tables already exist.
+
+### 24.4 Proposed tool delta
+
+The following MCP operations are proposed for independent review only:
+
+| Tool | Caller | Purpose |
+|---|---|---|
+| `qa_dispatch` | verified Codex principal with `qa:request` | Atomically admit one to sixteen registered worker runs |
+| `run_report` | verified worker with `work:report` and a valid run lease | Submit one bounded advisory terminal result |
+| `run_status` | verified principal or observer with `job:read` | Read bounded run status |
+
+No worker-administration, arbitrary process-launch, evidence, artifact,
+recovery, or second-decision tool is proposed. The tools are not registered in
+the current Phase 5-complete `main`.
+
+### 24.5 Proposed process and protocol boundary
+
+The generic `process` adapter is a pure planner. One shared process runtime
+owns argv-array execution, explicit working directory, explicit environment,
+bounded streams, timeout, process-tree/group termination, and normalization.
+
+The worker protocol is versioned NDJSON with bounded lines, total output,
+message count, progress text, and result summary. The initial message types
+are `ready`, `progress`, `result`, and `error`. A valid run has one terminal
+result or error; missing, malformed, oversized, duplicate, or out-of-order
+messages cannot produce success. Evidence and artifact messages are excluded
+from the Phase 6 protocol.
+
+Pipe-mode output and local pull-mode `run_report` input share one report
+settlement function. A run-scoped lease is never returned to the Codex
+dispatch caller and does not confer decision authority. Remote, cloud, browser,
+and external worker delivery are excluded.
+
+### 24.6 Persistence and transaction boundary
+
+The planning baseline introduces no migration and no schema-definition change.
+`qa_dispatch` creates all run and lease rows and the non-authoritative
+`QA_RUNNING` transition in one immediate transaction, then starts processes
+after commit. Report settlement consumes the lease and updates the run in one
+transaction; if the final run becomes terminal, the same transaction performs
+the one non-authoritative settlement.
+
+The existing audit-chain and attribution model is retained. Phase 6 may add
+only the reviewed lifecycle action names needed for dispatch, run settlement,
+lease events, timeout, cancellation, failure, and duplicate reporting. No
+worker event may be recorded as an authoritative decision.
+
+### 24.7 Phase boundary and authorization
+
+Revision 9 does not authorize implementation. Before source work begins, the
+Phase 6 plan, worker protocol, and this proposed architecture delta require
+independent architecture review and Codex adjudication. A separate explicit
+decision must then record either:
+
+```text
+AUTHORIZE PHASE 6 IMPLEMENTATION: YES
+```
+
+or:
+
+```text
+AUTHORIZE PHASE 6 IMPLEMENTATION: NO
+```
+
+Until the first decision is explicitly issued, Phase 6 remains planning-only.
