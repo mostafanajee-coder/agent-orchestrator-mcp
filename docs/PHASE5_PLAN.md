@@ -133,7 +133,8 @@ production worker behavior.
 
 Record the final request/response/error contracts, state ownership, actor
 permissions, pagination rules, and the exact relationship to `codex_decide`.
-Resolve the two open API questions in §12 before implementation authorization.
+The independent review identified D-1 and D-2 as blocking; this corrected
+baseline resolves both explicitly in §5 and §12.
 
 ### WP-2 — Input and domain validation
 
@@ -164,12 +165,13 @@ future evidence/artifact ownership into a Phase 5 write path.
 ### WP-6 — Lifecycle and cycle coordination
 
 Implement the lifecycle operations required by the approved state machine,
-including the `CREATED` start path and `REPAIR` resume path if the public API
-decision in §12 authorizes them. The implementation must call the existing
-transition/transaction primitives and must not create a second state writer.
+including the explicitly proposed `job_start` and `job_resume` surface in §5.
+The implementation must call the existing transition/transaction primitives
+and must not create a second state writer.
 
-Cycle limits, `hard_max_cycles`, and no-auto-dispatch behavior are specified in
-§8. Time-based stalling and process cleanup remain later-phase behavior.
+Cycle limits, `hard_max_cycles`, cycle-exhaustion behavior, and no-auto-dispatch
+behavior are specified in §8. Time-based stalling and process cleanup remain
+later-phase behavior.
 
 ### WP-7 — Lifecycle idempotency and CAS
 
@@ -214,7 +216,6 @@ Input:
   workspace: string,
   max_cycles?: integer,
   deadline_at?: RFC3339 UTC timestamp,
-  stale_after_s?: integer,
   idempotency_key?: UUID,
   session_hint?: string
 }
@@ -237,27 +238,32 @@ The server generates `job_id`, `request_id`, and timestamps. The caller cannot
 provide `owner_actor_id`, `state`, `authoritative_status`,
 `deciding_decision_id`, `version`, or a worker identity. Creation is rejected
 before any durable write if the workspace or specification is invalid.
+`stale_after_s` is server-owned: it is populated from the explicit configured
+default, is returned by `job_get`, and is not a caller-controlled creation
+parameter. The configured default must be present and bounded; there is no
+implicit unlimited or zero-value fallback.
 
 ### 5.2 `job_get`
 
-Caller: verified Codex or observer with `job:read`; a worker may use the
-architecture's later lease-scoped read rule only after Phase 6 owns that path.
+Caller: verified Codex or observer with `job:read`. Worker access and
+lease-scoped reads are deferred to Phase 6; Phase 5 grants no worker read path.
 
 Input:
 
 ```text
 {
   job_id: string,
-  include?: ["decisions" | "runs" | "evidence" | "artifacts"],
+  include?: ["decisions"],
   cycle?: integer
 }
 ```
 
 The core Phase 5 result contains the job lifecycle fields, `version`, cycle,
-workspace, and decisions that are already durable. The final plan must state
-whether `runs`, `evidence`, and `artifacts` are rejected as future-owned
-collections or returned read-only when fixture rows exist. Phase 5 must not
-write those collections or bypass their later ownership boundaries.
+workspace, and decisions that are already durable. `runs`, `evidence`, and
+`artifacts` are rejected with `UNSUPPORTED_COLLECTION` unconditionally. They
+are not returned conditionally when fixtures happen to exist, and no worker
+lease-scoping approximation is implemented in Phase 5. Their read/write
+contracts remain with Phases 6 and 7.
 
 ### 5.3 `job_list`
 
@@ -286,18 +292,45 @@ Output:
 ```
 
 Listing is bounded, uses a stable server-defined ordering such as
-`(updated_at, job_id)`, and uses an opaque cursor rather than unbounded OFFSET
-pagination. The final plan must define whether a null-status filter means
-explicit `NULL` or absence of a filter; it must not silently conflate them.
+`(updated_at DESC, job_id DESC)`, and uses an opaque cursor rather than
+unbounded OFFSET pagination. The default page size is 50 and the maximum is
+100. The cursor contains the last ordering key and a filter fingerprint; a
+cursor cannot be reused with different filters. The existing indexes plus a
+bounded sort satisfy this ordering; no new index is required by this plan.
 
-### 5.4 Lifecycle transitions
+When `authoritative_status` is omitted there is no status filter. When it is
+explicitly `null`, the query selects rows whose status is SQL `NULL`. The two
+cases are distinct and are covered separately by tests.
 
-The approved state machine already defines `CREATED → IN_PROGRESS` (`start`)
-and `REPAIR → IN_PROGRESS` (`resume`) under `job:create`, while Phase 4 owns
-decision transitions and authoritative writes. Phase 5 must provide the
-approved invocation surface for those two non-authoritative transitions, or
-explicitly document that they are internal domain operations. It must not
-invent a generic `set_status` operation.
+### 5.4 `job_start` and `job_resume`
+
+The corrected plan resolves D-1 by proposing two explicit, non-authoritative
+Phase 5 lifecycle operations. These are subject to independent review as part
+of this plan; they are not implementation authorization.
+
+Both operations use:
+
+```text
+Input:  { job_id, expected_version, idempotency_key?, session_hint? }
+Output: { job_id, state, authoritative_status, cycle, version }
+Caller: verified `codex` principal with `job:create`
+```
+
+`job_start` moves only `CREATED → IN_PROGRESS`. `job_resume` moves only
+`REPAIR → IN_PROGRESS`. Both require `expected_version`, use the common
+idempotency contract, emit a bounded audit action (`job.start` or
+`job.resume`), and return `STATE_CONFLICT` for a stale version. Neither writes
+an authoritative status, changes the cycle, creates worker rows, or dispatches
+work. `job_resume` requires that any cycle increment associated with the
+preceding `FIX`/`RETEST` has already happened.
+
+### 5.5 Lifecycle transition ownership
+
+The approved state machine defines `CREATED → IN_PROGRESS` (`start`) and
+`REPAIR → IN_PROGRESS` (`resume`) under `job:create`. Phase 4 owns all
+`codex_decide` calls and remains the only application writer of authoritative
+fields. Phase 5 owns the public lifecycle surface and invokes the existing
+transition choke point; it must not invent a generic `set_status` operation.
 
 ## 6. Initial row and lifecycle semantics
 
@@ -312,25 +345,35 @@ Every successful creation has:
 - `version = 1`;
 - an owner actor derived from verified authentication;
 - a canonical, admitted workspace path;
-- bounded, valid `max_cycles`, `deadline_at`, and `stale_after_s` values.
+- bounded, valid `max_cycles`, `deadline_at`, and the configured effective
+  `stale_after_s` value.
 
 The existing T7/T8 database guards remain the final barrier against an already
 authoritative insert, deletion, or replacement of the job ledger root.
 
 ### 6.2 Start, resume, and decision ownership
 
-- `start` may move only `CREATED` to `IN_PROGRESS`.
-- `resume` may move only `REPAIR` to `IN_PROGRESS` and must preserve the
-  state-machine cycle semantics.
+- `job_start` may move only `CREATED` to `IN_PROGRESS`.
+- `job_resume` may move only `REPAIR` to `IN_PROGRESS` and preserves the
+  already-updated cycle.
 - Phase 5 may not write an authoritative status while performing either move.
 - `FIX` and `RETEST` decisions remain Phase 4 `codex_decide` operations; the
-  cycle increment must happen exactly once according to the existing transition
-  table, not once in Phase 4 and again in Phase 5.
+  Phase 4 decision transaction performs the cycle increment exactly once for a
+  normal transition. `job_resume` never increments it again.
 - `APPROVE` from a valid non-authoritative state remains a `codex_decide`
   operation. It is the integration route for the no-worker Phase 5 acceptance
   test.
 - Phase 5 does not infer approval from a job's age, worker verdict, text,
   evidence, or absence of errors.
+
+If a `FIX` or `RETEST` request would advance beyond `max_cycles`, the existing
+`codex_decide` authority choke point records a non-authoritative
+cycle-exhaustion transition to `STALLED` with `state_reason = max_cycles`.
+That guard transition increments no cycle, creates no worker run, and leaves
+`authoritative_status` unchanged. It is an explicit lifecycle guard, not a
+time-based reaper and not a second Phase 5 state writer. The corresponding
+shared transition clarification is recorded in `ARCHITECTURE.md` and must be
+accepted before implementation.
 
 ### 6.3 Time and cycle fields
 
@@ -338,10 +381,15 @@ Phase 5 validates and stores the existing `deadline_at`, `stale_after_s`,
 `cycle`, and `max_cycles` fields. It does not run a clock-based reaper, kill a
 process, mark a job `STALLED` because time passed, or perform retry scheduling.
 Those behaviors belong to Phase 8 and require their own plan and authorization.
+The only Phase 5 cycle-exhaustion move is the explicit `FIX`/`RETEST` guard
+described in §6.2; it is not automatic time enforcement.
 
-`max_cycles` is clamped to the configured `hard_max_cycles`; values beyond the
+`max_cycles` defaults to the configured bounded lifecycle default and is clamped
+to the configured `hard_max_cycles` (default hard ceiling 10). Values beyond the
 hard ceiling are rejected or normalized according to the final reviewed API
-contract, never accepted as a principal override.
+contract, never accepted as a principal override. The effective
+`stale_after_s` comes from an explicit bounded configuration default, and a
+missing or invalid default fails closed rather than becoming unlimited.
 
 ## 7. Workspace admission and path safety
 
@@ -377,16 +425,26 @@ For every mutating Phase 5 operation that accepts `idempotency_key`:
 4. return `IDEMPOTENCY_CONFLICT` for a different hash; and
 5. store the response only in the same transaction as the lifecycle mutation.
 
-The hash excludes untrusted transport decoration that has no semantic effect,
-or the final reviewed contract must explain why it is included. A session hint
+The canonical hash input is fixed and excludes transport decoration, server
+generated IDs, timestamps, and `session_hint`:
+
+- `job_create`: `{ operation, title, spec.objective,
+  spec.acceptance_criteria, spec.context|null, canonical_workspace,
+  max_cycles, deadline_at|null, effective_stale_after_s }`;
+- `job_start`/`job_resume`: `{ operation, job_id, expected_version }`.
+
+Keys are serialized in this documented order before hashing. A session hint
 never creates a second idempotency namespace.
 
 ### 8.2 Optimistic concurrency
 
-Every mutating operation that changes a job requires the current
+Every mutating operation that changes an existing job requires the current
 `expected_version`. The update must include `WHERE job_id = ? AND version = ?`
-and require exactly one changed row. A loser receives `STATE_CONFLICT` and the
-transaction writes no decision, status, cycle, audit, or idempotency mutation.
+and require exactly one changed row. A loser receives `STATE_CONFLICT`; by
+deliberate inherited policy, a failed CAS is not an accepted mutation and
+writes no decision, status, cycle, audit, or idempotency row. The losing
+session is not treated as authoritative and is not persisted as a successful
+attempt.
 
 Concurrent read operations are bounded and do not hold a write transaction.
 Concurrent lifecycle mutations are serialized through SQLite's existing
@@ -416,12 +474,15 @@ At minimum, the reviewed Phase 5 surface must distinguish:
 - `AUTHORIZATION_DENIED` — verified actor lacks the required capability;
 - `STATE_CONFLICT` — stale version, cycle, or lifecycle precondition;
 - `IDEMPOTENCY_CONFLICT` — key reused for a different request;
-- `UNSUPPORTED_COLLECTION` — a future-owned `job_get` collection is requested,
-  if the conservative include policy is selected; and
+- `UNSUPPORTED_COLLECTION` — `job_get` requests `runs`, `evidence`, or
+  `artifacts`, which are unconditionally future-owned in Phase 5; and
 - `INTERNAL_ERROR` — bounded safe failure without secret or raw SQL leakage.
 
-Exact public error names must be reconciled with the existing repository error
-taxonomy before implementation. Error wording is not an authority mechanism.
+These are the fixed Phase 5 public error codes. They are mapped into the
+repository's existing response envelope; internal TypeScript error classes may
+remain implementation details. `WORKSPACE_NOT_ALLOWED` and
+`UNSUPPORTED_COLLECTION` are operation-level codes, not new capabilities or
+database statuses. Error wording is not an authority mechanism.
 
 ## 10. Audit and attribution
 
@@ -476,8 +537,8 @@ result. The initial target matrix is:
 - filters compose deterministically and do not leak unrequested collections;
 - null authoritative status is represented distinctly from an omitted filter;
 - an observer can read only the approved surface and cannot mutate it;
-- future-owned collections are rejected or read exactly as the final plan says,
-  never silently activated.
+- future-owned collections are rejected unconditionally with
+  `UNSUPPORTED_COLLECTION` and never silently activated.
 
 ### 11.4 Lifecycle, idempotency, and CAS
 
@@ -487,7 +548,11 @@ result. The initial target matrix is:
 - same actor/key/different request returns `IDEMPOTENCY_CONFLICT`;
 - two concurrent writers produce one winner and one `STATE_CONFLICT`;
 - max-cycle and hard-max-cycle bounds are enforced without auto-dispatch;
-- `RETEST`/`FIX` cycle increments are not duplicated by Phase 5;
+- normal `FIX`/`RETEST` increments the cycle exactly once in the Phase 4
+  decision transaction; `job_resume` does not increment it again;
+- a `FIX`/`RETEST` request that would exceed `max_cycles` produces the explicit
+  non-authoritative `STALLED(max_cycles)` guard transition and does not exceed
+  the limit;
 - a Phase 5-created job can reach `APPROVED` only through `codex_decide` and
   without worker rows or worker verdict authority.
 
@@ -503,51 +568,96 @@ result. The initial target matrix is:
   durable rows;
 - Windows and POSIX `npm run ci` remain green, including build asset checks.
 
-## 12. Open decisions and planning blockers
+### 11.6 Invariant traceability and owner split
 
-These are intentionally explicit. They must be resolved by the independent
-review and Codex adjudication before implementation authorization.
+| Architecture invariant | Phase 5 proof | Later owner-phase proof |
+|---|---|---|
+| 21 — max-cycle bound | Prove `FIX`/`RETEST` at the limit yields the explicit `STALLED(max_cycles)` guard without increment or worker creation. | Phase 6 proves the `max_cycles+1` dispatch request is refused before worker/lease creation. |
+| 22 — hard maximum | Prove `job_create` and any reviewed lifecycle amendment cannot set `max_cycles` above the configured `hard_max_cycles`. | Later phases must preserve the same ceiling when dispatching or changing lifecycle state. |
+| 24 — RETEST behavior | Prove the Phase 4 `RETEST` result is `IN_PROGRESS` at `cycle+1`, no Phase 5 auto-dispatch occurs, and `job_resume` does not add another increment. | Phase 6 proves a fresh explicit `qa_dispatch` is required and no implicit dispatch occurs. |
+| 29 — workspace allowlist | Prove realpath containment, root/path rejection, canonical storage, and no write on rejection. | Later artifact/process phases must not weaken the admitted workspace boundary. |
 
-### D-1 — Public start/resume surface (BLOCKING)
+This split is part of the acceptance contract: Phase 5 cannot claim to prove
+worker/lease behavior owned by Phase 6, but Phase 5 must leave those later
+preconditions explicit and testable.
 
-The architecture's state machine defines `start` and `resume`, while the
-approved tool inventory names `job_create`, `job_get`, and `job_list` for the
-Phase 5 job lifecycle but does not name `job_start` or `job_resume`. The final
-plan must choose one of these and document its capability, input, audit event,
-idempotency, and CAS contract:
+## 12. Adjudicated review corrections and closed decisions
 
-- expose explicit reviewed lifecycle tools;
-- make the operations internal domain calls with a separately documented
-  caller; or
-- revise the lifecycle contract so another already-approved operation invokes
-  them without creating an authority bypass.
+The independent review returned `NEEDS DOCUMENTATION CORRECTION`. Codex accepts
+P5-01 through P5-10 and P5-13 as valid corrections, rejects P5-11, P5-12, and
+P5-14 as non-findings, and records the following final planning decisions.
 
-No implementation may guess this boundary.
+### D-1 — Public start/resume surface (RESOLVED)
 
-### D-2 — `job_get` future-owned collections (BLOCKING)
+Phase 5 proposes explicit `job_start` and `job_resume` operations. Options that
+leave `start` internal with no Phase 5 caller are rejected because
+`job_create` returns `CREATED` and `codex_decide(APPROVE)` cannot accept that
+state. Both operations use `job:create`, `expected_version`, the common
+idempotency contract, and the `job.start`/`job.resume` audit action. They are
+non-authoritative and do not create worker activity.
 
-The architecture describes `job_get` as a full picture with optional runs,
-evidence, artifacts, and decisions, while Phase 6/7 own active worker and
-evidence/artifact behavior. The final plan must choose whether Phase 5 rejects
-future-owned collection requests, returns only already-durable read data, or
-defers those include options until their owner phases. It must specify worker
-row scoping and avoid creating a Phase 7 write path.
+### D-2 — `job_get` future-owned collections (RESOLVED)
 
-### D-3 — Workspace configuration source (CLOSED FOR PLANNING)
+Phase 5 accepts `include: ["decisions"]` only. Requests for `runs`, `evidence`,
+or `artifacts` fail unconditionally with `UNSUPPORTED_COLLECTION`. Worker
+lease-scoped filtering is deferred to Phase 6; Phase 5 provides no approximation
+of it and no conditional fixture-dependent response shape.
 
-Use the existing configured roots and Phase 1 path-safety boundary. Do not add a
-workspace table, remote URL feature, or user-controlled allowlist in Phase 5.
+### D-3 — Workspace configuration source (RESOLVED)
 
-### D-4 — Time-based enforcement (CLOSED FOR PLANNING)
+Use the existing configured roots and Phase 1 path-safety boundary. No workspace
+table, remote URL feature, or user-controlled allowlist is added.
 
-Phase 5 validates and stores deadline/stale fields; it does not run reapers,
-perform automatic stalling, or kill processes. Enforcement belongs to Phase 8.
+### D-4 — Time-based enforcement (RESOLVED)
 
-### D-5 — Stable list ordering (PROPOSED)
+Phase 5 validates and stores deadline/stale fields but does not run reapers,
+perform time-based stalling, or kill processes. Those behaviors belong to
+Phase 8. The only Phase 5 cycle-limit move is the explicit `FIX`/`RETEST`
+guard-to-`STALLED` through the existing authority choke point.
 
-Use an opaque cursor over a deterministic `(updated_at, job_id)` ordering with a
-bounded limit. The independent review may refine the encoding, but OFFSET-only
-pagination and unbounded lists are not acceptable.
+### D-5 — Stable list ordering (RESOLVED)
+
+Use `(updated_at DESC, job_id DESC)` with default limit 50 and maximum 100. An
+opaque cursor carries the last ordering key and a filter fingerprint. Existing
+indexes plus a bounded sort satisfy the contract; no new index is required.
+
+### D-6 — Null filter semantics (RESOLVED)
+
+An omitted `authoritative_status` means no status filter. An explicit JSON null
+means `WHERE authoritative_status IS NULL`.
+
+### D-7 — Public error taxonomy (RESOLVED)
+
+The codes in §9 are the fixed Phase 5 envelope codes. Implementation-specific
+error classes may map to them, but the public meanings and distinctions cannot
+be changed without a reviewed plan amendment.
+
+### D-8 — Idempotency hash membership (RESOLVED)
+
+The exact semantic fields are fixed in §8.1. `session_hint`, request IDs,
+server-generated identifiers, and timestamps are excluded; no implementation
+may choose a different field set silently.
+
+### D-9 — CAS-loss audit policy (RESOLVED)
+
+The merged Phase 4 behavior is retained: a failed CAS returns `STATE_CONFLICT`
+and writes no audit row or other durable mutation. The architecture annotation
+in `ARCHITECTURE.md` reconciles the older wording that said the losing attempt
+was audited. Accepted lifecycle mutations remain audited.
+
+### D-10 — Cycle increment ownership (RESOLVED)
+
+The Phase 4 `codex_decide` transaction increments `cycle` exactly once for a
+normal `FIX` or `RETEST`. Phase 5 `job_resume` preserves that value. A limit
+guard that would exceed `max_cycles` increments nothing and transitions the job
+to non-authoritative `STALLED(max_cycles)` through the same existing choke
+point.
+
+### D-11 — Phase 5 invariant ownership (RESOLVED)
+
+The traceability table below separates Phase 5 coverage from later owner-phase
+coverage. No invariant is treated as fully proven merely because its later
+runtime half is documented.
 
 ## 13. Explicit non-goals and later ownership
 
@@ -566,7 +676,9 @@ pagination and unbounded lists are not acceptable.
 
 Implementation may be authorized only when all of the following are true:
 
-1. D-1 and D-2 are resolved in the final reviewed plan.
+1. D-1 through D-11 are resolved in the final reviewed plan, including the
+   corresponding `ARCHITECTURE.md` annotations for cycle exhaustion, cycle
+   ownership, and CAS-loss auditing.
 2. The frozen planning snapshot is documentation-only and its exact base/head
    are recorded.
 3. Independent architecture review reports no unresolved blocking finding, or
@@ -574,7 +686,9 @@ Implementation may be authorized only when all of the following are true:
 4. The implementation branch starts from the selected authoritative `main`
    SHA and contains no pre-existing Phase 5 source work.
 5. The approved scope still excludes Phase 6–9 and post-V1 work.
-6. Codex records the exact decision:
+6. The public Phase 5 additions are limited to the reviewed lifecycle surface:
+   `job_create`, `job_start`, `job_resume`, `job_get`, and `job_list`.
+7. Codex records the exact decision:
 
 ```text
 AUTHORIZE PHASE 5 IMPLEMENTATION: YES
@@ -605,5 +719,7 @@ and must not treat a planning review as permission to implement.
 ```text
 PHASE 5 PLAN STARTED
 PHASE 5 IMPLEMENTATION AUTHORIZED: NO
-NEXT GOVERNANCE STEP: RESOLVE D-1/D-2, THEN FREEZE AND SUBMIT FOR INDEPENDENT ARCHITECTURE REVIEW
+INDEPENDENT REVIEW RESULT: NEEDS DOCUMENTATION CORRECTION
+CODEX ADJUDICATION: CORRECTIONS ACCEPTED; D-1 THROUGH D-11 RESOLVED IN THIS SNAPSHOT
+NEXT GOVERNANCE STEP: RE-FREEZE AND SUBMIT THIS CORRECTED DOCUMENTATION SNAPSHOT FOR TARGETED INDEPENDENT RE-REVIEW
 ```
