@@ -5,6 +5,7 @@ import { stateDirectories } from '../config/stateRoot.js';
 import { SecurityError } from '../errors.js';
 import { ensureLeaseKey } from '../secrets/leaseKey.js';
 import { assertPathIsSafe } from '../security/pathSafety.js';
+import { initializeDatabaseForInit, type DatabaseInitResult } from '../store/init.js';
 import type { CommandContext } from './context.js';
 
 export interface InitResult {
@@ -12,13 +13,14 @@ export interface InitResult {
   readonly createdDirectories: readonly string[];
   readonly leaseKeyCreated: boolean;
   readonly securityModel: string;
+  readonly database: DatabaseInitResult;
 }
 
 /**
  * Phase 1 bootstrap: prepare and protect the state root.
  *
- * Later phases extend `init` with schema migrations and principal bootstrap;
- * neither exists yet.
+ * Phase 3 extends this command with secure schema initialization. Production
+ * principal/system/token bootstrap remains a Phase 4 operation.
  *
  * Ordering is load-bearing. Each directory is created, proven to be a real
  * directory rather than a redirection, hardened, and verified before the next
@@ -58,12 +60,14 @@ export function runInit(context: CommandContext): InitResult {
   }
   assertPathIsSafe(layout.leaseKey, 'file', context.platform, { requireSingleLink: true });
   assertSecure(context, layout.leaseKey, 'file');
+  const database = initializeDatabaseForInit(context);
 
   return {
     stateRoot: layout.root,
     createdDirectories: created,
     leaseKeyCreated: leaseKey.created,
     securityModel: security.describe(),
+    database,
   };
 }
 

@@ -9,11 +9,13 @@ triggers, not by prompt instructions.
 
 ## Status
 
-**Phase 2 — MCP spine.** The CLI prepares, protects, and inspects the global state root, and now
-serves a minimal authenticated MCP spine with one diagnostic `ping` tool over loopback Streamable
-HTTP or stdio. Dropbox discovery covers both documented Windows metadata locations, and cloud-sync
-containment covers every protected state path in both nesting directions. SQLite, persistent
-`actor_tokens`, jobs, decisions, workers, and audit authority remain later-phase work.
+**Phase 3 — Store & database authority.** The CLI prepares and protects the global state root,
+initializes the approved schema-v4 local SQLite store, and serves the existing authenticated MCP spine with
+only one diagnostic `ping` tool over loopback Streamable HTTP or stdio. Doctor is
+filesystem/security-only and explicitly reports
+`DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; `init` and serve startup own deep
+SQLite integrity, including canonical table/index/trigger definitions and T1–T8. Persistent `actor_tokens` authentication, jobs, decisions, workers,
+and authority tools remain later-phase work.
 
 The approved design and the full phase plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 The empirical Codex/Inspector protocol observation is recorded in
@@ -41,19 +43,25 @@ npm run ci
 node dist/index.js init
 ```
 
-Prepares the state root: creates each directory, applies owner-only protection, verifies it, and
-creates the lease key once. It is idempotent — running it again preserves the existing key
-unchanged. This is the Phase 1 portion of `init`; schema migrations and principal bootstrap arrive
-in later phases.
+Prepares the state root, creates the database only on the explicit init path, applies owner-only
+protection, verifies it, applies the exact numbered migration set `[1, 2, 3, 4]`, and runs the deep
+structural/canonical integrity gate. It is idempotent — running it again preserves the existing
+lease key unchanged. Jobs are durable ledger roots: they begin without authority and are never
+deleted or replaced by runtime SQL. The same replacement guard applies to durable decisions and
+audit rows; normal audit AUTOINCREMENT inserts remain valid.
+Phase 3 creates schema only; production principal/system/token bootstrap remains Phase 4.
 
 ```bash
 node dist/index.js doctor
 ```
 
-Reports on the state root, printing the resolved active root. **Read-only**: it never creates,
-hardens, or repairs anything, and it never reads the lease key. It exits non-zero if anything is
-insecure. Advisory warnings — such as a superseded state root still present on disk — are reported
-without failing the run.
+Reports the resolved root, DB file, and WAL/SHM filesystem-security state. **Read-only**:
+it never invokes SQLite for the authoritative DB, creates, hardens, repairs, migrates, checkpoints,
+or reads lease-key contents. When filesystem checks pass it reports
+`DB_FILE_SECURITY=PASS` and
+`DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; SQL integrity is not claimed. It exits non-zero
+for unsafe filesystem/security state. Advisory warnings — such as a superseded state root still
+present on disk — are reported without failing the run.
 
 ```bash
 ORCHESTRATOR_ACTOR_TOKEN="<operator-supplied-token>" node dist/index.js serve --stdio
@@ -71,10 +79,15 @@ Starts Streamable HTTP on `127.0.0.1` only. Every MCP request requires a bearer 
 `mcp` scope; Host and Origin are restricted to localhost-class values. `--port` is optional and
 defaults to `4317`.
 
-Before either transport starts, `serve` performs the same structured, read-only Phase 1 verification
-used by `doctor`. It refuses to start when the state root, protected directories, cloud-sync
-relationship, ACL/mode metadata, or lease-key shape is not valid. It never runs `init`, creates
-state, repairs permissions, or reads lease-key contents automatically.
+Before either transport starts, `serve` performs the filesystem/security checks and then opens only
+an existing authoritative DB for the approved deep migration/schema/integrity gate. It refuses to
+start before HTTP bind or stdio protocol output when the state root, DB/sidecars, migrations,
+PRAGMA policy, schema, or integrity checks are invalid. It never runs `init`, creates a
+missing DB, repairs permissions, or reads lease-key contents automatically.
+
+Writable AOM connections enable and verify `recursive_triggers=ON` as defense in depth. The
+schema itself rejects `INSERT OR REPLACE` and `REPLACE` against existing job, decision, and audit
+identities even when an external connection explicitly disables that pragma.
 
 Exit codes: `0` success, `1` unexpected internal failure, `2` usage error, `3` security or
 invariant failure.
@@ -85,7 +98,7 @@ Runtime state lives outside this repository, in one global root shared by every 
 
 ```
 <OS user profile>\.agent-orchestrator-mcp\     e.g. C:\Users\<user>\.agent-orchestrator-mcp
-  data\        reserved for the database (later phase)
+  data\        orchestrator.db, WAL/SHM sidecars when SQLite owns them
   artifacts\   per job / cycle / run
   secrets\     lease.key
   logs\
@@ -179,9 +192,11 @@ protection status.
 src/config/     state-root resolution, cloud-sync detection
 src/security/   ACL and permission providers, SDDL policy, safe process execution
 src/secrets/    lease key lifecycle
+src/store/      secure DB modes, migrations, schema, integrity, repositories
 src/commands/   init and doctor
 src/mcp/        shared MCP factory, ping, auth boundary, HTTP and stdio entry points
-test/unit/      unit tests, including a dependency-scope guard
+test/unit/      unit tests
+test/store/     migrations, schema, raw-SQL authority, doctor, startup gates
 test/integration/ real loopback HTTP and stdio transport acceptance tests
 docs/           approved architecture
 .github/        CI workflow (Windows + Linux)

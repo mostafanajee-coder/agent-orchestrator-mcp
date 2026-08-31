@@ -5,6 +5,7 @@ import { stateDirectories } from '../config/stateRoot.js';
 import { SecurityError } from '../errors.js';
 import { inspectLeaseKey, LEASE_KEY_BYTES } from '../secrets/leaseKey.js';
 import { inspectPathSafety } from '../security/pathSafety.js';
+import { inspectDatabaseFilesForDoctor } from '../store/doctorFiles.js';
 import type { CommandContext } from './context.js';
 
 /** `warn` is advisory: it is reported but never makes doctor fail. */
@@ -28,8 +29,8 @@ export interface DoctorReport {
  * Read-only Phase 1 health check.
  *
  * It inspects and reports; it never creates, hardens, or repairs anything, and
- * it never opens the lease key. Checks cover only what Phase 1 implements —
- * there is no database, actor, or MCP check to run yet.
+ * it never opens the lease key or the authoritative SQLite database. Deep SQL
+ * integrity is deliberately owned by init and serve startup.
  */
 export function runDoctor(context: CommandContext): DoctorReport {
   const { layout, security } = context;
@@ -43,6 +44,7 @@ export function runDoctor(context: CommandContext): DoctorReport {
 
   checks.push(leaseKeyCheck(context));
   checks.push(...legacyRootChecks(context));
+  checks.push(...inspectDatabaseFilesForDoctor(context));
 
   let subject: string;
   try {

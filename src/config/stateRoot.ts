@@ -63,6 +63,9 @@ export interface StateRootEnvironment {
 export interface StateLayout {
   readonly root: string;
   readonly data: string;
+  readonly database: string;
+  readonly databaseWal: string;
+  readonly databaseShm: string;
   readonly artifacts: string;
   readonly secrets: string;
   readonly logs: string;
@@ -215,6 +218,9 @@ export function stateLayout(root: string, platform: NodeJS.Platform): StateLayou
   return {
     root,
     data: path.join(root, 'data'),
+    database: path.join(root, 'data', 'orchestrator.db'),
+    databaseWal: path.join(root, 'data', 'orchestrator.db-wal'),
+    databaseShm: path.join(root, 'data', 'orchestrator.db-shm'),
     artifacts: path.join(root, 'artifacts'),
     secrets: path.join(root, 'secrets'),
     logs: path.join(root, 'logs'),

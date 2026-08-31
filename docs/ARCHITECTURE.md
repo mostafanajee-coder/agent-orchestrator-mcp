@@ -1,13 +1,70 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 5)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7)
 
 > **Status:** approved. This is the design of record; the implementation follows the phase plan in §21.
-> Implementation is at **Phase 2 (MCP spine)**. Sections describing later phases are design intent, not
-> shipped behaviour. This document was written before any code existed, so present-tense descriptions
-> of components state what they must do, not what exists today.
+> Implementation is at **Phase 3 (Store & DB authority)**. Phase 4 and later sections are design intent, not
+> shipped behaviour. The design sections state required behavior; the Phase 3
+> implementation status is recorded in the plan and README.
 
 ---
 
 ## Revision Delta
+
+### Revision 7 / SQLite row-replacement integrity (this revision — approved architecture correction)
+
+Revision 6's DELETE-only durability claim was incomplete for SQLite
+`REPLACE` conflict resolution. With `PRAGMA recursive_triggers=OFF`, SQLite can
+remove a conflicting PRIMARY KEY row before inserting the replacement without
+firing the row's `BEFORE DELETE` trigger. That path could otherwise erase a
+terminal job, rewrite an append-only decision, or forge an `audit_log` row.
+
+Revision 7 preserves Revision 5's doctor decision, Revision 6's canonical
+schema verification, T1–T7, the 13-table schema, Phase 2 behavior, and the
+Phase 4 boundary. It adds only:
+
+- Migration `004_row_replacement_integrity.sql`, without rewriting historical
+  migrations `001`/`002`/`003`.
+- T8, with INSERT-side identity-existence guards on `jobs`, `decisions`, and
+  `audit_log`. A genuinely new row may be inserted, but an existing protected
+  primary-key identity may not be inserted as a replacement, whether the
+  caller uses `INSERT OR REPLACE` or bare `REPLACE`.
+- AOM-owned writable connections set and verify
+  `PRAGMA recursive_triggers=ON` as defense in depth. The schema-resident T8
+  guards remain the integrity boundary and continue to reject replacement from
+  an external connection that explicitly sets it OFF; the design does not
+  depend on a caller honoring AOM's connection policy.
+- Canonical verification of every physical T1–T8 trigger and schema version 4.
+
+Canonical SQL fingerprints intentionally preserve SQL case and comments; only
+whitespace is normalized. Any reviewed DDL change must regenerate the compiled
+fingerprint in the same reviewed source change. A fail-closed representation
+drift is preferable to accepting weakened DDL.
+
+### Revision 6 / Phase 3 job-row and schema-verification correction (this revision — approved architecture correction)
+
+Revision 6 preserves the Revision 5 doctor boundary and all T1–T6 semantics. It
+adds the narrow D-1/D-2/D-3/D-4/D-5/D-6 corrections approved for the Phase 3
+implementation:
+
+- Migration `003_job_row_integrity_and_schema_verification.sql` installs T7 as
+  two physical triggers: `trg_jobs_unstamped_on_insert` rejects any new job
+  with a non-NULL `authoritative_status`, a non-NULL `deciding_decision_id`, or
+  an authoritative initial `state`; `trg_jobs_no_delete` rejects every runtime
+  job deletion. Both use the fixed error strings recorded in §4.
+- A job row is a durable ledger root. It must begin in a non-authoritative
+  workflow state with both authority columns NULL, and it cannot be deleted,
+  including by a second connection with foreign-key enforcement disabled.
+- `init` and `serve` verify canonical normalized SQL definitions, not only
+  object names, for all approved tables, security-sensitive indexes, and every
+  physical T1–T7 trigger. A same-name weaker object is therefore a startup
+  failure before HTTP bind or stdio protocol output.
+- The approved migration set is exactly `[1, 2, 3]`. Failed fresh-init
+  attempts close SQLite before removing only the DB/WAL/SHM files created by
+  that attempt, while preserving the original failure. Build copying clears
+  the exact `dist/store/migrations` destination first, and the synchronous
+  transaction primitive rejects thenables before commit.
+- The Phase 3 repository inventory is the implemented single
+  `src/store/repositories.ts` module. Phase 4 design remains intact and is not
+  activated by these corrections.
 
 ### Revision 5 / Phase 3 doctor ownership (this revision — approved architecture correction)
 
@@ -142,7 +199,7 @@ A single long-lived local service (`agent-orchestrator-mcp`) that is:
 
 Four architectural commitments carry the whole design:
 
-1. **Authority is a capability, not a prompt.** `job:decide` is held by exactly one enabled actor row whose `role='principal'`. Tools requiring it are not registered on servers built for other actors, handlers re-check it, the domain layer re-checks it, and the database independently refuses an `authoritative_status` that is not *semantically granted* by a principal decision targeting that exact state.
+1. **Authority is a capability, not a prompt.** `job:decide` is held by exactly one enabled actor row whose `role='principal'`. Tools requiring it are not registered on servers built for other actors, handlers re-check it, the domain layer re-checks it, and the database independently refuses an `authoritative_status` that is not *semantically granted* by a principal decision targeting that exact state. T7 also prevents an authoritative or stamped job from entering the ledger before that decision path exists.
 2. **Worker verdict ≠ authoritative status.** `worker_runs.worker_verdict` and `jobs.authoritative_status` are different columns in different tables with **no code path between them**. The only writer of `authoritative_status` is `domain/decide.ts`.
 3. **Deterministic execution is separated from intelligent analysis.** Browser navigation, DOM reads, screenshots, console capture are mechanical work with no model in the loop. Models are spent only on interpreting the artifacts that work produced.
 4. **The system never self-approves and never self-fails a job.** Timeouts, crashes, max-cycle exhaustion, and orphaned runs move a job to `STALLED` — a *non-authoritative* holding state — and wait for Codex. The `system` actor has no path to any authoritative status.
@@ -360,6 +417,74 @@ BEGIN SELECT RAISE(ABORT,'authoritative_statuses is immutable'); END;
 -- reviewed and versioned, never a runtime statement.
 ```
 
+### T7 — durable, initially unstamped job rows
+
+Migration `003_job_row_integrity_and_schema_verification.sql` adds these two
+physical triggers after the T1–T6 schema exists:
+
+```sql
+CREATE TRIGGER trg_jobs_unstamped_on_insert
+BEFORE INSERT ON jobs
+WHEN NEW.authoritative_status IS NOT NULL
+  OR NEW.deciding_decision_id IS NOT NULL
+  OR NEW.state IN (
+    'APPROVED',
+    'READY_FOR_DELIVERY',
+    'JOB_COMPLETED',
+    'REJECTED',
+    'JOB_CANCELLED'
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'jobs must begin without authoritative state');
+END;
+
+CREATE TRIGGER trg_jobs_no_delete
+BEFORE DELETE ON jobs
+BEGIN
+  SELECT RAISE(ABORT, 'jobs are durable and cannot be deleted');
+END;
+```
+
+T7 is deliberately independent of foreign-key enforcement. A runtime DELETE
+is never permitted, and a new job cannot be created already authoritative. The
+later authority domain may stamp an existing non-authoritative row only through
+the reviewed decision/status transaction protected by T1–T4.
+
+### T8 — durable-row replacement integrity
+
+Migration `004_row_replacement_integrity.sql` adds INSERT-side identity guards:
+
+```sql
+CREATE TRIGGER trg_jobs_no_replace
+BEFORE INSERT ON jobs
+WHEN EXISTS (SELECT 1 FROM jobs WHERE job_id = NEW.job_id)
+BEGIN
+  SELECT RAISE(ABORT, 'jobs are durable and cannot be replaced');
+END;
+
+CREATE TRIGGER trg_decisions_no_replace
+BEFORE INSERT ON decisions
+WHEN EXISTS (SELECT 1 FROM decisions WHERE decision_id = NEW.decision_id)
+BEGIN
+  SELECT RAISE(ABORT, 'decisions are append-only and cannot be replaced');
+END;
+
+CREATE TRIGGER trg_audit_no_replace
+BEFORE INSERT ON audit_log
+WHEN NEW.seq IS NOT NULL
+  AND EXISTS (SELECT 1 FROM audit_log WHERE seq = NEW.seq)
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only and cannot be replaced');
+END;
+```
+
+T8 is the schema-resident protection against SQLite's `REPLACE` conflict
+resolution. It does not rely on `foreign_keys` or `recursive_triggers`, and it
+does not reject a genuinely new row. For `audit_log`, the normal AUTOINCREMENT
+path omits `seq` and remains valid; the implementation tests SQLite's actual
+`NEW.seq` behavior rather than assuming that an omitted value is already the
+final sequence number.
+
 What this blocks, at the SQL layer, with no application code involved:
 
 | Attempt | Blocked by |
@@ -376,6 +501,9 @@ What this blocks, at the SQL layer, with no application code involved:
 | `UPDATE authoritative_statuses SET terminal = 0 WHERE … = 'JOB_COMPLETED'` to reopen a terminal job | **T6** |
 | Lower `APPROVED`'s rank (or raise a terminal status's) to permit regression | **T6** |
 | Insert a new authoritative status, or delete an existing one, to bypass T3 | **T6** |
+| Insert a job already carrying an authoritative status, deciding decision, or authoritative state | **T7** |
+| Delete an unstamped or stamped job, including after disabling foreign keys on another connection | **T7** |
+| Replace an existing `jobs`, `decisions`, or `audit_log` primary-key row with `INSERT OR REPLACE` or `REPLACE` | **T8** |
 
 **The structural separation.** `worker_runs.worker_verdict ∈ {PASS, FAIL, INCONCLUSIVE, NONE}` is advisory metadata on a worker row. `jobs.authoritative_status ∈ {APPROVED, READY_FOR_DELIVERY, JOB_COMPLETED, REJECTED, JOB_CANCELLED}` is authoritative. **No function reads the first and writes the second** — asserted by a source-scanning test.
 
@@ -545,6 +673,7 @@ PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
 PRAGMA synchronous = NORMAL;      -- FULL available via config
+PRAGMA recursive_triggers = ON;   -- AOM-owned connection defense in depth
 
 CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 
@@ -696,7 +825,11 @@ CREATE INDEX ix_audit_job     ON audit_log(job_id, seq);
 CREATE INDEX ix_audit_session ON audit_log(session_token_id, seq);
 ```
 
-Plus triggers T1–T6 from §4. Migrations are numbered `.sql` files applied in a transaction at startup; the service refuses to start if the DB is newer than the binary.
+Plus triggers T1–T8 from §4. Migrations are numbered `.sql` files applied in a
+runner-owned transaction at startup; the approved set is exactly
+`[1, 2, 3, 4]`, and the service refuses to start if the DB is newer than the
+binary or any canonical table/index/trigger definition differs from the
+approved schema.
 
 ---
 
@@ -819,7 +952,7 @@ Every entry answers **who / which session / what / when / which job / what resul
 
 **Session attribution.** `session_token_id` is **verified** — it is the token row the request authenticated with, not a self-declared value — so "which Codex session made this decision?" is answered by joining `decisions.session_token_id → actor_tokens.label`. `session_hint` is an optional client-supplied string recorded alongside it and always treated as untrusted labelling. Neither field confers or restricts authority; both are attribution only, preserving the single-principal invariant.
 
-**Tamper evidence:** `hash = sha256(prev_hash || canonical_json(row))`, chained by `seq`. `audit_query { verify_chain: true }` recomputes and reports the first break. Append-only is enforced by trigger T5 as well as by the absence of any update/delete statement in the codebase (source-scanning test).
+**Tamper evidence:** `hash = sha256(prev_hash || canonical_json(row))`, chained by `seq`. `audit_query { verify_chain: true }` recomputes and reports the first break. Append-only is enforced by trigger T5 and T8 as well as by the absence of any update/delete/replace statement in the codebase (source-scanning test).
 
 **"Why did Codex approve this job?"** — one query: the `decisions` rows for the job (each with mandatory `rationale`, `evidence_refs`, and session attribution), joined to the evidence they cite and the worker runs that produced it, in audit order. No transcripts required.
 
@@ -834,6 +967,8 @@ Every entry answers **who / which session / what / when / which job / what resul
 | 1 | **Worker promotes its own verdict to APPROVED** | Five layers (§4): capability gate, tool non-registration, handler check, single domain choke point, and DB triggers T1–T4 that require a *semantically granting* principal decision |
 | 2 | **A non-granting decision is reused as justification** | `decision_grants` is an immutable allowlist; `RETEST`/`FIX`/`VERIFY_SELF`/`IGNORE_FALSE_POSITIVE`/`STOP`/`PACKAGE` have no grant row and can never satisfy T2 |
 | 2b | **Disarming a trigger by mutating the reference data it reads** — e.g. `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status='JOB_COMPLETED'` to reopen a completed job, or re-ranking statuses to permit regression, without touching a single job row | **T6** freezes `authoritative_statuses` against INSERT/UPDATE/DELETE, as **T5** does for `decision_grants`. Both trigger sets are created *after* the seed inserts in the same migration, so the seed succeeds once and the tables are read-only for the life of the database. Changing either map is a reviewed, versioned migration — never a runtime statement |
+| 2c | **Pre-authoritative, deleted, or replaced job ledger root** — a direct SQL client inserts an already-stamped/authoritative job, deletes and reinserts a terminal job, or uses `REPLACE` with foreign keys and recursive triggers disabled | **T7** requires NULL `authoritative_status`/`deciding_decision_id` and a non-authoritative initial state and rejects every job DELETE. **T8** rejects an existing `job_id` on the INSERT side. These physical guards remain active across connections regardless of connection-scoped `foreign_keys` or `recursive_triggers`; job/status/decision history remains durable |
+| 2d | **Same-name schema weakening** — an attacker drops and recreates a trigger, index, or table with the expected name but weaker SQL | Init/serve compare canonical normalized-SQL fingerprints for all approved tables, security-sensitive indexes, and physical T1–T8 triggers before service. A mismatch fails closed before HTTP bind or stdio output |
 | 3 | **Forged Codex identity** | Per-token SHA-256 with constant-time compare; `role='principal'` is a unique partial index; a second principal cannot exist, and a *session* token grants no more than its actor |
 | 4 | **Replayed / duplicated worker result** | Single-use lease consumed in the same transaction as the write; `(actor_id, key)` idempotency returns the original response |
 | 5 | **Stale authorization** | Leases carry `expires_at` and bind `(job_id, cycle, run_id)`; a report for cycle N is refused once the job is at N+1. `actor_tokens.expires_at` bounds session tokens |
@@ -888,12 +1023,19 @@ database, apply migrations, and run every required SQLite integrity/schema check
 before it returns. `serve` opens an existing database only, performs
 the same deep checks at startup, and fails before serving a request if any
 required check fails. `doctor` performs no SQLite open or SQL integrity
-check; it owns only the filesystem/security diagnosis described in Revision 5.
+check; it owns only the filesystem/security diagnosis described in Revision 6
+while retaining the Revision 5 no-direct-SQL boundary.
+
+On a fresh-init migration failure, SQLite is closed before cleanup. Only the
+DB/WAL/SHM paths created by that fresh attempt are removed; cleanup errors are
+reported as secondary detail and never replace the original initialization
+failure. A normal retry starts from the known failed-init artifact boundary.
 
 **Serve startup invariants**, checked before serving a single request; any failure exits non-zero with an actionable message and an `startup.invariant_failed` audit row:
 
 1. State root exists and its ACL verifies (§15.1).
-2. Migrations applied; `PRAGMA quick_check` clean; DB not newer than the binary.
+2. Migrations applied; `PRAGMA quick_check` clean; DB not newer than the binary;
+   AOM-owned connections report `recursive_triggers=ON`.
 3. **Exactly one enabled principal actor exists.** Zero → "run `init`"; more than one is impossible by index, but the check reports it rather than assuming.
 4. Every configured worker's capability set is in the catalogue; every configured workspace root exists and is not a drive root.
 5. Lease HMAC key present and readable, or generated and hardened on first run.
@@ -998,7 +1140,8 @@ agent-orchestrator-mcp/
 │   │   ├── decide.ts                  # THE ONLY writer of authoritative_status
 │   │   ├── jobs.ts  cycles.ts  errors.ts
 │   ├── store/
-│   │   ├── db.ts  migrations/*.sql  repositories/*.ts
+│   │   ├── db.ts  integrity.ts  schemaDefinitions.ts  repositories.ts
+│   │   └── migrations/*.sql
 │   ├── workers/
 │   │   ├── registry.ts  adapter.ts  runtime.ts  ndjson.ts  report.ts
 │   │   └── adapters/process.ts
@@ -1053,6 +1196,29 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 - **15d. Statuses cannot be deleted.** `DELETE FROM authoritative_statuses WHERE authoritative_status = 'REJECTED'` is ABORTed.
 - **15e. Invariants survive every attempt.** After each of 15a–15d, re-run the T3 checks against a live job: a `JOB_COMPLETED` job still cannot be moved to any other status, and an `APPROVED` job still cannot regress. The protected behaviour is verified, not just the ABORT.
 
+**Durable job roots (T7) — raw SQL, application bypassed**
+
+- **15f. New jobs start unstamped.** Inserts carrying an
+  `authoritative_status`, a `deciding_decision_id`, or an authoritative state
+  (`APPROVED`, `READY_FOR_DELIVERY`, `JOB_COMPLETED`, `REJECTED`, or
+  `JOB_CANCELLED`) are ABORTed with `jobs must begin without authoritative state`.
+- **15g. Jobs cannot be deleted.** Deletes of both unstamped and stamped jobs
+  are ABORTed with `jobs are durable and cannot be deleted`; the same remains
+  true when a second SQLite connection disables foreign-key enforcement. The
+  original job, status, and decision rows remain unchanged.
+
+**Durable-row replacement (T8) — raw SQL, application bypassed**
+
+- **15h.** A genuinely new `jobs` row can be inserted, but ordinary duplicate
+  INSERT, `INSERT OR REPLACE`, and bare `REPLACE` cannot replace an existing
+  `job_id`, even when the connection has `recursive_triggers=OFF`.
+- **15i.** A new principal decision can be inserted, while UPDATE, DELETE,
+  `INSERT OR REPLACE`, and bare `REPLACE` cannot replace an existing
+  `decision_id`; T2 continues to evaluate the original immutable decision.
+- **15j.** Normal `audit_log` AUTOINCREMENT inserts that omit `seq` continue to
+  work, while explicit-sequence `INSERT OR REPLACE` and `REPLACE` cannot replace
+  an existing row. The original audit row and hash remain unchanged.
+
 **Identity, sessions, bootstrap**
 
 16. **Only one principal actor can exist** (unique partial index).
@@ -1103,7 +1269,10 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
    hand: the three decision bypasses (invariants 7–9), then
    `UPDATE authoritative_statuses SET terminal = 0 WHERE authoritative_status='JOB_COMPLETED'`
    and `UPDATE authoritative_statuses SET rank = 99 WHERE authoritative_status='APPROVED'`
-   (invariants 15a–15b). Every one must ABORT, and
+   (invariants 15a–15b), an authoritative/stamped job INSERT, and a DELETE of
+   both an unstamped and a stamped job (15f–15g), then exercise
+   `INSERT OR REPLACE` and bare `REPLACE` against jobs, decisions, and
+   `audit_log` (15h–15j). Every one must ABORT, and
    `SELECT * FROM authoritative_statuses` must be unchanged afterwards.
 9. Kill the service mid-run and restart; confirm `STALLED` with orphaned runs and no authoritative status set.
 
@@ -1116,7 +1285,7 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 - Config loading and validation, including the **workspace-root allowlist**
 - `init` / `migrate` / `token` / `doctor` / `serve` CLI, with documented bootstrap
 - Global state root under `<OS profile>\.agent-orchestrator-mcp\`, **Windows ACL hardening with fail-closed verification** (§15.1), POSIX modes on POSIX
-- One SQLite store, migrations, all tables and **triggers T1–T6** (including the frozen `decision_grants` and `authoritative_statuses` reference tables)
+- One SQLite store, migrations, all tables and **triggers T1–T8** (including the frozen `decision_grants` and `authoritative_statuses` reference tables and durable job roots)
 - Actors, `actor_tokens` (multi-session), capabilities, dispatch leases, print-once tokens
 - Job state machine and transition table exactly as §6, including the atomic `qa_dispatch` transaction
 - The ten MCP tools of §8
@@ -1162,7 +1331,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **0** | Skeleton | package.json, tsconfig, vitest, lint, empty CLI, CI script | `npm test` runs; `--help` works |
 | **1** | State root & secrets | State-root resolution, directory creation, **Windows ACL apply + verify + fail-closed**, POSIX modes, lease-key generation, `doctor` | Invariants 31, 32; manual ACL tamper drill |
 | **2** | MCP spine | Both entry points, one trivial `ping` tool, localhost guards, bearer gate, `actor_tokens` resolution | Inspector connects; invariant 37; **observed Codex protocol era recorded** |
-| **3** | Store & DB authority | Migrations, all tables, seeds, **triggers T1–T6** (freeze triggers created *after* the seed inserts), repositories, init/serve SQL integrity checks, and doctor filesystem/security diagnosis | Invariants 7–15, **15a–15e** (raw SQL), 16; doctor explicitly reports SQL integrity not checked by design |
+| **3** | Store & DB authority | Migrations `001`–`004`, all tables, seeds, **triggers T1–T8** (freeze triggers created *after* the seed inserts), canonical schema verification, repositories, init/serve SQL integrity checks, and doctor filesystem/security diagnosis | Invariants 7–15, **15a–15j** plus F-1 replacement cases (raw SQL), 16; failed-init cleanup/build-copy/transaction gates; doctor explicitly reports SQL integrity not checked by design |
 | **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
 | **5** | Job lifecycle | `job_create` (+ workspace allowlist), `job_get`, `job_list`, cycles, idempotency, CAS | Invariants 21, 22, 24, 29; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34 |
@@ -1190,15 +1359,18 @@ Only what genuinely blocks or materially changes implementation. *(State locatio
 
 ## 23. FINAL RECOMMENDATION
 
-**Revision 5 is the approved architecture for Phase 3 implementation
-authorization.**
+**Revision 7 is the approved architecture for Phase 3 implementation
+authorization.** Revision 5 remains the historical doctor-boundary correction;
+Revision 6 remains the historical job-row/schema correction; Revision 7
+preserves both and adds the narrow SQLite row-replacement integrity correction
+described above.
 
-Revision 5 makes the doctor boundary explicit: it performs filesystem/security
+Revision 6 retains the Revision 5 doctor boundary: doctor performs filesystem/security
 diagnosis only and reports SQL integrity as
 `NOT_CHECKED_BY_DESIGN`. Authoritative SQLite integrity belongs to
 `init` and `serve` startup, where migration, schema, trigger,
-seed, and integrity checks can fail closed without giving the diagnostic path a
-direct SQLite handle to the WAL database.
+seed, canonical-definition, and integrity checks can fail closed without giving
+the diagnostic path a direct SQLite handle to the WAL database.
 
 The central requirement — Codex as sole authority — is now enforced at five independent layers, and the database layer no longer merely checks that *a* decision exists: it checks that the referenced decision **semantically grants the exact status being written**, was authored by an **enabled principal**, targets the **same job, cycle, and state**, and does not regress or resurrect a terminal outcome. `RETEST`, `FIX`, `VERIFY_SELF`, and `IGNORE_FALSE_POSITIVE` have no grant row and therefore cannot justify any authoritative write, from the application or from a `sqlite3` shell. Those claims are proven by a raw-SQL test layer that bypasses the application entirely, not asserted in prose.
 
@@ -1206,12 +1378,27 @@ Revision 3 closes the last gap in that argument: the reference data those trigge
 
 Naming now matches semantics: `authoritative_status` records milestones (some of which are not terminal), `state` records workflow position, and `worker_verdict` remains structurally unable to reach either.
 
+Revision 6 closed the prior job-row lifecycle gap: every job begins as a
+durable, non-authoritative ledger root and no runtime path may delete it. The
+canonical startup verifier checks trigger bodies and all security-sensitive
+schema definitions, so preserving an object name while weakening its SQL is
+not an accepted recovery state. Its approved migration ledger was `[1, 2, 3]`;
+failed fresh initialization removes only its own DB/WAL/SHM artifacts after
+closing SQLite and keeps the original failure visible.
+
+Revision 7 closes F-1: SQLite `REPLACE` cannot erase and recreate an existing
+`jobs`, `decisions`, or `audit_log` identity, even when an external connection
+sets `recursive_triggers=OFF`. The current approved migration ledger is
+`[1, 2, 3, 4]`, canonical verification covers T1–T8, and AOM-owned writable
+connections enable `recursive_triggers` as defense in depth. Phase 4 remains a
+design-only hand-off.
+
 The Windows security model is Windows-native — inheritance-stripped, current-user-SID-only DACLs, verified after creation and on every startup, failing closed — with `chmod` correctly demoted to the POSIX implementation, and DPAPI evaluated and deferred on a stated cost/benefit basis rather than by omission. State lives in one global root so the orchestrator can coordinate across projects, while workspace access is a narrow, config-driven allowlist that never includes a drive root.
 
 Multiple Codex sessions are supported with **verified** session attribution and exactly one principal actor; the single-principal invariant is now guaranteed in both directions — at most one by index, exactly one enabled by startup check, with documented bootstrap.
 
 Scope remains honest: V1 is the authority core plus one generic worker adapter. `agy` and the browser worker are designed, external, and deferred, with the agy CLI contract explicitly flagged as unverified.
 
-**Recommended next step:** separately authorize the Phase 3 implementation
-against this Revision 5 boundary; do not add Phase 3 runtime code merely because
-this architecture revision is approved.
+**Recommended next step:** independently re-review the Phase 3 F-1 remediation
+against this Revision 7 boundary; do not begin Phase 4 until that review and
+principal confirmation are complete.

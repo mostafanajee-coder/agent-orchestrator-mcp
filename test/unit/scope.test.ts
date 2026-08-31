@@ -1,10 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-/**
- * Phase 2 owns only the official MCP server/node adapters and schema runtime.
- * These tests keep Phase 3+ dependencies out of the spine.
- */
+/** Phase 3 adds only the approved SQLite persistence dependency. */
 
 interface Manifest {
   readonly dependencies?: Record<string, string>;
@@ -13,18 +10,17 @@ interface Manifest {
 
 const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as Manifest;
 
-const PHASE_2_PACKAGES = {
+const PHASE_3_PACKAGES = {
   '@modelcontextprotocol/server': '2.0.0',
   '@modelcontextprotocol/node': '2.0.0',
+  'better-sqlite3': '13.0.3',
   zod: '4.5.4',
 };
 
-/** Packages reserved for Phase 3+ or explicitly forbidden by the architecture. */
+/** Packages reserved for later phases or explicitly forbidden by the architecture. */
 const FORBIDDEN_PHASE_PACKAGES = [
   '@modelcontextprotocol/express',
   '@modelcontextprotocol/sdk',
-  'better-sqlite3',
-  '@types/better-sqlite3',
   'chrome-remote-interface',
   'puppeteer',
   'puppeteer-core',
@@ -32,9 +28,13 @@ const FORBIDDEN_PHASE_PACKAGES = [
   'express',
 ];
 
-describe('Phase 2 dependency scope', () => {
-  it('declares the verified exact Phase 2 runtime dependencies', () => {
-    expect(manifest.dependencies ?? {}).toEqual(PHASE_2_PACKAGES);
+describe('Phase 3 dependency scope', () => {
+  it('declares the verified exact Phase 3 runtime dependencies', () => {
+    expect(manifest.dependencies ?? {}).toEqual(PHASE_3_PACKAGES);
+  });
+
+  it('declares only the matching development typings in addition to runtime dependencies', () => {
+    expect(manifest.devDependencies?.['@types/better-sqlite3']).toBeDefined();
   });
 
   it.each(FORBIDDEN_PHASE_PACKAGES)('does not depend on %s', (name) => {

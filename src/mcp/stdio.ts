@@ -20,7 +20,7 @@ interface CommonStdioServerOptions {
 }
 
 export interface StdioServerOptions extends CommonStdioServerOptions {
-  /** Read-only Phase 1 gate; it runs before protocol serving begins. */
+  /** Fail-closed Phase 3 startup gate; it runs before protocol serving begins. */
   readonly verifyStartup: () => void;
 }
 
@@ -48,7 +48,7 @@ export function startStdioServer(options: StdioServerOptions): StdioServerHandle
 
 /**
  * Authenticates a supplied stdio token once before the transport starts.
- * This is useful for deterministic tests and for a future Phase 3 resolver.
+ * This is useful for deterministic tests and for the future Phase 4 resolver.
  */
 export async function startAuthenticatedStdioServer(options: {
   readonly resolver: AccessTokenResolver;

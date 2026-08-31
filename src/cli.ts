@@ -3,7 +3,7 @@ import { runDoctor } from './commands/doctor.js';
 import type { InitResult } from './commands/init.js';
 import { runInit } from './commands/init.js';
 import { createCommandContext } from './commands/context.js';
-import { assertPhase1Ready } from './commands/startup.js';
+import { assertServeReady } from './commands/startup.js';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
 import { createEnvironmentTokenResolver } from './mcp/auth.js';
 import { MCP_HTTP_DEFAULT_PORT, MCP_HTTP_HOST, startHttpServer } from './mcp/http.js';
@@ -43,7 +43,7 @@ export const defaultCommands: CliCommands = {
     if (options.mode === 'stdio') {
       startEnvironmentStdioServer({
         version,
-        verifyStartup: () => assertPhase1Ready(createCommandContext()),
+        verifyStartup: () => assertServeReady(createCommandContext()),
         onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
       });
       return;
@@ -52,7 +52,7 @@ export const defaultCommands: CliCommands = {
     const httpOptions = {
       resolver: createEnvironmentTokenResolver(),
       version,
-      verifyStartup: () => assertPhase1Ready(createCommandContext()),
+      verifyStartup: () => assertServeReady(createCommandContext()),
       logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
       ...(options.port === undefined ? {} : { port: options.port }),
     };
@@ -82,8 +82,8 @@ export function renderHelp(version: string): string {
     `  ${CLI_NAME} <command> [options]`,
     '',
     'Commands:',
-    '  init             Prepare and protect the state root (Phase 1 bootstrap)',
-    '  doctor           Report on the state root. Read-only; repairs nothing',
+    '  init             Prepare the state root and initialize the Phase 3 schema',
+    '  doctor           Report state and DB-file security. Read-only; repairs nothing',
     '  serve            Serve the Phase 2 MCP spine (--http or --stdio)',
     '',
     'Serve options:',
@@ -102,8 +102,9 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 2. MCP ping, loopback HTTP/stdio transports, and bearer authentication.',
-    '  Persistent actor_tokens, jobs, workers, and database authority arrive in later phases.',
+    '  Phase 3. SQLite schema/structural integrity with the Phase 2 MCP ping surface.',
+    '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
+    '  Production actor_tokens auth, jobs, workers, and authority arrive in later phases.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
 }
@@ -163,8 +164,13 @@ function renderInit(result: InitResult): string[] {
       ? 'Lease key:       created'
       : 'Lease key:       already present, preserved unchanged',
   );
+  lines.push(
+    'Database:        schema ready (version ' + String(result.database.schemaVersion) + ')',
+  );
   lines.push('');
-  lines.push('init complete. This is the Phase 1 bootstrap: state root, directories, and lease key.');
+  lines.push(
+    'init complete. State root, lease key, and Phase 3 schema are ready; production authority remains Phase 4.',
+  );
   return lines;
 }
 

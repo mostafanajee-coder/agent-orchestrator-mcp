@@ -35,7 +35,7 @@ export interface HttpServerOptions {
   readonly version: string;
   readonly port?: number;
   readonly logger?: HttpLogger;
-  /** Read-only Phase 1 gate; it runs before this server binds. */
+  /** Fail-closed Phase 3 startup gate; it runs before this server binds. */
   readonly verifyStartup: () => void;
 }
 

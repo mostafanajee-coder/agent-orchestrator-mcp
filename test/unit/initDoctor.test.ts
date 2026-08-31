@@ -52,6 +52,7 @@ describe('runInit', () => {
     for (const path of [layout.root, layout.data, layout.artifacts, layout.secrets, layout.logs]) {
       expect(existsSync(path)).toBe(true);
     }
+    expect(existsSync(layout.database)).toBe(true);
     expect(readFileSync(layout.leaseKey).length).toBe(LEASE_KEY_BYTES);
     expect(result.leaseKeyCreated).toBe(true);
     expect(result.createdDirectories).toHaveLength(5);
@@ -118,8 +119,11 @@ describe('runDoctor', () => {
     const report = runDoctor(context());
 
     expect(report.ok).toBe(true);
-    expect(report.checks.every((check) => check.status === 'pass')).toBe(true);
-    expect(report.checks).toHaveLength(7);
+    expect(report.checks.every((check) => check.status !== 'fail')).toBe(true);
+    expect(report.checks).toHaveLength(11);
+    expect(
+      report.checks.find((check) => check.name === 'DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN')?.status,
+    ).toBe('warn');
   });
 
   it('fails when the state root has never been initialised, and creates nothing', () => {
@@ -196,11 +200,22 @@ describe('serve startup verification', () => {
   });
 
   it('proceeds for a valid initialized Phase 1 state', () => {
+    const layout = stateLayout(root, process.platform);
     runInit(context());
     const hardenedBefore = security.hardened.length;
 
     expect(() => assertPhase1Ready(context())).not.toThrow();
-    expect(security.hardened).toHaveLength(hardenedBefore);
+    const protectedPaths = new Set([
+      layout.root,
+      layout.secrets,
+      layout.data,
+      layout.artifacts,
+      layout.logs,
+      layout.leaseKey,
+    ]);
+    expect(security.hardened.filter((call) => protectedPaths.has(call.path))).toHaveLength(
+      security.hardened.slice(0, hardenedBefore).filter((call) => protectedPaths.has(call.path)).length,
+    );
   });
 
   it('fails closed on a tampered protected directory without repairing it', () => {
@@ -289,7 +304,7 @@ describe('legacy state root', () => {
   it('is not reported when it does not exist', () => {
     runInit(context({ legacyRoots: [legacy] }));
     const report = runDoctor(context({ legacyRoots: [legacy] }));
-    expect(report.checks.some((check) => check.status === 'warn')).toBe(false);
+    expect(report.checks.some((check) => check.name.startsWith('legacy state root'))).toBe(false);
   });
 
   it('never becomes authoritative: init creates only the new root', () => {
