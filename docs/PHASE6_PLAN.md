@@ -190,8 +190,10 @@ cycle settings. Phase 6 proposes a separate protected state-root file:
 
 The registry is server-owned configuration, not a request payload and not an
 MCP administration surface. It is loaded and validated before a Phase 6
-transport is exposed. A missing, malformed, duplicated, disabled, or
-incompatible worker definition fails closed for the relevant startup gate.
+transport is exposed. A missing, malformed, duplicated, or incompatible
+enabled worker definition fails closed for the relevant startup gate. Disabled
+starter entries remain non-selectable and may be retained until an operator
+provisions their worker actor and executable.
 
 This separation prevents a worker executable policy from being silently added
 to the Phase 5 lifecycle configuration and makes the Phase 6 registry a
@@ -397,13 +399,14 @@ Every listed field is required. No root or worker-entry property outside this
 table is allowed. The following rules are also normative:
 
 - `worker_id` is unique and is the only worker selector accepted by dispatch;
-- `actor_id` is unique within the registry and must resolve to an enabled actor
-  with role `worker`;
+- `actor_id` is unique within the registry; an enabled entry must resolve to an
+  enabled actor with role `worker`;
 - `adapter` must be a known adapter; the initial set contains only `process`;
 - `delivery` is limited to `pipe` or local `mcp_pull`;
 - `executable` must be a local absolute path with no UNC/device form or
   traversal segment; an enabled entry must resolve to an approved regular
-  executable file at startup;
+  executable file at startup. A disabled starter entry may use a not-yet-
+  installed executable path;
 - executable and argument templates are operator-owned and never copied from
   the dispatch request;
 - template substitution has a fixed allowlist of `{run_id}`, `{job_id}`, and

@@ -272,6 +272,9 @@ function parseDispatchInput(raw: unknown): QaDispatchInput {
 function parseReportInput(raw: unknown): RunReportInput {
   const parsed = RunReportInputSchema.safeParse(raw);
   if (!parsed.success) fail('INVALID_INPUT', 'The worker report input is invalid.');
+  if (bytes(parsed.data.summary) > MAX_SUMMARY_BYTES) {
+    fail('INVALID_INPUT', 'The worker report summary exceeds its bound.');
+  }
   if (parsed.data.usage !== undefined && Object.keys(parsed.data.usage).length > 16) {
     fail('INVALID_INPUT', 'Worker usage metadata exceeds its bound.');
   }
@@ -1003,7 +1006,7 @@ export function listRunStatus(
   }
   const rows = input.cycle === undefined
     ? db.prepare(
-      'SELECT run_id, job_id, cycle, worker_id, adapter, request_json, status, worker_verdict, failure_class, attempt, started_at, ended_at, created_at, pid, exit_code, usage_json FROM worker_runs WHERE job_id = ? ORDER BY cycle, created_at, run_id',
+      'SELECT run_id, job_id, cycle, worker_id, adapter, request_json, status, worker_verdict, failure_class, attempt, started_at, ended_at, created_at, pid, exit_code, usage_json FROM worker_runs WHERE job_id = ? ORDER BY cycle, created_at, run_id LIMIT 256',
     ).all(job.job_id) as RunSqlRow[]
     : db.prepare(
       'SELECT run_id, job_id, cycle, worker_id, adapter, request_json, status, worker_verdict, failure_class, attempt, started_at, ended_at, created_at, pid, exit_code, usage_json FROM worker_runs WHERE job_id = ? AND cycle = ? ORDER BY created_at, run_id',

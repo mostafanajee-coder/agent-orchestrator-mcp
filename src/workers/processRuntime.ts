@@ -73,6 +73,12 @@ function lineBytes(value: Buffer): number {
   return value.byteLength;
 }
 
+function redactRuntimeText(value: string): string {
+  return value
+    .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
+    .replace(/(authorization|password|secret|credential|token|api[_-]?key|lease[_-]?key)\s*[:=]\s*[^,;\s}]+/gi, '$1=[REDACTED]');
+}
+
 /**
  * Owns process creation and protocol normalization for Phase 6. It never
  * chooses a job decision and never exposes its in-memory lease map.
@@ -407,7 +413,11 @@ export class ProcessRuntime {
   ): void {
     try {
       if (active.stderrTail.byteLength > 0) {
-        setRunStderr(this.dependencies.db, active.run.run_id, active.stderrTail.toString('utf8'));
+        setRunStderr(
+          this.dependencies.db,
+          active.run.run_id,
+          redactRuntimeText(active.stderrTail.toString('utf8')),
+        );
       }
       settleRuntimeRun(
         this.dependencies.db,

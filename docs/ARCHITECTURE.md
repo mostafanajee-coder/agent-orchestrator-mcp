@@ -1689,6 +1689,11 @@ runtime/output limits. A dispatch request supplies only a registered
 `worker_id` and bounded task parameters; it never supplies an executable,
 shell command, environment, or arbitrary directory.
 
+The init path creates one disabled starter entry so the Phase 6 transport can
+start before an operator configures a real worker. Disabled entries are never
+selectable; only an enabled entry requires an existing enabled `worker` actor
+and an available regular executable.
+
 The registry must be loaded and validated before the Phase 6 transport surface
 is exposed. Worker actor bindings, capabilities, adapter names, path policy,
 and bounds are all server-owned and fail closed when invalid. The exact

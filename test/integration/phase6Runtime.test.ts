@@ -138,4 +138,24 @@ describe('Phase 6 process runtime', () => {
       worker_verdict: 'NONE',
     });
   });
+
+  it('redacts bearer-like values from the retained stderr tail', async () => {
+    const runtimeOptions: Phase6RunOptions = {
+      ...options,
+      registry: registry("process.stderr.write('Bearer private-value\\n'); process.stdout.write(JSON.stringify({type:'result',verdict:'PASS',summary:'done'}) + '\\n');"),
+    };
+    const dispatched = dispatchQa(fixture.db, audit, principal, {
+      job_id: 'job-1',
+      cycle: 0,
+      expected_version: 1,
+      requests: [{ worker_id: 'process-worker', task: 'redact' }],
+    }, 'dispatch-redact', runtimeOptions);
+    const runtime = new ProcessRuntime({ db: fixture.db, audit, ...runtimeOptions });
+    runtimes.push(runtime);
+    runtime.startRuns(dispatched.runtimeLeases);
+    await waitForTerminal('job-1');
+    const row = fixture.db.prepare('SELECT stderr_tail FROM worker_runs').get() as { readonly stderr_tail?: string | null };
+    expect(row.stderr_tail).toContain('Bearer [REDACTED]');
+    expect(row.stderr_tail).not.toContain('private-value');
+  });
 });

@@ -83,6 +83,13 @@ export function parseWorkerMessage(line: string): WorkerMessage {
   }
   const result = WorkerMessageSchema.safeParse(parsed);
   if (!result.success) throw new WorkerProtocolError('The worker emitted an invalid protocol message.');
+  if (
+    (result.data.type === 'progress' && byteLength(result.data.message) > MAX_PROGRESS_BYTES)
+    || (result.data.type === 'result' && byteLength(result.data.summary) > MAX_SUMMARY_BYTES)
+    || (result.data.type === 'error' && byteLength(result.data.message) > MAX_ERROR_BYTES)
+  ) {
+    throw new WorkerProtocolError('The worker protocol field exceeds its byte bound.');
+  }
   return result.data;
 }
 

@@ -7,7 +7,7 @@ import type { CommandContext } from '../commands/context.js';
 import { SecurityError } from '../errors.js';
 import { assertPathIsSafe } from '../security/pathSafety.js';
 import type { SqliteDatabase } from '../store/db.js';
-import { assertRoleCapabilities, parseCapabilities } from '../authority/capabilities.js';
+import { assertRoleCapabilities, hasCapability, parseCapabilities } from '../authority/capabilities.js';
 import type { StateLayout } from './stateRoot.js';
 
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
@@ -117,6 +117,9 @@ function validateCrossFields(registry: WorkerRegistryFile, platform: NodeJS.Plat
   const workerIds = new Set<string>();
   const actorIds = new Set<string>();
   for (const worker of registry.workers) {
+    if (byteLength(worker.worker_id) > MAX_WORKER_ID_BYTES || byteLength(worker.actor_id) > MAX_WORKER_ID_BYTES) {
+      fail(`Worker ${worker.worker_id} has an oversized identity.`);
+    }
     if (workerIds.has(worker.worker_id)) fail('workers.json contains duplicate worker_id values.');
     if (actorIds.has(worker.actor_id)) fail('workers.json contains duplicate actor_id values.');
     workerIds.add(worker.worker_id);
@@ -141,6 +144,9 @@ function validateCrossFields(registry: WorkerRegistryFile, platform: NodeJS.Plat
         fail(`Worker ${worker.worker_id} contains an oversized argv template argument.`);
       }
     }
+    if (byteLength(worker.executable) > MAX_PATH_BYTES) {
+      fail(`Worker ${worker.worker_id} has an oversized executable path.`);
+    }
     validateExecutablePath(worker.executable, platform);
   }
 }
@@ -150,6 +156,7 @@ function validateEnabledExecutables(registry: WorkerRegistryFile, platform: Node
     if (!worker.enabled) continue;
     let stats;
     try {
+      assertPathIsSafe(worker.executable, 'file', platform);
       stats = lstatSync(worker.executable);
     } catch {
       fail(`Enabled worker ${worker.worker_id} has an unavailable executable.`);
@@ -292,11 +299,15 @@ export function validatePhase6WorkerActors(
     if (typeof actor['capabilities_json'] !== 'string') {
       fail(`Worker ${worker.worker_id} has malformed actor capabilities.`);
     }
+    let capabilities: ReturnType<typeof parseCapabilities>;
     try {
-      const capabilities = parseCapabilities(actor['capabilities_json']);
+      capabilities = parseCapabilities(actor['capabilities_json']);
       assertRoleCapabilities('worker', capabilities);
     } catch {
       fail(`Worker ${worker.worker_id} has incompatible actor capabilities.`);
+    }
+    if (worker.delivery === 'mcp_pull' && !hasCapability(capabilities, 'work:report')) {
+      fail(`Worker ${worker.worker_id} is missing the work:report capability.`);
     }
   }
 }
