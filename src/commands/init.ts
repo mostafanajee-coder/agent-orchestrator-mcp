@@ -16,18 +16,23 @@ export interface InitResult {
   readonly database: DatabaseInitResult;
 }
 
+export interface InitOptions {
+  /** Test-only escape hatch for structural schema fixtures. Production defaults to true. */
+  readonly phase4Bootstrap?: boolean;
+}
+
 /**
- * Phase 1 bootstrap: prepare and protect the state root.
+ * Bootstrap the protected state root and the Phase 4 production authority.
  *
- * Phase 3 extends this command with secure schema initialization. Production
- * principal/system/token bootstrap remains a Phase 4 operation.
+ * The test-only `phase4Bootstrap: false` option leaves structural fixtures
+ * unbootstrapped; production defaults to the approved Phase 4 bootstrap path.
  *
  * Ordering is load-bearing. Each directory is created, proven to be a real
  * directory rather than a redirection, hardened, and verified before the next
  * step runs, so the lease key is only ever written into a directory whose
  * protection has already been proven.
  */
-export function runInit(context: CommandContext): InitResult {
+export function runInit(context: CommandContext, options: InitOptions = {}): InitResult {
   const { layout, security } = context;
 
   // Lexical pass: refuse a bad location before creating anything at all.
@@ -60,7 +65,9 @@ export function runInit(context: CommandContext): InitResult {
   }
   assertPathIsSafe(layout.leaseKey, 'file', context.platform, { requireSingleLink: true });
   assertSecure(context, layout.leaseKey, 'file');
-  const database = initializeDatabaseForInit(context);
+  const database = initializeDatabaseForInit(context, {
+    phase4Bootstrap: options.phase4Bootstrap ?? true,
+  });
 
   return {
     stateRoot: layout.root,

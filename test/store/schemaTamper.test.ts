@@ -48,7 +48,7 @@ afterEach(() => {
 describe('canonical trigger definitions', () => {
   it.each(EXPECTED_TRIGGERS)('rejects a weakened same-name trigger: %s', (name) => {
     tamperTrigger(name);
-    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical Phase 3 definition');
+    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical definition');
   });
 });
 
@@ -58,7 +58,7 @@ describe('canonical index and table definitions', () => {
       "DROP INDEX ux_actors_single_principal; " +
       "CREATE INDEX ux_actors_single_principal ON actors(role) WHERE role = 'principal';",
     );
-    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical Phase 3 definition');
+    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical definition');
 
     db().exec(
       "DROP INDEX ux_actors_single_principal; " +
@@ -84,7 +84,7 @@ describe('canonical index and table definitions', () => {
       'CREATE INDEX ix_actor_tokens_actor ON actor_tokens(actor_id);',
     );
     db().pragma('foreign_keys = ON');
-    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical Phase 3 definition');
+    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical definition');
   });
 
   it('rejects removal of the lease composite relation', () => {
@@ -99,7 +99,7 @@ describe('canonical index and table definitions', () => {
       'CREATE UNIQUE INDEX ux_leases_run_id ON leases(run_id);',
     );
     db().pragma('foreign_keys = ON');
-    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical Phase 3 definition');
+    expect(() => verifyDatabaseIntegrity(db())).toThrow('canonical definition');
   });
 });
 
@@ -112,7 +112,7 @@ describe('serve tamper gate', () => {
       version: '0.0.0-test',
       port: 0,
       verifyStartup: () => assertServeReady(fixture.context),
-    })).toThrow('Phase 3 database verification failed');
+    })).toThrow('canonical version 6');
   });
 
   it('rejects a tampered same-name T7 trigger before stdio output', () => {
@@ -125,7 +125,7 @@ describe('serve tamper gate', () => {
       environment: { ORCHESTRATOR_ACTOR_TOKEN: 'phase3-test' },
       transport: new StdioServerTransport(input, output),
       verifyStartup: () => assertServeReady(fixture.context),
-    })).toThrow('Phase 3 database verification failed');
+    })).toThrow('canonical version 6');
     expect(output.readableLength).toBe(0);
     input.destroy();
     output.destroy();

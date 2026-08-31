@@ -17,7 +17,7 @@ export const PingOutput = z.object({
 
 export type PingResult = z.infer<typeof PingOutput>;
 
-/** Registers the only Phase 2 tool. */
+/** Registers the compatibility health tool shared by both phases. */
 export function registerPing(
   server: McpServer,
   transport: McpTransportKind,

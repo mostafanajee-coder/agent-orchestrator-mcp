@@ -56,6 +56,46 @@ export const CANONICAL_SCHEMA_DEFINITIONS = {
 } as const;
 
 export type SchemaObjectType = keyof typeof CANONICAL_SCHEMA_DEFINITIONS;
+export type CanonicalSchemaDefinitions = {
+  readonly tables: Readonly<Record<string, string>>;
+  readonly indexes: Readonly<Record<string, string>>;
+  readonly triggers: Readonly<Record<string, string>>;
+};
+export type CanonicalSchemaVersion = 4 | 5 | 6;
+
+/**
+ * Canonical definitions are keyed by the schema version that owns them.
+ * Version 4 is the approved Phase 3 baseline; versions 5 and 6 are the
+ * reviewed Phase 4 post-migration states.
+ */
+export const CANONICAL_SCHEMA_DEFINITIONS_BY_VERSION = {
+  4: CANONICAL_SCHEMA_DEFINITIONS,
+  5: {
+    tables: CANONICAL_SCHEMA_DEFINITIONS.tables,
+    indexes: CANONICAL_SCHEMA_DEFINITIONS.indexes,
+    triggers: {
+      ...CANONICAL_SCHEMA_DEFINITIONS.triggers,
+      trg_audit_no_replace: '3b7713e0b36f80004fdccfdb61a87d9796335d0ef8995086e9b65ab997f3cd16',
+    },
+  },
+  6: {
+    tables: CANONICAL_SCHEMA_DEFINITIONS.tables,
+    indexes: CANONICAL_SCHEMA_DEFINITIONS.indexes,
+    triggers: {
+      ...CANONICAL_SCHEMA_DEFINITIONS.triggers,
+      trg_audit_no_replace: '3b7713e0b36f80004fdccfdb61a87d9796335d0ef8995086e9b65ab997f3cd16',
+      trg_actors_identity_immutable: '9a804024f94c19d20c8b115c86ef07f4dde325c7a6c7d769d5b3ba6f1a89e27b',
+      trg_actor_tokens_binding_immutable: '5de07e243a0a6040c2b6e800aefea55962a0b347a0c43ab28c08641fc59c50a7',
+      trg_actor_tokens_no_reenable: '401f1de1a03eed9a78351301c9505b04ee3bc3b3bec3953338f667467c7fb5e4',
+    },
+  },
+} as const satisfies Readonly<Record<CanonicalSchemaVersion, CanonicalSchemaDefinitions>>;
+
+export function canonicalSchemaDefinitionsForVersion(
+  version: number,
+): CanonicalSchemaDefinitions | undefined {
+  return CANONICAL_SCHEMA_DEFINITIONS_BY_VERSION[version as CanonicalSchemaVersion];
+}
 
 /**
  * Deliberately normalizes whitespace only. SQL keyword/identifier case and

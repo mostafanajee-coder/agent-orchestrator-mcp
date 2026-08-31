@@ -9,13 +9,14 @@ triggers, not by prompt instructions.
 
 ## Status
 
-**Phase 3 — Store & database authority.** The CLI prepares and protects the global state root,
-initializes the approved schema-v4 local SQLite store, and serves the existing authenticated MCP spine with
-only one diagnostic `ping` tool over loopback Streamable HTTP or stdio. Doctor is
-filesystem/security-only and explicitly reports
-`DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; `init` and serve startup own deep
-SQLite integrity, including canonical table/index/trigger definitions and T1–T8. Persistent `actor_tokens` authentication, jobs, decisions, workers,
-and authority tools remain later-phase work.
+**Phase 4 — Authority and authentication activation (implementation branch; not merged).** The CLI prepares
+and protects the global state root, initializes the approved schema-v6 local SQLite store, bootstraps the
+`codex` principal and internal `system` actor, and prints the first bearer token exactly once. Serve uses the
+database-backed `actor_tokens` resolver and exposes the compatibility `ping` tool plus `codex_decide` only
+to a verified `codex` principal holding `job:decide`. Doctor remains filesystem/security-only and explicitly
+reports `DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN`; init and serve startup own deep SQLite integrity,
+canonical schema, audit-chain, actor-state, and token checks. Job creation, worker execution, leases,
+evidence, artifacts, and other Phase 5/6 behavior remain out of scope.
 
 The approved design and the full phase plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 The empirical Codex/Inspector protocol observation is recorded in
@@ -44,12 +45,22 @@ node dist/index.js init
 ```
 
 Prepares the state root, creates the database only on the explicit init path, applies owner-only
-protection, verifies it, applies the exact numbered migration set `[1, 2, 3, 4]`, and runs the deep
-structural/canonical integrity gate. It is idempotent — running it again preserves the existing
-lease key unchanged. Jobs are durable ledger roots: they begin without authority and are never
-deleted or replaced by runtime SQL. The same replacement guard applies to durable decisions and
-audit rows; normal audit AUTOINCREMENT inserts remain valid.
-Phase 3 creates schema only; production principal/system/token bootstrap remains Phase 4.
+protection, verifies it, applies the exact numbered migration set `[1, 2, 3, 4, 5, 6]`, and runs the deep
+structural/canonical integrity gate. A fresh database atomically creates the `codex` principal, internal
+`system` actor, and digest-only initial token; the plaintext token is printed once after commit. Re-running
+init preserves the lease key and does not print another token. Existing ambiguous authority state fails
+closed and is never auto-repaired.
+
+Local token administration is explicit and operator-only:
+
+```bash
+node dist/index.js token issue --label operator-session
+node dist/index.js token list
+node dist/index.js token revoke --token-id <token_id>
+```
+
+`token list` returns metadata only. Revocation is one-way; expiry and revoked rows remain retained for
+attribution and audit history.
 
 ```bash
 node dist/index.js doctor
@@ -67,23 +78,25 @@ present on disk — are reported without failing the run.
 ORCHESTRATOR_ACTOR_TOKEN="<operator-supplied-token>" node dist/index.js serve --stdio
 ```
 
-Starts the official MCP stdio transport. Authentication is resolved once at startup; the Phase 2
-boundary keeps only a SHA-256 token digest in memory and does not create a competing token database.
-Operational errors go to stderr and stdout remains reserved for MCP protocol traffic.
+Starts the official MCP stdio transport. The supplied bearer is hashed and matched against the persistent
+database token row before protocol output; environment actor IDs, labels, token IDs, and scopes cannot
+override database identity. Operational errors go to stderr and stdout remains reserved for MCP protocol
+traffic.
 
 ```bash
 ORCHESTRATOR_ACTOR_TOKEN="<operator-supplied-token>" node dist/index.js serve --http --port 4317
 ```
 
-Starts Streamable HTTP on `127.0.0.1` only. Every MCP request requires a bearer token with the
-`mcp` scope; Host and Origin are restricted to localhost-class values. `--port` is optional and
-defaults to `4317`.
+Starts Streamable HTTP on `127.0.0.1` only. Every MCP request requires a persistent database bearer token
+with the fixed `mcp` transport marker; application capabilities come from the verified actor row. Host and
+Origin are restricted to localhost-class values. `--port` is optional and defaults to `4317`.
 
 Before either transport starts, `serve` performs the filesystem/security checks and then opens only
-an existing authoritative DB for the approved deep migration/schema/integrity gate. It refuses to
-start before HTTP bind or stdio protocol output when the state root, DB/sidecars, migrations,
-PRAGMA policy, schema, or integrity checks are invalid. It never runs `init`, creates a
-missing DB, repairs permissions, or reads lease-key contents automatically.
+an existing authoritative DB for the approved deep migration/schema/integrity gate, then verifies the
+exact enabled principal/system state, persistent token rows, and audit chain. It refuses to start before
+HTTP bind or stdio protocol output when the state root, DB/sidecars, migrations, PRAGMA policy, schema,
+authority state, audit chain, or integrity checks are invalid. It never runs `init`, creates a missing DB,
+repairs permissions, or reads lease-key contents automatically.
 
 Writable AOM connections enable and verify `recursive_triggers=ON` as defense in depth. The
 schema itself rejects `INSERT OR REPLACE` and `REPLACE` against existing job, decision, and audit
@@ -193,8 +206,9 @@ src/config/     state-root resolution, cloud-sync detection
 src/security/   ACL and permission providers, SDDL policy, safe process execution
 src/secrets/    lease key lifecycle
 src/store/      secure DB modes, migrations, schema, integrity, repositories
-src/commands/   init and doctor
-src/mcp/        shared MCP factory, ping, auth boundary, HTTP and stdio entry points
+src/authority/  Phase 4 bootstrap, capabilities, audit, runtime, and decisions
+src/commands/   init, doctor, and local token administration
+src/mcp/        shared MCP factory, ping, codex_decide, auth, HTTP, and stdio entry points
 test/unit/      unit tests
 test/store/     migrations, schema, raw-SQL authority, doctor, startup gates
 test/integration/ real loopback HTTP and stdio transport acceptance tests

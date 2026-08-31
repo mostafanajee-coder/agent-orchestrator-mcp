@@ -35,7 +35,7 @@ export function createStoreFixture(): StoreFixture {
     platform: process.platform,
     legacyRoots: [],
   };
-  runInit(context);
+  runInit(context, { phase4Bootstrap: false });
   const db = new Database(context.layout.database);
   db.pragma('foreign_keys = ON');
   db.pragma('recursive_triggers = ON');

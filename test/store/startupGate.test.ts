@@ -50,7 +50,7 @@ afterEach(() => {
 describe('serve startup Phase 3 gate', () => {
   it('fails closed before serving when the DB is absent', () => {
     expect(() => assertPhase1Ready(context)).toThrow(
-      'MCP serve refused because Phase 3 database verification failed',
+      'authoritative database',
     );
     expect(() => requirePath(context.layout.database)).toThrow();
   });
@@ -59,7 +59,7 @@ describe('serve startup Phase 3 gate', () => {
     writeFileSync(context.layout.database, Buffer.from('not a SQLite database'));
     (context.security as FakeSecurityProvider).harden(context.layout.database, 'file');
     expect(() => assertPhase1Ready(context)).toThrow(
-      'MCP serve refused because Phase 3 database verification failed',
+      'Could not open the authoritative database',
     );
   });
 
@@ -69,7 +69,7 @@ describe('serve startup Phase 3 gate', () => {
       version: '0.0.0-test',
       port: 0,
       verifyStartup: () => assertPhase1Ready(context),
-    })).toThrow('Phase 3 database verification failed');
+    })).toThrow('authoritative database');
   });
 
   it('fails stdio before emitting protocol output', () => {
@@ -80,7 +80,7 @@ describe('serve startup Phase 3 gate', () => {
       environment: {},
       transport: new StdioServerTransport(input, output),
       verifyStartup: () => assertPhase1Ready(context),
-    })).toThrow('Phase 3 database verification failed');
+    })).toThrow('authoritative database');
     expect(output.readableLength).toBe(0);
     input.destroy();
     output.destroy();

@@ -214,6 +214,53 @@ describe('run: serve', () => {
   });
 });
 
+describe('run: token', () => {
+  it('parses token issue and renders the one-time plaintext result', () => {
+    const { io, out, err } = capture();
+    let received: unknown;
+    const result = run(
+      ['token', 'issue', '--label', 'operator', '--expires-at', '2030-01-01T00:00:00Z'],
+      io,
+      VERSION,
+      commands({
+        token: (options) => {
+          received = options;
+          return {
+            action: 'issue',
+            tokenId: 'token-test',
+            label: 'operator',
+            expiresAt: '2030-01-01T00:00:00.000Z',
+            plaintext: 'test-plaintext',
+          };
+        },
+      }),
+    );
+
+    expect(result.exitCode).toBe(EXIT_OK);
+    expect(received).toEqual({
+      action: 'issue',
+      label: 'operator',
+      expiresAt: '2030-01-01T00:00:00Z',
+    });
+    expect(out.join('\n')).toContain('test-plaintext');
+    expect(err).toEqual([]);
+  });
+
+  it('rejects token syntax before invoking the command', () => {
+    const { io, err } = capture();
+    let invoked = false;
+    const result = run(
+      ['token', 'revoke'],
+      io,
+      VERSION,
+      commands({ token: () => { invoked = true; return { action: 'list', tokens: [] }; } }),
+    );
+    expect(result.exitCode).toBe(EXIT_USAGE);
+    expect(invoked).toBe(false);
+    expect(err.join('\n')).toContain('requires --token-id');
+  });
+});
+
 describe('renderHelp', () => {
   it('documents the implemented commands and exit codes', () => {
     const help = renderHelp(VERSION);
@@ -229,11 +276,12 @@ describe('renderHelp', () => {
     expect(help).toContain('3  security');
   });
 
-  it('states that this is Phase 3 and does not promise later-phase work', () => {
+  it('states that this is Phase 4 and does not promise later-phase work', () => {
     const help = renderHelp(VERSION);
-    expect(help).toContain('Phase 3');
+    expect(help).toContain('Phase 4');
     expect(help).toContain('later phases');
-    expect(help).not.toContain('migrations and principal bootstrap are available');
+    expect(help).toContain('token issue');
+    expect(help).not.toContain('Phase 5 tools');
   });
 });
 

@@ -30,12 +30,17 @@ export {
   EXPECTED_INDEXES,
   EXPECTED_TABLES,
   EXPECTED_TRIGGERS,
+  EXPECTED_TRIGGERS_BY_VERSION,
   type IntegrityReport,
 } from './integrity.js';
 export {
   CANONICAL_SCHEMA_DEFINITIONS,
+  CANONICAL_SCHEMA_DEFINITIONS_BY_VERSION,
+  canonicalSchemaDefinitionsForVersion,
   canonicalizeSchemaSql,
   fingerprintSchemaSql,
+  type CanonicalSchemaDefinitions,
+  type CanonicalSchemaVersion,
 } from './schemaDefinitions.js';
 export {
   createStructuralRepositories,

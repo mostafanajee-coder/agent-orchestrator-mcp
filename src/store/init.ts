@@ -8,21 +8,25 @@ import {
 } from './db.js';
 import { runMigrations, type Migration } from './migrations.js';
 import { verifyDatabaseIntegrity } from './integrity.js';
+import { AuditWriter } from '../authority/audit.js';
+import { bootstrapProduction, type BootstrapResult } from '../authority/bootstrap.js';
 
 export interface DatabaseInitResult {
   readonly created: boolean;
-  readonly schemaVersion: number;
+  readonly schemaVersion: 4 | 5 | 6;
   readonly appliedVersions: readonly number[];
+  readonly bootstrap?: BootstrapResult;
 }
 
 export interface DatabaseInitDependencies extends DatabaseOpenDependencies {
   readonly migrationDirectory?: string;
   readonly migrations?: readonly Migration[];
+  readonly phase4Bootstrap?: boolean;
 }
 
 /**
- * Initializes only the schema on the explicit init path. Production actors,
- * tokens, and authority activation remain Phase 4.
+ * Initializes the schema on the explicit init path. Production Phase 4 actor,
+ * token, and authority bootstrap is opt-out only for structural test fixtures.
  */
 export function initializeDatabaseForInit(
   context: CommandContext,
@@ -39,10 +43,20 @@ export function initializeDatabaseForInit(
     };
     runMigrations(opened.db, migrationOptions);
     const integrity = verifyDatabaseIntegrity(opened.db);
+    if (dependencies.phase4Bootstrap === true && integrity.schemaVersion !== 6) {
+      throw new SecurityError(
+        'Phase 4 bootstrap requires schema version 6.',
+        'Apply the complete approved migration set before bootstrapping authority.',
+      );
+    }
+    const bootstrap = dependencies.phase4Bootstrap === true
+      ? bootstrapProduction(opened.db, new AuditWriter(opened.db))
+      : undefined;
     return {
       created: opened.fresh,
       schemaVersion: integrity.schemaVersion,
       appliedVersions: integrity.appliedVersions,
+      ...(bootstrap === undefined ? {} : { bootstrap }),
     };
   } catch (cause) {
     const original = cause instanceof SecurityError
@@ -53,7 +67,7 @@ export function initializeDatabaseForInit(
             'Inspect the database security and migration state, then retry init.',
           )
         : new SecurityError(
-            'Phase 3 database initialization failed.',
+            'Database initialization failed.',
             'Inspect the database security and migration state, then retry init.',
           );
     let cleanupFailure: unknown;

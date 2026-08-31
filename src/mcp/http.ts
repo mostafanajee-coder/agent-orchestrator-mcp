@@ -19,6 +19,7 @@ import {
 
 import { createSdkTokenVerifier, type AccessTokenResolver } from './auth.js';
 import { createMcpServerFactory } from './server.js';
+import type { Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 
 export const MCP_HTTP_HOST = '127.0.0.1';
 export const MCP_HTTP_PATH = '/mcp';
@@ -35,7 +36,8 @@ export interface HttpServerOptions {
   readonly version: string;
   readonly port?: number;
   readonly logger?: HttpLogger;
-  /** Fail-closed Phase 3 startup gate; it runs before this server binds. */
+  readonly authority?: Phase4AuthorityToolOptions;
+  /** Fail-closed startup gate; it runs before this server binds. */
   readonly verifyStartup: () => void;
 }
 
@@ -182,7 +184,11 @@ async function handleRequest(
 export function createHttpServer(options: HttpServerOptions): Server {
   const logger = options.logger ?? DEFAULT_LOGGER;
   const mcpHandler = createMcpHandler(
-    createMcpServerFactory({ transport: 'http', version: options.version }),
+    createMcpServerFactory({
+      transport: 'http',
+      version: options.version,
+      ...(options.authority === undefined ? {} : { authority: options.authority }),
+    }),
     {
       legacy: 'stateless',
       responseMode: 'auto',

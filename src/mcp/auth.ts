@@ -7,6 +7,14 @@ import {
   type OAuthTokenVerifier,
 } from '@modelcontextprotocol/server';
 
+import {
+  assertRoleCapabilities,
+  canonicalCapabilitiesJson,
+  CAPABILITY_VALUES,
+  type ActorRole,
+  type Capability,
+} from '../authority/capabilities.js';
+
 /** Authentication data the Phase 2 boundary exposes to the core. */
 export interface ActorAuthInfo {
   readonly clientId: string;
@@ -14,6 +22,16 @@ export interface ActorAuthInfo {
   readonly tokenId: string;
   readonly sessionLabel: string;
   readonly expiresAt: number;
+  /** Present for the Phase 4 persistent resolver; absent on legacy fixtures. */
+  readonly actorId?: string;
+  readonly role?: ActorRole;
+  readonly capabilities?: readonly Capability[];
+}
+
+export interface VerifiedActorAuthInfo extends ActorAuthInfo {
+  readonly actorId: string;
+  readonly role: ActorRole;
+  readonly capabilities: readonly Capability[];
 }
 
 /** The Phase 3-compatible shape of an actor token, without plaintext. */
@@ -158,6 +176,13 @@ function requiredEnvironmentToken(environment: Readonly<Record<string, string | 
   return token;
 }
 
+/** Reads only the stdio bearer value; identity fields never come from env. */
+export function readEnvironmentToken(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  return requiredEnvironmentToken(environment);
+}
+
 function environmentTokenMaterial(
   environment: Readonly<Record<string, string | undefined>>,
 ): { readonly token: string; readonly record: ActorTokenRecord } {
@@ -224,6 +249,9 @@ export function createSdkTokenVerifier(resolver: AccessTokenResolver): OAuthToke
         extra: {
           tokenId: auth.tokenId,
           sessionLabel: auth.sessionLabel,
+          ...(auth.actorId === undefined ? {} : { actorId: auth.actorId }),
+          ...(auth.role === undefined ? {} : { role: auth.role }),
+          ...(auth.capabilities === undefined ? {} : { capabilities: [...auth.capabilities] }),
         },
       };
     },
@@ -240,11 +268,42 @@ export function actorAuthInfoFromSdk(auth: SdkAuthInfo): ActorAuthInfo {
   if (expiresAt === undefined || !Number.isFinite(expiresAt)) {
     throw new AuthConfigurationError('The verified SDK auth context has no valid expiration time.');
   }
+  const actorId = typeof extra['actorId'] === 'string' ? extra['actorId'] : undefined;
+  const role = extra['role'];
+  const parsedRole =
+    role === 'principal' || role === 'worker' || role === 'observer' || role === 'system'
+      ? role
+      : undefined;
+  const rawCapabilities = extra['capabilities'];
+  let capabilities = Array.isArray(rawCapabilities)
+    && rawCapabilities.every(
+      (value): value is Capability =>
+        typeof value === 'string' && (CAPABILITY_VALUES as readonly string[]).includes(value),
+    )
+    ? [...rawCapabilities]
+    : undefined;
+  if (
+    capabilities !== undefined
+    && (canonicalCapabilitiesJson(capabilities) !== JSON.stringify(capabilities)
+      || parsedRole === undefined)
+  ) {
+    capabilities = undefined;
+  }
+  if (capabilities !== undefined && parsedRole !== undefined) {
+    try {
+      assertRoleCapabilities(parsedRole, capabilities);
+    } catch {
+      capabilities = undefined;
+    }
+  }
   return {
     clientId: auth.clientId,
     scopes: [...auth.scopes],
     tokenId,
     sessionLabel,
     expiresAt,
+    ...(actorId === undefined ? {} : { actorId }),
+    ...(parsedRole === undefined ? {} : { role: parsedRole }),
+    ...(capabilities === undefined ? {} : { capabilities }),
   };
 }
