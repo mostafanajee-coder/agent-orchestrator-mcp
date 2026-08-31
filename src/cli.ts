@@ -52,6 +52,7 @@ export const defaultCommands: CliCommands = {
           version,
           authInfo,
           authority: runtime,
+          jobs: runtime,
           verifyStartup: () => undefined,
           onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
         });
@@ -74,6 +75,7 @@ export const defaultCommands: CliCommands = {
       resolver: runtime.resolver,
       version,
       authority: runtime,
+      jobs: runtime,
       verifyStartup: () => undefined,
       logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
       ...(options.port === undefined ? {} : { port: options.port }),

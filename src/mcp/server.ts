@@ -6,6 +6,7 @@ import {
 
 import { actorAuthInfoFromSdk, type ActorAuthInfo } from './auth.js';
 import { registerCodexDecide, type Phase4AuthorityToolOptions } from './tools/codexDecide.js';
+import { registerJobLifecycle, type Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import { registerPing, type McpTransportKind, SERVICE_NAME } from './tools/ping.js';
 
 export interface McpServerFactoryOptions {
@@ -15,6 +16,8 @@ export interface McpServerFactoryOptions {
   readonly staticAuthInfo?: ActorAuthInfo;
   /** Phase 4 authority backing; the tool is hidden unless auth has job:decide. */
   readonly authority?: Phase4AuthorityToolOptions;
+  /** Phase 5 job-lifecycle backing; tools are hidden unless auth permits them. */
+  readonly jobs?: Phase5JobToolOptions;
 }
 
 /** Builds the common compatibility and Phase 4 server surface for one transport/era. */
@@ -30,6 +33,9 @@ export function buildMcpServer(
   registerPing(server, options.transport, authInfo, context.era);
   if (options.authority !== undefined) {
     registerCodexDecide(server, options.authority, authInfo);
+  }
+  if (options.jobs !== undefined) {
+    registerJobLifecycle(server, options.jobs, authInfo);
   }
   return server;
 }

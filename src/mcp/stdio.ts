@@ -11,6 +11,7 @@ import {
 } from './auth.js';
 import { createMcpServerFactory } from './server.js';
 import type { Phase4AuthorityToolOptions } from './tools/codexDecide.js';
+import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
 
 interface CommonStdioServerOptions {
   readonly authInfo: ActorAuthInfo;
@@ -19,6 +20,7 @@ interface CommonStdioServerOptions {
   /** Injectable only for deterministic tests; production uses process stdio. */
   readonly transport?: Transport;
   readonly authority?: Phase4AuthorityToolOptions;
+  readonly jobs?: Phase5JobToolOptions;
 }
 
 export interface StdioServerOptions extends CommonStdioServerOptions {
@@ -38,6 +40,7 @@ function startVerifiedStdioServer(options: CommonStdioServerOptions): StdioServe
       version: options.version,
       staticAuthInfo: options.authInfo,
       ...(options.authority === undefined ? {} : { authority: options.authority }),
+      ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
     }),
     stdioOptions,
   );
@@ -61,6 +64,7 @@ export async function startAuthenticatedStdioServer(options: {
   readonly transport?: Transport;
   readonly verifyStartup: () => void;
   readonly authority?: Phase4AuthorityToolOptions;
+  readonly jobs?: Phase5JobToolOptions;
 }): Promise<StdioServerHandle> {
   options.verifyStartup();
   const authInfo = await options.resolver.verifyAccessToken(options.token);
@@ -70,6 +74,7 @@ export async function startAuthenticatedStdioServer(options: {
     ...(options.onerror === undefined ? {} : { onerror: options.onerror }),
     ...(options.transport === undefined ? {} : { transport: options.transport }),
     ...(options.authority === undefined ? {} : { authority: options.authority }),
+    ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
   });
 }
 
@@ -81,6 +86,7 @@ export function startEnvironmentStdioServer(options: {
   readonly transport?: Transport;
   readonly verifyStartup: () => void;
   readonly authority?: Phase4AuthorityToolOptions;
+  readonly jobs?: Phase5JobToolOptions;
 }): StdioServerHandle {
   options.verifyStartup();
   const authInfo = authenticateEnvironmentToken(options.environment);
@@ -90,5 +96,6 @@ export function startEnvironmentStdioServer(options: {
     ...(options.onerror === undefined ? {} : { onerror: options.onerror }),
     ...(options.transport === undefined ? {} : { transport: options.transport }),
     ...(options.authority === undefined ? {} : { authority: options.authority }),
+    ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
   });
 }

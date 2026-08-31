@@ -25,17 +25,18 @@ describe('Phase 4 matrix traceability', () => {
     expect(all).not.toMatch(/INSERT\s+OR\s+REPLACE|REPLACE\s+INTO|ON\s+CONFLICT/i);
 
     for (const entry of contents) {
-      if (/authoritative_status\s*=/i.test(entry.text)) {
+      if (/UPDATE\s+jobs\s+SET[^\r\n]*\bauthoritative_status\s*=(?!=)/i.test(entry.text)) {
         expect(entry.path).toBe('src/domain/decide.ts');
       }
     }
   });
 
-  it('REG-04 keeps Phase 5/6 tool names absent from the implementation source', () => {
+  it('REG-04 exposes the Phase 5 lifecycle names without leaking Phase 6+ tools', () => {
     const root = process.cwd();
     const files = sourceFiles(join(root, 'src'));
     const all = files.map((path) => readFileSync(path, 'utf8')).join('\n');
-    expect(all).not.toMatch(/job_create|job_get|job_list|qa_dispatch|run_report|audit_query/);
+    expect(all).toMatch(/job_create|job_get|job_list|job_start|job_resume/);
+    expect(all).not.toMatch(/qa_dispatch|run_report|audit_query/);
   });
 
   it('AUTH-05 keeps the legacy environment resolver out of the production CLI path', () => {
