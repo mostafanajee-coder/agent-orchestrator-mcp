@@ -71,13 +71,54 @@ The following rules apply:
   bounded and normalized before delivery;
 - `workspace` is the canonical admitted workspace, not an arbitrary path;
 - `deadline_at` is server-derived and is not extended by the worker;
-- a pull-mode process may receive an additional opaque run lease and local
-  report endpoint in its private runtime envelope; that material is never
-  returned to the Codex dispatch caller;
+- a pull-mode process may receive an additional opaque run lease and a
+  runtime-selected local report route in its private envelope; that material
+  is never returned to the Codex dispatch caller;
 - the worker cannot change the binding by echoing different values.
 
-The exact private-envelope representation is an implementation detail, but the
-semantic bindings above are normative.
+The exact lease representation for pull mode is normative in §3.1. Other
+private-envelope serialization details remain an implementation detail.
+
+### 3.1 Exact lease envelope for `mcp_pull`
+
+The run lease is an opaque two-part value:
+
+```text
+base64url(canonical_payload) + "." + base64url(mac)
+```
+
+The canonical payload contains exactly these fields:
+
+```json
+{
+  "v": 1,
+  "lease_id": "uuid",
+  "run_id": "uuid",
+  "job_id": "uuid",
+  "cycle": 0,
+  "actor_id": "worker-local",
+  "expires_at": "2026-08-31T12:00:00Z",
+  "nonce": "64-lowercase-hex-characters"
+}
+```
+
+The payload is serialized with the repository's deterministic canonical JSON
+rules. `mac` is the base64url encoding of an HMAC-SHA256 over the exact UTF-8
+payload bytes using the existing local lease-key mechanism. The server creates
+the 32-byte random nonce, stores its lowercase hexadecimal representation in
+the existing `leases.nonce` field, and never accepts a nonce from the dispatch
+request.
+
+The worker's transport identity is separate from the lease. A pull-mode worker
+uses its pre-provisioned worker actor session; that session material is not
+placed in `workers.json`, the start envelope, or the lease. `run_report`
+accepts the complete lease value and does not accept a separately supplied
+nonce or binding override. The server verifies the MAC, exact database binding,
+expiry, actor, and unconsumed state before consuming the lease atomically.
+
+For `pipe` mode, the lease remains runtime-owned and is consumed by the shared
+settlement path after a valid process result. It is not returned to the Codex
+caller and need not be exposed to the child as a report credential.
 
 ## 4. Worker-to-orchestrator messages
 
@@ -222,7 +263,8 @@ default Phase 6 policy is to require exit code 0 for `SUCCEEDED`.
 ## 7. Pull-mode report envelope
 
 For a registered local `mcp_pull` worker, the private start envelope provides
-an opaque lease and the configured local report route. The worker submits:
+the exact opaque lease from §3.1 and a runtime-selected local report route. The
+worker submits:
 
 ```json
 {
@@ -236,13 +278,14 @@ an opaque lease and the configured local report route. The worker submits:
 }
 ```
 
-The `run_report` MCP operation validates the worker actor, lease binding,
-expiry, single-use state, and bounded report fields. It then calls the same
-settlement function used by pipe-mode results. A worker never supplies a job
-status or decision in the report.
+The `run_report` MCP operation validates the worker actor, the complete lease
+envelope, binding, expiry, single-use state, and bounded report fields. It then
+calls the same settlement function used by pipe-mode results. A worker never
+supplies a job status or decision in the report.
 
-The pull route is local-only. No public remote callback, cloud endpoint, or
-worker-discovery mechanism is introduced by this protocol.
+The pull route is local-only and is selected by the orchestrator. No public
+remote callback, cloud endpoint, or worker-discovery mechanism is introduced
+by this protocol.
 
 ## 8. Limits and resource behavior
 
@@ -298,6 +341,10 @@ allowed only after an explicit protocol revision and independent review.
 The protocol is intentionally narrower than the later V1 design material in
 `docs/ARCHITECTURE.md`: evidence, artifacts, recovery, retry scheduling, and
 external adapters require their own phase ownership and review.
+
+The exact `workers.json` registry schema is defined in
+`docs/PHASE6_PLAN.md` §5. This protocol does not add registry fields or permit
+worker-supplied execution policy.
 
 ## 12. Implementation and review gate
 

@@ -196,6 +196,9 @@ This separation prevents a worker executable policy from being silently added
 to the Phase 5 lifecycle configuration and makes the Phase 6 registry a
 separately reviewable artifact.
 
+The exact schema is fixed in §5 below. Unknown top-level or worker-entry
+properties are rejected; the registry is not an open-ended extension point.
+
 ### D6-03 — One generic local process adapter
 
 The initial adapter identifier is `process`. The adapter is a pure planner; a
@@ -218,7 +221,10 @@ path:
 
 Both modes call the same transaction-owned report settlement function. The
 Codex caller never receives a lease. No remote worker or remote report endpoint
-is part of this baseline.
+is part of this baseline. The exact pull-mode lease envelope, nonce binding,
+and separate worker session rule are defined in
+`docs/WORKER_PROTOCOL.md` §3.1; a report submits the complete envelope rather
+than a caller-supplied binding or standalone nonce.
 
 ### D6-05 — Strict bounded NDJSON protocol
 
@@ -330,12 +336,20 @@ terminal requirements, lease rules, and authority separation. Platform-specific
 process-tree termination is an implementation detail behind the common
 runtime contract.
 
+### D6-16 — Exact worker-registry schema (RESOLVED)
+
+The `workers.json` schema is now fixed for the planning baseline. Its exact
+fields, types, bounds, and cross-field rules are defined in §5 and must be
+implemented as a strict parser with no additional properties. The schema is a
+precondition for implementation authorization and is no longer deferred to an
+unspecified implementation decision.
+
 ## 5. Worker registry proposal
 
-The proposed `workers.json` document is strict and server-owned. A planning
-shape is:
+The `workers.json` document is strict and server-owned. The following is the
+normative schema for the Phase 6 planning baseline:
 
-```text
+```json
 {
   "version": 1,
   "workers": [
@@ -345,7 +359,7 @@ shape is:
       "enabled": true,
       "adapter": "process",
       "delivery": "pipe",
-      "executable": "absolute-or-approved-configured-path",
+      "executable": "C:\\AgentTools\\local-worker.exe",
       "argv_template": ["--mode", "worker"],
       "cwd_policy": "job_workspace",
       "environment_allowlist": ["LANG"],
@@ -358,25 +372,57 @@ shape is:
 }
 ```
 
-The exact JSON schema remains part of the independent review. The following
-rules are not optional:
+The field schema is:
+
+| Object | Field | Type and bounds |
+|---|---|---|
+| root | `version` | integer, exactly `1` |
+| root | `workers` | array, 1–64 entries |
+| worker | `worker_id` | string matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` |
+| worker | `actor_id` | string matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` |
+| worker | `enabled` | boolean |
+| worker | `adapter` | string, exactly `process` |
+| worker | `delivery` | string, `pipe` or `mcp_pull` |
+| worker | `executable` | non-empty string, maximum 4,096 bytes; local absolute path |
+| worker | `argv_template` | array of 0–32 strings, each maximum 1,024 bytes |
+| worker | `cwd_policy` | string, exactly `job_workspace` |
+| worker | `environment_allowlist` | array of 0–64 unique environment-name strings |
+| worker | `default_timeout_ms` | integer from 1,000 through 900,000 |
+| worker | `hard_timeout_ms` | integer from 1,000 through 900,000 |
+| worker | `max_output_bytes` | integer from 1 through 4,194,304 |
+| worker | `max_messages` | integer from 1 through 256 |
+
+Every listed field is required. No root or worker-entry property outside this
+table is allowed. The following rules are also normative:
 
 - `worker_id` is unique and is the only worker selector accepted by dispatch;
-- `actor_id` must resolve to an enabled actor with role `worker`;
+- `actor_id` is unique within the registry and must resolve to an enabled actor
+  with role `worker`;
 - `adapter` must be a known adapter; the initial set contains only `process`;
 - `delivery` is limited to `pipe` or local `mcp_pull`;
+- `executable` must be a local absolute path with no UNC/device form or
+  traversal segment; an enabled entry must resolve to an approved regular
+  executable file at startup;
 - executable and argument templates are operator-owned and never copied from
   the dispatch request;
-- template substitution has a fixed allowlist of run/job/cycle placeholders;
+- template substitution has a fixed allowlist of `{run_id}`, `{job_id}`, and
+  `{cycle}` placeholders; task text and parameters are delivered through the
+  private start envelope, not argv;
 - shell interpretation is prohibited;
-- the child environment is an explicit allowlist, not the parent environment;
-- the working directory must be the admitted job workspace or another
-  explicitly approved local directory inside the worker policy;
+- each environment name must match `^[A-Za-z_][A-Za-z0-9_]{0,127}$`; the child
+  environment is an explicit allowlist, not the parent environment;
+- `cwd_policy = job_workspace` means the canonical admitted job workspace and
+  no other directory;
+- `default_timeout_ms <= hard_timeout_ms <= 900000`;
+- `max_output_bytes <= 4194304` and `max_messages <= 256`;
 - worker capabilities are checked against the existing catalogue and cannot
   include `job:decide`;
 - disabled or invalid workers cannot be selected;
 - worker configuration is read before transport exposure and is not changed by
-  an MCP call in Phase 6.
+  an MCP call in Phase 6;
+- the file is UTF-8 JSON, has no comments, and is bounded to 256 KiB;
+- registry validation is deterministic and fails closed on unknown fields,
+  duplicate IDs, invalid actor bindings, invalid paths, or invalid bounds.
 
 ## 6. Worker lifecycle and transaction boundaries
 
@@ -457,14 +503,17 @@ its own terminal acknowledgement.
 ## 7. Lease model
 
 Each admitted run receives one lease bound to `(lease_id, run_id, job_id,
-cycle, actor_id, expires_at)`. The lease is an opaque, signed, run-scoped
-envelope. It is not a principal identity and it does not confer decision
-authority.
+cycle, actor_id, expires_at)`. The lease is the exact opaque, signed,
+run-scoped envelope defined in `docs/WORKER_PROTOCOL.md` §3.1. It is not a
+principal identity and it does not confer decision authority.
 
 The database stores the existing lease metadata and `consumed_at`. The
-implementation may use the existing local lease-key mechanism to authenticate
-the envelope, but it must not persist a reusable plaintext principal token in
-the run or lease row.
+existing local lease-key mechanism authenticates the envelope. Its canonical
+payload includes the server-generated nonce, and the database value must match
+the presented payload before consumption. The worker's transport session is
+separate from the lease and is provisioned outside the dispatch request. The
+implementation must not persist a reusable plaintext principal token in the
+run or lease row.
 
 Rules:
 
@@ -779,6 +828,11 @@ The documentation-only Phase 6 planning snapshot consists of:
    marked as proposed and not implementation authorization;
 4. `README.md` — status-only update identifying Phase 6 as planning-only.
 
+The same snapshot carries status-only reconciliation in
+`docs/PHASE5_PLAN.md` and `docs/PHASE5_IMPLEMENTATION_REPORT.md`. Those two
+files are included for provenance and Phase 5 closure context; they introduce
+no Phase 6 design or source behavior.
+
 The snapshot must also record the exact Phase 5 base SHA, the planning branch,
 the changed-path set, the persistence decision, the actor boundary, the
 candidate MCP surface, and the explicit `PHASE 6 IMPLEMENTATION AUTHORIZED:
@@ -795,7 +849,8 @@ adjudication:
 
 1. confirm that schema-v6 `worker_runs` and `leases` can represent every
    approved invariant without a migration;
-2. approve or correct the separate `workers.json` registry boundary;
+2. verify that the strict `workers.json` schema in §5 is implemented without
+   widening it or moving executable policy into Phase 5 `config.json`;
 3. approve the two local report delivery modes and their lease handoff;
 4. approve exact protocol bounds and malformed-output behavior;
 5. approve whether progress is runtime-only and non-durable;
@@ -805,6 +860,11 @@ adjudication:
 9. approve the exact audit action catalogue and actor attribution;
 10. verify equivalent Windows/POSIX process termination semantics;
 11. verify that Phase 7 evidence/artifact ownership remains untouched.
+
+The former F-01 schema deferral is closed by D6-16 in this documentation-only
+amendment. Because the planning snapshot changed after the independent review,
+the corrected snapshot requires a targeted independent re-review before final
+Codex adjudication.
 
 Any unresolved item that changes authority, persistence, or phase ownership is
 blocking for implementation authorization. Planning may continue while the
@@ -819,6 +879,8 @@ The independent reviewer should receive exactly this planning snapshot:
 - `docs/WORKER_PROTOCOL.md`;
 - `docs/ARCHITECTURE.md` with the proposed Revision 9 delta;
 - `README.md` status context;
+- `docs/PHASE5_PLAN.md` and `docs/PHASE5_IMPLEMENTATION_REPORT.md` for the
+  synchronized Phase 5 closure context;
 - the exact base SHA `530e2441636e6517096b1319c4510b1e56626592`;
 - the exact documentation-only changed-path list;
 - an instruction to review planning only, with no edits, implementation,
@@ -845,10 +907,10 @@ AUTHORIZE PHASE 6 IMPLEMENTATION: NO
 
 ```text
 PHASE 5 BASELINE: COMPLETE AND PUBLISHED
-PHASE 6 PLANNING BASELINE: PREPARED ON codex/phase6-authority-plan
-PHASE 6 INDEPENDENT ARCHITECTURE REVIEW: REQUIRED
+PHASE 6 PLANNING BASELINE: CORRECTED FOR F-01 ON codex/phase6-authority-plan
+PHASE 6 INDEPENDENT ARCHITECTURE REVIEW: TARGETED RE-REVIEW REQUIRED
 PHASE 6 IMPLEMENTATION AUTHORIZED: NO
 PHASE 6 STARTED: NO
 ```
 
-**PHASE 6 PLANNING BASELINE READY FOR INDEPENDENT ARCHITECTURE REVIEW**
+**PHASE 6 CORRECTED PLANNING BASELINE READY FOR TARGETED INDEPENDENT RE-REVIEW**

@@ -1690,7 +1690,14 @@ shell command, environment, or arbitrary directory.
 
 The registry must be loaded and validated before the Phase 6 transport surface
 is exposed. Worker actor bindings, capabilities, adapter names, path policy,
-and bounds are all server-owned and fail closed when invalid.
+and bounds are all server-owned and fail closed when invalid. The exact
+registry schema is fixed in `docs/PHASE6_PLAN.md` §5: root `version` is exactly
+`1`, `workers` contains 1–64 entries, every entry has exactly the required
+fields, `adapter` is `process`, `cwd_policy` is `job_workspace`, and timeout,
+output, message, identifier, path, and environment bounds are enforced. No
+unknown property is accepted. This replaces the earlier broad design wording
+that described worker policy as part of general configuration; Revision 9
+assigns it to the separate protected `workers.json` registry.
 
 ### 24.3 Proposed lifecycle and state boundary
 
@@ -1747,7 +1754,12 @@ from the Phase 6 protocol.
 Pipe-mode output and local pull-mode `run_report` input share one report
 settlement function. A run-scoped lease is never returned to the Codex
 dispatch caller and does not confer decision authority. Remote, cloud, browser,
-and external worker delivery are excluded.
+and external worker delivery are excluded. In `mcp_pull` mode the lease is the
+exact two-part `base64url(canonical_payload).base64url(HMAC-SHA256)` envelope
+defined in `docs/WORKER_PROTOCOL.md` §3.1; its payload binds lease, run, job,
+cycle, actor, expiry, and the server-generated nonce. The worker's transport
+identity is separate from the lease and is not included in the registry or
+private start envelope. Pipe mode keeps the lease runtime-owned.
 
 ### 24.6 Persistence and transaction boundary
 
