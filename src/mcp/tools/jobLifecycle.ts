@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
@@ -93,6 +95,7 @@ const DecisionOutput = z.object({
 
 const JobMutationSuccess = z.object({
   ok: z.literal(true),
+  request_id: z.string().uuid(),
   job_id: z.string(),
   state: z.enum(WORKFLOW_STATE_VALUES),
   authoritative_status: z.enum(AUTHORITATIVE_STATUS_VALUES).nullable(),
@@ -103,18 +106,21 @@ const JobMutationSuccess = z.object({
 
 const JobGetSuccess = z.object({
   ok: z.literal(true),
+  request_id: z.string().uuid(),
   job: JobRecordOutput,
   decisions: z.array(DecisionOutput).optional(),
 });
 
 const JobListSuccess = z.object({
   ok: z.literal(true),
+  request_id: z.string().uuid(),
   jobs: z.array(JobSummaryOutput),
   next_cursor: z.string().optional(),
 });
 
 const JobFailure = z.object({
   ok: z.literal(false),
+  request_id: z.string().uuid(),
   error: z.object({
     code: z.enum(JOB_LIFECYCLE_ERROR_CODES),
     message: z.string(),
@@ -129,9 +135,8 @@ export type JobMutationOutputValue = z.infer<typeof JobMutationOutput>;
 export type JobGetOutputValue = z.infer<typeof JobGetOutput>;
 export type JobListOutputValue = z.infer<typeof JobListOutput>;
 
-function requestIdFromContext(value: unknown): string {
-  if (typeof value === 'string' || typeof value === 'number') return String(value);
-  return 'mcp-request';
+function requestId(): string {
+  return randomUUID();
 }
 
 function validCapabilities(authInfo: VerifiedActorAuthInfo): boolean {
@@ -182,9 +187,10 @@ function readerActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo
   return actor;
 }
 
-function mutationOutput(job: JobRecord): JobMutationOutputValue {
+function mutationOutput(job: JobRecord, currentRequestId: string): JobMutationOutputValue {
   return {
     ok: true,
+    request_id: currentRequestId,
     job_id: job.job_id,
     state: job.state,
     authoritative_status: job.authoritative_status,
@@ -196,10 +202,11 @@ function mutationOutput(job: JobRecord): JobMutationOutputValue {
 
 function failure(
   error: unknown,
+  currentRequestId: string,
 ): { readonly content: [{ readonly type: 'text'; readonly text: string }]; readonly structuredContent: JobFailureValue } {
   const result: JobFailureValue = error instanceof JobLifecycleError
-    ? { ok: false, error: { code: error.code, message: error.message } }
-    : { ok: false, error: { code: 'INTERNAL_ERROR', message: 'The job lifecycle operation failed.' } };
+    ? { ok: false, request_id: currentRequestId, error: { code: error.code, message: error.message } }
+    : { ok: false, request_id: currentRequestId, error: { code: 'INTERNAL_ERROR', message: 'The job lifecycle operation failed.' } };
   return {
     content: [{ type: 'text', text: JSON.stringify(result) }],
     structuredContent: result,
@@ -235,18 +242,19 @@ export function registerJobLifecycle(
         inputSchema: JobCreateInputSchema,
         outputSchema: JobMutationOutput,
       },
-      async (input, context) => {
+      async (input) => {
+        const currentRequestId = requestId();
         try {
           return success(mutationOutput(createJob(
             options.db,
             options.audit,
             lifecycle,
             input,
-            requestIdFromContext(context.mcpReq.id),
+            currentRequestId,
             options,
-          )));
+          ), currentRequestId));
         } catch (error) {
-          return failure(error);
+          return failure(error, currentRequestId);
         }
       },
     );
@@ -259,18 +267,19 @@ export function registerJobLifecycle(
         inputSchema: JobMutationInputSchema,
         outputSchema: JobMutationOutput,
       },
-      async (input, context) => {
+      async (input) => {
+        const currentRequestId = requestId();
         try {
           return success(mutationOutput(startJob(
             options.db,
             options.audit,
             lifecycle,
             input,
-            requestIdFromContext(context.mcpReq.id),
+            currentRequestId,
             options,
-          )));
+          ), currentRequestId));
         } catch (error) {
-          return failure(error);
+          return failure(error, currentRequestId);
         }
       },
     );
@@ -283,18 +292,19 @@ export function registerJobLifecycle(
         inputSchema: JobMutationInputSchema,
         outputSchema: JobMutationOutput,
       },
-      async (input, context) => {
+      async (input) => {
+        const currentRequestId = requestId();
         try {
           return success(mutationOutput(resumeJob(
             options.db,
             options.audit,
             lifecycle,
             input,
-            requestIdFromContext(context.mcpReq.id),
+            currentRequestId,
             options,
-          )));
+          ), currentRequestId));
         } catch (error) {
-          return failure(error);
+          return failure(error, currentRequestId);
         }
       },
     );
@@ -310,10 +320,12 @@ export function registerJobLifecycle(
         outputSchema: JobGetOutput,
       },
       async (input) => {
+        const currentRequestId = requestId();
         try {
           const result = getJob(options.db, reader, input);
           return success({
             ok: true,
+            request_id: currentRequestId,
             job: result.job,
             ...(result.decisions === undefined
               ? {}
@@ -325,7 +337,7 @@ export function registerJobLifecycle(
               }),
           });
         } catch (error) {
-          return failure(error);
+          return failure(error, currentRequestId);
         }
       },
     );
@@ -339,15 +351,17 @@ export function registerJobLifecycle(
         outputSchema: JobListOutput,
       },
       async (input) => {
+        const currentRequestId = requestId();
         try {
           const result = listJobs(options.db, reader, input, options);
           return success({
             ok: true,
+            request_id: currentRequestId,
             jobs: result.jobs.map((job): JobSummary => ({ ...job })),
             ...(result.next_cursor === undefined ? {} : { next_cursor: result.next_cursor }),
           });
         } catch (error) {
-          return failure(error);
+          return failure(error, currentRequestId);
         }
       },
     );

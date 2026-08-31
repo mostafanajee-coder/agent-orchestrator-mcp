@@ -1,8 +1,10 @@
 # Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
-> `main` is now the authoritative merged Phase 4 state. This document does not
-> authorize Phase 5/6 implementation, deployment, or unrelated changes.
+> `main` is the authoritative merged Phase 4 state. This document alone does
+> not authorize Phase 5/6 implementation, deployment, or unrelated changes;
+> the separate Phase 5 plan records the explicit Codex authorization and its
+> narrow implementation scope.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -108,8 +110,9 @@ the final canonical key and no separate prefix concatenation.
 The full Phase 4 plan, 12 work packages, 70-case executable matrix, security
 answers, review sequence, and explicit Phase 5/6 exclusions are recorded in
 `docs/PHASE4_PLAN.md`. Revision 8 is the approved Phase 4 baseline and its
-implementation is merged. Phase 5 planning is a separate proposed workstream
-recorded in `docs/PHASE5_PLAN.md`; it does not authorize Phase 5 implementation.
+implementation is merged. Phase 5 planning and its explicit implementation
+authorization are recorded separately in `docs/PHASE5_PLAN.md`; that plan
+authorizes only the scoped Phase 5 implementation branch.
 
 ### Revision 7 / SQLite row-replacement integrity (this revision — approved architecture correction)
 
@@ -141,11 +144,12 @@ whitespace is normalized. Any reviewed DDL change must regenerate the compiled
 fingerprint in the same reviewed source change. A fail-closed representation
 drift is preferable to accepting weakened DDL.
 
-### Phase 5 planning amendment (proposed — not implementation-authorized)
+### Phase 5 planning amendment (proposed — implementation authorized on branch)
 
-The documentation-only Phase 5 planning branch adds a proposed lifecycle
-staging amendment. It is not a new approved architecture revision and it does
-not retroactively alter the merged Phase 4 implementation. The amendment
+The Phase 5 planning baseline and its authorized implementation branch add a
+proposed lifecycle staging amendment. It is not a new approved architecture
+revision and it does not retroactively alter the merged Phase 4 implementation
+on `main`. The amendment
 touches §1, §4, §6, §8, §14, §17, §19, §20, §21, and §23 only:
 
 - §4 defines one guard-selected outcome for each `(from_state, transition)`
@@ -163,10 +167,10 @@ touches §1, §4, §6, §8, §14, §17, §19, §20, §21, and §23 only:
 - §1 and §23 identify `docs/PHASE5_PLAN.md` as a separate proposed planning
   workstream that does not authorize implementation.
 
-The current merged Phase 4 code does not yet contain the proposed
-cycle-exhaustion branch. If Phase 5 implementation is later authorized, one
-and only one narrowly scoped dependency amendment to the existing
-`applyTransition`/`codex_decide` choke point may implement that guard and its
+The current merged Phase 4 code on `main` does not yet contain the proposed
+cycle-exhaustion branch. The explicit Phase 5 authorization permits one and
+only one narrowly scoped dependency amendment to the existing
+`applyTransition`/`codex_decide` choke point to implement that guard and its
 audit handling. No other Phase 4 source change is authorized by this addendum.
 
 ### Revision 6 / Phase 3 job-row and schema-verification correction (historical approved architecture correction)
@@ -785,7 +789,7 @@ Common: every mutating tool accepts `idempotency_key` and an optional `session_h
 - Caller: codex, observer · Capability: `job:read`
 - In: `{ state?, authoritative_status?, workspace?, updated_since?, limit?, cursor? }` · Out: `{ jobs[], next_cursor? }`
 
-### Phase 5 staging amendment (proposed — not implementation-authorized)
+### Phase 5 staging amendment (proposed — implementation authorized on branch)
 
 The Phase 5 plan proposes `job_start` and `job_resume` as explicit lifecycle
 operations under `job:create`. Both require `expected_version`, use the common
@@ -802,8 +806,10 @@ from a bounded configured default rather than a request field. `job_get`
 accepts `include: ["decisions"]` only; `runs`, `evidence`, and `artifacts` are
 unconditionally deferred to their owner phases and return the reviewed
 `UNSUPPORTED_COLLECTION` error. The original ten-tool list remains the full
-later V1 target description; these staging rules govern Phase 5 only and take
-effect only after independent review and principal authorization.
+later V1 target description; these staging rules govern Phase 5 only. The
+required independent review and Codex authorization are recorded in
+`docs/PHASE5_PLAN.md`; the additions are active only on the implementation
+branch until a later merge.
 
 **4. `qa_dispatch`** — Request QA and dispatch workers as one atomic act.
 - Caller: codex · Capability: `qa:request`
@@ -1621,7 +1627,6 @@ Scope remains honest: V1 is the authority core plus one generic worker adapter. 
 The Phase 3 merge is complete. The Revision 8 amendment and
 `docs/PHASE4_PLAN.md` are governing artifacts originating at `65008a97`; the
 Phase 4 implementation is complete and merged in `main` at
-`ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. The proposed Phase 5 planning
-baseline is recorded in `docs/PHASE5_PLAN.md` on its documentation-only
-planning branch. Phase 5 implementation remains unauthorized pending
-independent review and a separate Codex authorization decision.
+`ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. The Phase 5 planning baseline and
+its authorization are recorded in `docs/PHASE5_PLAN.md`; implementation is in
+progress on `codex/phase5-implementation` and remains unmerged.

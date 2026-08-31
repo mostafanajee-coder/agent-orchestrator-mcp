@@ -117,7 +117,7 @@ export function renderHelp(version: string): string {
     '  init             Prepare state, initialize schema, and bootstrap Phase 4 authority',
     '  doctor           Report state and DB-file security. Read-only; repairs nothing',
     '  token            Issue, list, or revoke local persistent actor tokens',
-    '  serve            Serve the Phase 4 MCP spine (--http or --stdio)',
+    '  serve            Serve the Phase 5 MCP spine (--http or --stdio)',
     '',
     'Token options:',
     '  token issue --label LABEL [--expires-at UTC_TIMESTAMP]',
@@ -140,9 +140,9 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 4. Persistent actor_tokens auth, Codex authority, audit, and ping.',
+    '  Phase 5 implementation candidate. Persistent auth, Codex authority, job lifecycle, audit, and ping.',
     '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
-    '  Job creation, worker execution, leases, evidence, and artifacts remain later phases.',
+    '  Worker execution, leases, evidence, artifacts, resilience, and later phases remain out of scope.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
 }

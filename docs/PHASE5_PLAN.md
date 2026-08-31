@@ -1,20 +1,22 @@
 # AOM — PHASE 5 JOB LIFECYCLE PLAN
 
-> **Status: PROPOSED PLANNING BASELINE — IMPLEMENTATION NOT AUTHORIZED**
+> **Status: APPROVED PHASE 5 IMPLEMENTATION — IN PROGRESS**
 >
-> This document starts the Phase 5 planning cycle from the authoritative merged
-> Phase 4 `main` state. It defines the intended job-lifecycle boundary and the
-> review gates; it does not authorize source changes, migrations, MCP tool
-> registration, push, pull requests, deployment, or Phase 6+ work.
+> This document records the reviewed Phase 5 planning baseline and the separate
+> Codex authorization below. The authorization permits only the scoped Phase 5
+> source work; it does not authorize migrations, push, pull requests, merge,
+> deployment, or Phase 6+ work.
 
 Date: 2026-08-31
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
 Planning branch: `codex/phase5-authority-plan`
+Implementation branch: `codex/phase5-implementation`
 Authoritative planning base: `4ebfb267b25607f5e955d0d376582a3b26593648`
 Phase 4 implementation merge: `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`
 Phase 4 closure merge: `4ebfb267b25607f5e955d0d376582a3b26593648`
 Governing architecture: `docs/ARCHITECTURE.md` Revision 8
 Governing Phase 4 record: `docs/PHASE4_PLAN.md`
+Codex implementation authorization: `AUTHORIZE PHASE 5 IMPLEMENTATION: YES`
 
 ## 0. Governance and authority
 
@@ -37,17 +39,17 @@ Phase 5 plan
   -> Codex final merge gate
 ```
 
-The following remain prohibited by this document:
+The following remain prohibited by this document and authorization:
 
-- source-code changes for Phase 5;
+- source-code changes outside the scoped Phase 5 implementation below;
 - SQL migration creation or schema-version changes;
-- registering or exposing Phase 5 MCP tools;
+- registering or exposing tools outside the exact Phase 5 surface;
 - worker execution, lease use, evidence/artifact writes, or resilience loops;
 - changes to Phase 3/4 history or the merged Phase 4 implementation, except
   for the narrowly scoped Phase 4 dependency amendment explicitly described in
   §6.2 and §12; that exception is available only after a separate Phase 5
-  implementation authorization and this planning document itself authorizes
-  nothing;
+  implementation authorization and this record authorizes only that single
+  dependency amendment;
 - push, PR creation, merge, deployment, or Phase 6/7/8/9 work.
 
 ## 1. Planning baseline
@@ -798,17 +800,23 @@ Implementation may be authorized only when all of the following are true:
 7. The narrowly scoped Phase 4 dependency amendment described in D-12 is
    treated as part of the Phase 5 implementation scope; no other Phase 4
    source change is permitted.
-8. Codex records the exact decision:
+8. Codex records the exact decision. This has now been satisfied:
 
 ```text
 AUTHORIZE PHASE 5 IMPLEMENTATION: YES
 ```
 
-Until that line is issued in a separate authorization record:
+Before the authorization record above was issued, the state was:
 
 ```text
 PHASE 5 IMPLEMENTATION AUTHORIZED: NO
 ```
+
+The current authorized scope is the five lifecycle operations
+`job_create`, `job_start`, `job_resume`, `job_get`, and `job_list`, plus the
+single D-12 dependency amendment to the existing Phase 4 authority choke point.
+No other Phase 4 source behavior, schema change, migration, worker behavior, or
+later-phase behavior is authorized.
 
 ## 15. Requested independent-review packet
 
@@ -828,8 +836,8 @@ and must not treat a planning review as permission to implement.
 
 ```text
 PHASE 5 PLAN STARTED
-PHASE 5 IMPLEMENTATION AUTHORIZED: NO
+PHASE 5 IMPLEMENTATION AUTHORIZED: YES
 INDEPENDENT RE-REVIEW RESULT: READY FOR CODEX IMPLEMENTATION-AUTHORIZATION GATE
-CODEX ADJUDICATION: P5-22 AND P5-24 ACCEPTED; P5-23 TRACKED AS D-20; NO BLOCKER REMAINS
-NEXT GOVERNANCE STEP: VERIFY THE REPOSITORY SNAPSHOT AND RECORD THE SEPARATE CODEX IMPLEMENTATION-AUTHORIZATION DECISION
+CODEX AUTHORIZATION: RECORDED; IMPLEMENTATION IN PROGRESS ON codex/phase5-implementation
+IMPLEMENTATION LIMITS: NO MIGRATIONS, NO PHASE 6+, NO PUSH, NO PR, NO MERGE, NO DEPLOYMENT
 ```
