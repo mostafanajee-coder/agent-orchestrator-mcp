@@ -118,11 +118,17 @@ Runtime state lives outside this repository, in one global root shared by every 
 
 ```
 <OS user profile>\.agent-orchestrator-mcp\     e.g. C:\Users\<user>\.agent-orchestrator-mcp
+  config.json  protected Phase 5 runtime settings (workspace roots and bounded defaults)
   data\        orchestrator.db, WAL/SHM sidecars when SQLite owns them
   artifacts\   per job / cycle / run
   secrets\     lease.key
   logs\
 ```
+
+`init` creates the protected `config.json` with the approved Windows workspace-root seeds and
+bounded lifecycle defaults. `serve` reads and validates that file before exposing the MCP surface;
+operators may add local workspace roots there without changing source code. On POSIX, no workspace
+roots are seeded by default; a local root must be configured explicitly before `job_create` can admit a job.
 
 On POSIX the root is `$XDG_STATE_HOME/agent-orchestrator-mcp`, falling back to
 `~/.local/state/agent-orchestrator-mcp`. There is deliberately **no override** — no flag,

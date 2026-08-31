@@ -5,6 +5,7 @@ import { runInit } from './commands/init.js';
 import type { TokenCommandOptions, TokenCommandResult } from './commands/tokens.js';
 import { runTokenCommand } from './commands/tokens.js';
 import { createCommandContext } from './commands/context.js';
+import { loadPhase5Config } from './config/phase5.js';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
 import { readEnvironmentToken } from './mcp/auth.js';
 import { openPhase4Runtime } from './authority/runtime.js';
@@ -44,15 +45,17 @@ export const defaultCommands: CliCommands = {
   token: (options) => runTokenCommand(createCommandContext(), options),
   serve: (options, io) => {
     const version = readPackageVersion();
-    const runtime = openPhase4Runtime(createCommandContext());
+    const commandContext = createCommandContext();
+    const runtime = openPhase4Runtime(commandContext);
     if (options.mode === 'stdio') {
       try {
+        const phase5Config = loadPhase5Config(commandContext);
         const authInfo = runtime.resolver.verifyAccessTokenSync(readEnvironmentToken());
         const handle = startStdioServer({
           version,
           authInfo,
           authority: runtime,
-          jobs: runtime,
+          jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
           verifyStartup: () => undefined,
           onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
         });
@@ -75,14 +78,17 @@ export const defaultCommands: CliCommands = {
       resolver: runtime.resolver,
       version,
       authority: runtime,
-      jobs: runtime,
       verifyStartup: () => undefined,
       logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
-      ...(options.port === undefined ? {} : { port: options.port }),
     };
     let server: ReturnType<typeof startHttpServer>;
     try {
-      server = startHttpServer(httpOptions);
+      const phase5Config = loadPhase5Config(commandContext);
+      server = startHttpServer({
+        ...httpOptions,
+        jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
+        ...(options.port === undefined ? {} : { port: options.port }),
+      });
     } catch (cause) {
       runtime.close();
       throw cause;

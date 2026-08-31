@@ -6,6 +6,7 @@ import { SecurityError } from '../errors.js';
 import { ensureLeaseKey } from '../secrets/leaseKey.js';
 import { assertPathIsSafe } from '../security/pathSafety.js';
 import { initializeDatabaseForInit, type DatabaseInitResult } from '../store/init.js';
+import { ensurePhase5Config } from '../config/phase5.js';
 import type { CommandContext } from './context.js';
 
 export interface InitResult {
@@ -68,6 +69,10 @@ export function runInit(context: CommandContext, options: InitOptions = {}): Ini
   const database = initializeDatabaseForInit(context, {
     phase4Bootstrap: options.phase4Bootstrap ?? true,
   });
+  // Phase 5 runtime defaults live in the protected, operator-editable config
+  // file. Create it only after database initialization succeeds so a failed
+  // fresh init does not leave a misleading partial runtime configuration.
+  ensurePhase5Config(context);
 
   return {
     stateRoot: layout.root,

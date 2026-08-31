@@ -70,6 +70,15 @@ Phase 5 starts with no production job-lifecycle tool registered. Existing
 job row. Phase 5 supplies the durable job lifecycle around that primitive; it
 does not replace it and does not create another authority writer.
 
+Phase 5 runtime configuration is stored at `<state_root>\config.json`, a
+protected operator-editable JSON file created by `init` and read by `serve`
+before either transport is exposed. Windows is seeded with the approved
+`C:\AgentProjects` and `C:\SallaProjects` roots. POSIX receives no invented
+workspace-root seed; an operator must configure a local absolute root before
+`job_create` can admit work. The file also owns the bounded default and hard
+cycle limits and the positive stale threshold. The module-level defaults are
+validated initialization seeds only, never the production read path.
+
 ## 2. Objective
 
 Implement and verify the smallest safe lifecycle for durable jobs:
@@ -153,10 +162,10 @@ a command or a filesystem operation.
 
 ### WP-3 — Workspace admission policy
 
-Validate `job_create.workspace` against the existing configured workspace-root
-allowlist before inserting the job. The policy is described in §7 and must be
-implemented once in a shared domain boundary rather than copied into MCP
-handlers.
+Validate `job_create.workspace` against the configured workspace-root allowlist
+loaded from `<state_root>\config.json` before inserting the job. The policy is
+described in §7 and must be implemented once in a shared domain boundary rather
+than copied into MCP handlers.
 
 ### WP-4 — Atomic job creation
 
@@ -412,6 +421,14 @@ contract, never accepted as a principal override. The effective
 `stale_after_s` comes from an explicit bounded configuration default, and a
 missing or invalid default fails closed rather than becoming unlimited.
 
+`state_reason` is a bounded diagnostic field, not an authorization input. The
+current Phase 5 vocabulary is `start`, `resume`, `max_cycles`, and the existing
+lowercase decision names (`approve`, `reject`, `fix`, `retest`, `verify_self`,
+`ignore_false_positive`, `stop`, `package`, `deliver`, `complete`, `cancel`).
+The later runtime phases may add only documented values such as `timeout`,
+`orphaned_runs`, `stale`, or `deadline`; they must not reinterpret an existing
+value as authority.
+
 ## 7. Workspace admission and path safety
 
 `job_create` must realpath-resolve the requested workspace and prove strict
@@ -461,6 +478,13 @@ never creates a second idempotency namespace. `effective_stale_after_s` is
 deliberately excluded: a valid replay returns the originally stored response
 even if an operator later changes the server configuration. Configuration
 changes do not invalidate an otherwise identical caller request.
+
+Phase 5 intentionally uses a different, explicitly reviewed request-hash policy
+from the merged Phase 4 `codex_decide` implementation: Phase 4 currently
+includes `session_hint`, while Phase 5 excludes it as transport decoration.
+Both operations share `(actor_id, key)` storage, but their operation-specific
+hash inputs and response shapes are distinct. Unifying these policies would be
+a separate reviewed amendment and is not part of Phase 5.
 
 ### 8.2 Optimistic concurrency
 
@@ -637,8 +661,9 @@ of it and no conditional fixture-dependent response shape.
 
 ### D-3 — Workspace configuration source (RESOLVED)
 
-Use the existing configured roots and Phase 1 path-safety boundary. No workspace
-table, remote URL feature, or user-controlled allowlist is added.
+Use the protected `<state_root>\config.json` source and Phase 1 path-safety
+boundary. No workspace table, environment-variable override, remote URL feature,
+or unprotected user-controlled allowlist is added.
 
 ### D-4 — Time-based enforcement (RESOLVED)
 

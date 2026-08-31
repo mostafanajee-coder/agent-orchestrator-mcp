@@ -30,14 +30,6 @@ const WINDOWS_ROOT = /^[A-Za-z]:[\\/]?$/;
 const MAX_WORKSPACE_LENGTH = 4_096;
 const MAX_CURSOR_LENGTH = 2_048;
 
-export const DEFAULT_HARD_MAX_CYCLES = 10;
-export const DEFAULT_MAX_CYCLES = 10;
-export const DEFAULT_STALE_AFTER_S = 3_600;
-export const DEFAULT_WORKSPACE_ROOTS = Object.freeze([
-  'C:\\AgentProjects',
-  'C:\\SallaProjects',
-]);
-
 const JOB_INCLUDE_VALUES = ['decisions', 'runs', 'evidence', 'artifacts'] as const;
 
 export const JobSpecSchema = z.object({
@@ -203,11 +195,11 @@ export class JobLifecycleError extends Error {
 }
 
 export interface JobLifecycleOptions {
-  readonly workspaceRoots?: readonly string[];
-  readonly platform?: NodeJS.Platform;
-  readonly hardMaxCycles?: number;
-  readonly defaultMaxCycles?: number;
-  readonly defaultStaleAfterS?: number;
+  readonly workspaceRoots: readonly string[];
+  readonly platform: NodeJS.Platform;
+  readonly hardMaxCycles: number;
+  readonly defaultMaxCycles: number;
+  readonly defaultStaleAfterS: number;
   readonly clock?: () => number;
 }
 
@@ -293,10 +285,10 @@ function fail(code: JobLifecycleErrorCode, message: string): never {
 }
 
 function resolveOptions(options: JobLifecycleOptions): ResolvedOptions {
-  const platform = options.platform ?? process.platform;
-  const hardMaxCycles = options.hardMaxCycles ?? DEFAULT_HARD_MAX_CYCLES;
-  const defaultMaxCycles = options.defaultMaxCycles ?? DEFAULT_MAX_CYCLES;
-  const defaultStaleAfterS = options.defaultStaleAfterS ?? DEFAULT_STALE_AFTER_S;
+  const platform = options.platform;
+  const hardMaxCycles = options.hardMaxCycles;
+  const defaultMaxCycles = options.defaultMaxCycles;
+  const defaultStaleAfterS = options.defaultStaleAfterS;
   if (!Number.isSafeInteger(hardMaxCycles) || hardMaxCycles < 0) {
     fail('INTERNAL_ERROR', 'The configured hard cycle limit is invalid.');
   }
@@ -306,10 +298,8 @@ function resolveOptions(options: JobLifecycleOptions): ResolvedOptions {
   if (!Number.isSafeInteger(defaultStaleAfterS) || defaultStaleAfterS <= 0) {
     fail('INTERNAL_ERROR', 'The configured stale threshold is invalid.');
   }
-  const workspaceRoots = options.workspaceRoots ?? (
-    platform === 'win32' ? DEFAULT_WORKSPACE_ROOTS : ['/AgentProjects', '/SallaProjects']
-  );
-  if (workspaceRoots.length === 0) fail('INTERNAL_ERROR', 'No workspace roots are configured.');
+  const workspaceRoots = options.workspaceRoots;
+  if (!Array.isArray(workspaceRoots)) fail('INTERNAL_ERROR', 'The workspace-root configuration is invalid.');
   return {
     workspaceRoots,
     platform,
@@ -415,9 +405,15 @@ function assertNoRedirectedComponents(
 /** Resolves and admits an existing child directory under a configured root. */
 export function admitWorkspace(
   value: string,
-  options: Pick<JobLifecycleOptions, 'workspaceRoots' | 'platform'> = {},
+  options: Pick<JobLifecycleOptions, 'workspaceRoots' | 'platform'>,
 ): string {
-  const resolved = resolveOptions(options);
+  const resolved = {
+    platform: options.platform,
+    workspaceRoots: options.workspaceRoots,
+  };
+  if (!Array.isArray(resolved.workspaceRoots)) {
+    fail('INTERNAL_ERROR', 'The workspace-root configuration is invalid.');
+  }
   const raw = typeof value === 'string' ? value.trim() : '';
   rejectPathSyntax(raw, resolved.platform);
 
@@ -697,10 +693,11 @@ function decisionFromSql(row: DecisionSqlRow): DecisionRecord {
   }
 }
 
-function normalizeWorkspaceFilter(value: string, platform: NodeJS.Platform): string {
-  const raw = value.trim();
-  rejectPathSyntax(raw, platform);
-  return canonicalPath(raw, platform);
+function normalizeWorkspaceFilter(
+  value: string,
+  options: Pick<JobLifecycleOptions, 'workspaceRoots' | 'platform'>,
+): string {
+  return admitWorkspace(value, options);
 }
 
 function normalizeUpdatedSince(value: string | undefined): string | null {
@@ -755,7 +752,7 @@ export function createJob(
   actor: VerifiedActorAuthInfo,
   rawInput: JobCreateInput,
   requestId: string,
-  options: JobLifecycleOptions = {},
+  options: JobLifecycleOptions,
 ): JobRecord {
   requirePrincipal(actor, 'job:create');
   const input = normalizeCreateInput(rawInput);
@@ -903,7 +900,7 @@ export function startJob(
   actor: VerifiedActorAuthInfo,
   input: JobMutationInput,
   requestId: string,
-  options: JobLifecycleOptions = {},
+  options: JobLifecycleOptions,
 ): JobRecord {
   return mutateLifecycleJob(db, audit, actor, input, 'job_start', requestId, options);
 }
@@ -914,7 +911,7 @@ export function resumeJob(
   actor: VerifiedActorAuthInfo,
   input: JobMutationInput,
   requestId: string,
-  options: JobLifecycleOptions = {},
+  options: JobLifecycleOptions,
 ): JobRecord {
   return mutateLifecycleJob(db, audit, actor, input, 'job_resume', requestId, options);
 }
@@ -947,7 +944,7 @@ export function listJobs(
   db: SqliteDatabase,
   actor: VerifiedActorAuthInfo,
   rawInput: JobListInput,
-  options: JobLifecycleOptions = {},
+  options: JobLifecycleOptions,
 ): JobListResult {
   requireReader(actor);
   const parsed = JobListInputSchema.safeParse(rawInput);
@@ -956,7 +953,7 @@ export function listJobs(
   const resolved = resolveOptions(options);
   const workspace = input.workspace === undefined
     ? null
-    : normalizeWorkspaceFilter(input.workspace, resolved.platform);
+    : normalizeWorkspaceFilter(input.workspace, resolved);
   const updatedSince = normalizeUpdatedSince(input.updated_since);
   const filter = listFilterFingerprint(input, workspace, updatedSince);
   const cursor = input.cursor === undefined ? undefined : decodeCursor(input.cursor, filter);
@@ -970,12 +967,12 @@ export function listJobs(
   if (input.authoritative_status !== undefined) {
     if (input.authoritative_status === null) clauses.push('authoritative_status IS NULL');
     else {
-      clauses.push('authoritative_status = ?');
+      clauses.push('authoritative_status IS ?');
       params.push(input.authoritative_status);
     }
   }
   if (workspace !== null) {
-    clauses.push(resolved.platform === 'win32' ? 'lower(workspace) = ?' : 'workspace = ?');
+    clauses.push('workspace = ?');
     params.push(workspace);
   }
   if (updatedSince !== null) {

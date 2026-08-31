@@ -122,13 +122,27 @@ describe('Phase 5 job lifecycle domain', () => {
 
   it('rejects a configured root and an outside directory before any write', () => {
     const rootOptions = options({ workspaceRoots: [project] });
-    const before = fixture.db.prepare('SELECT count(*) AS count FROM jobs').get();
+    const beforeJobs = fixture.db.prepare('SELECT count(*) AS count FROM jobs').get();
+    const beforeAudit = fixture.db.prepare('SELECT count(*) AS count FROM audit_log').get();
+    const beforeIdempotency = fixture.db.prepare('SELECT count(*) AS count FROM idempotency').get();
 
     expect(() => createJob(fixture.db, audit, auth(), input({ workspace: project }), 'root', rootOptions))
       .toThrowError(new JobLifecycleError('WORKSPACE_NOT_ALLOWED', 'The workspace is outside the configured workspace roots.'));
     expect(() => createJob(fixture.db, audit, auth(), input({ workspace: fixture.workspace }), 'outside', rootOptions))
       .toThrow(JobLifecycleError);
-    expect(fixture.db.prepare('SELECT count(*) AS count FROM jobs').get()).toEqual(before);
+    expect(() => createJob(fixture.db, audit, auth(), input({ workspace: `relative-${project}` }), 'relative', rootOptions))
+      .toThrow(JobLifecycleError);
+    expect(() => createJob(
+      fixture.db,
+      audit,
+      auth(),
+      input({ workspace: `${project}${process.platform === 'win32' ? '\\' : '/'}..${process.platform === 'win32' ? '\\' : '/'}project` }),
+      'traversal',
+      rootOptions,
+    )).toThrow(JobLifecycleError);
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM jobs').get()).toEqual(beforeJobs);
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log').get()).toEqual(beforeAudit);
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM idempotency').get()).toEqual(beforeIdempotency);
   });
 
   it('replays the same create request and does not hash server-owned defaults', () => {
@@ -176,6 +190,43 @@ describe('Phase 5 job lifecycle domain', () => {
       { action: 'job.start', from_state: 'CREATED', to_state: 'IN_PROGRESS', cycle: 0 },
       { action: 'job.resume', from_state: 'REPAIR', to_state: 'IN_PROGRESS', cycle: 1 },
     ]);
+  });
+
+  it('rejects stale lifecycle writes, enforces the hard cycle limit, and reaches APPROVED without workers', () => {
+    const tooLarge = input({ max_cycles: 4, title: 'Too large' });
+    expect(() => createJob(fixture.db, audit, auth(), tooLarge, 'too-large', options()))
+      .toThrowError(new JobLifecycleError('INVALID_INPUT', 'max_cycles exceeds hard_max_cycles.'));
+
+    const created = createJob(fixture.db, audit, auth(), input({ title: 'Approve without workers' }), 'create-approve', options());
+    const beforeAudit = fixture.db.prepare('SELECT count(*) AS count FROM audit_log').get();
+    expect(() => startJob(fixture.db, audit, auth(), {
+      job_id: created.job_id,
+      expected_version: 99,
+    }, 'stale-start', options())).toThrowError(
+      new JobLifecycleError('STATE_CONFLICT', 'The job version changed before the lifecycle operation was applied.'),
+    );
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM audit_log').get()).toEqual(beforeAudit);
+    expect(fixture.db.prepare('SELECT state, version FROM jobs WHERE job_id = ?').get(created.job_id)).toEqual({
+      state: 'CREATED',
+      version: 1,
+    });
+
+    const started = startJob(fixture.db, audit, auth(), {
+      job_id: created.job_id,
+      expected_version: created.version,
+    }, 'start-approve', options());
+    const approved = applyTransition(fixture.db, audit, auth(), {
+      jobId: created.job_id,
+      cycle: 0,
+      decision: 'APPROVE',
+      rationale: 'The lifecycle integration gate is satisfied.',
+      expectedVersion: started.version,
+      requestId: 'approve-without-workers',
+    });
+    expect(approved).toMatchObject({ state: 'APPROVED', authoritativeStatus: 'APPROVED', version: 3 });
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM worker_runs').get()).toEqual({ count: 0 });
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM leases').get()).toEqual({ count: 0 });
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM decisions WHERE job_id = ?').get(created.job_id)).toEqual({ count: 1 });
   });
 
   it('increments a normal FIX cycle once and records the max-cycle guard without exceeding the limit', () => {
@@ -238,6 +289,8 @@ describe('Phase 5 job lifecycle domain', () => {
 
     const page = listJobs(fixture.db, auth(), { limit: 1 }, options());
     expect(page.jobs).toHaveLength(1);
+    expect(listJobs(fixture.db, auth(), { workspace: project }, options()).jobs).toHaveLength(2);
+    expect(() => listJobs(fixture.db, auth(), { limit: 101 }, options())).toThrow(JobLifecycleError);
     if (page.next_cursor === undefined) throw new Error('expected a next cursor');
     const next = listJobs(fixture.db, auth(), { limit: 1, cursor: page.next_cursor }, options());
     expect(next.jobs).toHaveLength(1);
@@ -247,6 +300,48 @@ describe('Phase 5 job lifecycle domain', () => {
     expect(() => listJobs(fixture.db, auth(), { cursor: 'not-a-cursor' }, options()))
       .toThrow(JobLifecycleError);
     expect(listJobs(fixture.db, auth(), { authoritative_status: null }, options()).jobs.length).toBe(2);
+  });
+
+  it('returns JOB_NOT_FOUND and denies workers at both domain and registration layers', async () => {
+    expect(() => getJob(fixture.db, auth(), { job_id: 'missing-job' })).toThrowError(
+      new JobLifecycleError('JOB_NOT_FOUND', 'The requested job was not found.'),
+    );
+
+    fixture.db.prepare(
+      'INSERT INTO actors(actor_id, role, display_name, capabilities_json, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run('worker', 'worker', 'Worker', '["job:read"]', 0, '2026-08-31T00:00:00Z');
+    const workerToken = 'phase5-worker-token';
+    fixture.db.prepare(
+      'INSERT INTO actor_tokens(token_id, actor_id, token_sha256, label, disabled, expires_at, last_used_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run('worker-token', 'worker', hashAccessToken(workerToken), 'worker-session', 0, null, null, '2026-08-31T00:00:00Z');
+    const worker = createPersistentTokenResolver(fixture.db, { audit }).verifyAccessTokenSync(workerToken);
+    expect(() => getJob(fixture.db, worker, { job_id: 'missing-job' })).toThrowError(
+      new JobLifecycleError('AUTHORIZATION_DENIED', 'The verified actor cannot read job lifecycle data.'),
+    );
+    expect(() => listJobs(fixture.db, worker, {}, options())).toThrowError(
+      new JobLifecycleError('AUTHORIZATION_DENIED', 'The verified actor cannot read job lifecycle data.'),
+    );
+
+    const handler = createMcpHandler(
+      createMcpServerFactory({
+        transport: 'http',
+        version: '0.0.0-test',
+        jobs: { db: fixture.db, audit, ...options() },
+      }),
+      { legacy: 'stateless', responseMode: 'json' },
+    );
+    try {
+      const workerAuth = await createSdkTokenVerifier(createPersistentTokenResolver(fixture.db, { audit }))
+        .verifyAccessToken(workerToken);
+      const response = await handler.fetch(
+        request({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+        { authInfo: workerAuth },
+      );
+      const payload = await responsePayload(response);
+      expect((payload.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name)).toEqual(['ping']);
+    } finally {
+      await handler.close();
+    }
   });
 });
 

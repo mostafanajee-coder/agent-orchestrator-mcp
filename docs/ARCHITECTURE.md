@@ -150,7 +150,7 @@ The Phase 5 planning baseline and its authorized implementation branch add a
 proposed lifecycle staging amendment. It is not a new approved architecture
 revision and it does not retroactively alter the merged Phase 4 implementation
 on `main`. The amendment
-touches §1, §4, §6, §8, §14, §17, §19, §20, §21, and §23 only:
+touches §1, §4, §6, §8, §14, §15, §17, §18, §19, §20, §21, and §23 only:
 
 - §4 defines one guard-selected outcome for each `(from_state, transition)`
   key, so the existing `FIX`/`RETEST` verbs can select the normal or
@@ -161,6 +161,8 @@ touches §1, §4, §6, §8, §14, §17, §19, §20, §21, and §23 only:
 - §8 proposes permanent V1 `job_start`/`job_resume` lifecycle operations and
   the Phase 5 `job_get` collection restriction;
 - §14 adds the `job.resume` audit action;
+- §15 and §18 define the protected runtime `config.json` source for workspace
+  roots and bounded lifecycle defaults, with no invented POSIX roots;
 - §17 and §19 reconcile failed-CAS behavior as a no-durable-mutation result;
 - §20 and §21 distinguish the ten baseline tools from the two proposed Phase 5
   additions and split invariant ownership; and
@@ -740,7 +742,17 @@ creation. From `STALLED`, Codex may APPROVE, REJECT, CANCEL, or raise
 `max_cycles` via a `job:decide`-gated amendment — audited, and capped at a
 configured `hard_max_cycles` (default 10) it cannot exceed. The cycle-limit
 guard is a proposed Phase 5 lifecycle clarification and is not implementation
-authorization.
+authorization. The explicit Phase 5 authorization is recorded in
+`docs/PHASE5_PLAN.md`; the dependency is active only on the implementation
+branch until a later merge.
+
+**`state_reason` vocabulary.** The field is diagnostic metadata and never an
+authorization input. The current Phase 5 values are `start`, `resume`,
+`max_cycles`, and the lowercase decision names `approve`, `reject`, `fix`,
+`retest`, `verify_self`, `ignore_false_positive`, `stop`, `package`,
+`deliver`, `complete`, and `cancel`. Later runtime phases may add documented
+operational reasons such as `timeout`, `orphaned_runs`, `stale`, and `deadline`;
+they may not reinterpret an existing value as authority.
 
 **No worker appears in the Actor column anywhere.** Workers write `worker_runs`, `evidence`, and `artifacts`; they never call `applyTransition`.
 
@@ -1249,7 +1261,10 @@ failure. A normal retry starts from the known failed-init artifact boundary.
    AOM-owned connections report `recursive_triggers=ON`.
 3. **Exactly one enabled principal actor exists, with the exact internal `system` actor and no system-linked token.** Zero → "run `init`"; more than one is impossible by index, but the check reports it rather than assuming.
 4. Every configured worker's capability set is in the catalogue; every configured workspace root exists and is not a drive root.
-5. Lease HMAC key present and readable, or generated and hardened on first run.
+5. The protected Phase 5 `config.json` exists, parses against its schema, and
+   supplies the workspace roots and bounded lifecycle defaults before either
+   transport is exposed.
+6. Lease HMAC key present and readable, or generated and hardened on first run.
 
 **Bootstrap.** Under the proposed Revision 8 hand-off, `init` is the only command permitted to run with zero principals. It creates the state root, hardens `secrets\`, applies and verifies the approved migrations, creates the exact `codex` principal and internal `system` actor, issues its first token (printed once), and exits. `serve` never bootstraps.
 
@@ -1312,6 +1327,7 @@ Either the runs, the leases, and `QA_RUNNING` all exist, or none of them do. The
 
 ```
 <OS profile>\.agent-orchestrator-mcp\
+├── config.json                   # protected Phase 5 runtime configuration
 ├── data\
 │   └── orchestrator.db            # ONE database for all projects
 ├── artifacts\
@@ -1556,7 +1572,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **2** | MCP spine | Both entry points, one trivial `ping` tool, localhost guards, bearer gate, `actor_tokens` resolution | Inspector connects; invariant 37; **observed Codex protocol era recorded** |
 | **3** | Store & DB authority | Migrations `001`–`004`, all tables, seeds, **triggers T1–T8** (freeze triggers created *after* the seed inserts), canonical schema verification, repositories, init/serve SQL integrity checks, and doctor filesystem/security diagnosis | Invariants 7–15, **15a–15j** plus F-1 replacement cases (raw SQL), 16; failed-init cleanup/build-copy/transaction gates; doctor explicitly reports SQL integrity not checked by design |
 | **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, decision-scoped idempotency/CAS, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
-| **5** | Job lifecycle | `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
+| **5** | Job lifecycle | Protected `config.json`, `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34 |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, path jail, hashing, trust classes, size caps | Invariant 30 |
 | **8** | Resilience | Reaper, crash recovery, cancellation, graceful shutdown, `STALLED` paths, `audit_query` | Invariants 27, 35 |

@@ -24,8 +24,18 @@ describe('Phase 4 matrix traceability', () => {
     const all = contents.map((entry) => entry.text).join('\n');
     expect(all).not.toMatch(/INSERT\s+OR\s+REPLACE|REPLACE\s+INTO|ON\s+CONFLICT/i);
 
+    const phase5NullInsertPath = 'src/domain/jobs.ts';
     for (const entry of contents) {
-      if (/UPDATE\s+jobs\s+SET[^\r\n]*\bauthoritative_status\s*=(?!=)/i.test(entry.text)) {
+      const assignments = [...entry.text.matchAll(/\bauthoritative_status\s*=(?!=)/gi)];
+      for (const assignment of assignments) {
+        // Phase 5 creates jobs with authoritative_status hard-coded to null;
+        // it never assigns an authoritative value. All other assignments must
+        // remain in the Phase 4 decision choke point.
+        const before = entry.text.slice(0, assignment.index);
+        const phase5NullInsert = entry.path === phase5NullInsertPath
+          && /authoritative_status:\s*null/.test(entry.text)
+          && /INSERT INTO jobs/i.test(before.slice(Math.max(0, before.length - 2_000)));
+        if (phase5NullInsert) continue;
         expect(entry.path).toBe('src/domain/decide.ts');
       }
     }
