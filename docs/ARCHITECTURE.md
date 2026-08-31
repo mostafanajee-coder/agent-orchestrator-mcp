@@ -1,8 +1,8 @@
 # Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline)
 
-> **Status:** Revision 7 remains the approved Phase 3 baseline on `main`. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; this branch carries that baseline plus explicitly recorded status and ledger clarifications. The authorized implementation candidate is `codex/phase4-implementation` and is not merged.
-> Phase 4 source implementation is authorized on that branch by a subsequent Codex
-> gate. This document does not authorize merge, push, deployment, or Phase 5/6 work.
+> **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
+> `main` is now the authoritative merged Phase 4 state. This document does not
+> authorize Phase 5/6 implementation, deployment, or unrelated changes.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -12,10 +12,10 @@
 
 ### Revision 8 / Phase 4 authority and auth activation (approved implementation baseline)
 
-Revision 8 is the approved amendment governing the Phase 4 implementation
-candidate. It preserves the Revision 7 Phase 3 baseline and authorizes only the
-scoped Phase 4 work on `codex/phase4-implementation`; it does not authorize
-merge, push, deployment, or Phase 5/6 behavior.
+Revision 8 is the approved amendment governing the merged Phase 4
+implementation. It preserves the Revision 7 Phase 3 baseline and covers only
+the scoped Phase 4 work merged through PR #7; it does not authorize Phase 5/6
+behavior.
 
 The proposed Phase 4 target is schema version 6, reached by two new reviewed
 migrations:
@@ -1533,6 +1533,7 @@ Multiple Codex sessions are supported with **verified** session attribution and 
 Scope remains honest: V1 is the authority core plus one generic worker adapter. `agy` and the browser worker are designed, external, and deferred, with the agy CLI contract explicitly flagged as unverified.
 
 The Phase 3 merge is complete. The Revision 8 amendment and
-`docs/PHASE4_PLAN.md` are frozen governing artifacts from `65008a97`; the
-Phase 4 implementation candidate is now under independent review. No merge,
-push, deployment, or Phase 5/6 work is authorized by this document.
+`docs/PHASE4_PLAN.md` are governing artifacts originating at `65008a97`; the
+Phase 4 implementation is complete and merged in `main` at
+`ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. Phase 5 planning may begin only
+after a separate post-merge closure and planning authorization decision.

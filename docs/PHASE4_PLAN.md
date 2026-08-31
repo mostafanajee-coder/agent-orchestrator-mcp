@@ -1,19 +1,24 @@
 # Phase 4 Plan — Authority & Auth Activation
 
-> **APPROVED REVISION 8 IMPLEMENTATION BASELINE — PHASE 4 IMPLEMENTATION AUTHORIZED**
+> **APPROVED REVISION 8 IMPLEMENTATION BASELINE — PHASE 4 IMPLEMENTATION MERGED**
 >
 > This document carries the frozen Revision 8 planning baseline originating at
 > `65008a97`. A subsequent Codex authorization permits the scoped implementation
 > on `codex/phase4-implementation`.
 > It does not authorize merge, push, deployment, or Phase 5/6 work.
 
+Post-merge record: PR #7 merged the Phase 4 implementation into `main` at
+`ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`. The final implementation branch
+head was `29491c65dbd05ed8c568231cc7d8c9cec864c319`; this record is now closed
+for Phase 4 and does not authorize Phase 5 implementation.
+
 Date: 2026-08-31
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
 Authoritative Phase 4 base: `917a881aeab506538e55b1fac4eab12320ca9844`
 Phase 3 reviewed implementation head: `4b4a1ee3a155cf7ca412cf4477519be50b69d3d7`
 Current approved architecture baseline: `docs/ARCHITECTURE.md` Revision 8
-Architecture amendment: Revision 8 (approved implementation baseline)
-Implementation authorized by subsequent Codex gate: **YES**
+Architecture amendment: Revision 8 (approved and merged implementation baseline)
+Implementation authorization: **COMPLETED — MERGED IN PR #7**
 
 ## 0. Role, authority, and scope
 
@@ -890,9 +895,9 @@ A later Phase 4 implementation must report, at minimum:
 Architecture Revision 8 is internally coherent and preserves the merged
 Revision 7 boundary. The target schema version is 6, with migrations 005 and
 006. O-1 is a pre-audit activation gate; O-2 is an explicit
-no-conflict-resolution-write rule. The plan received independent review and
-subsequent Codex implementation authorization. The current implementation
-branch remains subject to targeted re-review and a separate Codex principal
-final review before merge.
+no-conflict-resolution-write rule. The plan received independent review,
+Codex implementation authorization, targeted re-review, principal final
+review, and merge verification through PR #7. Phase 4 is now closed; Phase 5
+planning requires a separate authorization decision.
 
-Current status: **PHASE 4 CORRECTIVE IMPLEMENTATION COMPLETE — AWAITING CODEX PRINCIPAL FINAL REVIEW**.
+Current status: **PHASE 4 IMPLEMENTATION COMPLETE AND MERGED — PHASE 5 NOT AUTHORIZED**.

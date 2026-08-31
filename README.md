@@ -9,7 +9,8 @@ triggers, not by prompt instructions.
 
 ## Status
 
-**Phase 4 — Authority and authentication activation (implementation branch; not merged).** The CLI prepares
+**Phase 4 — Authority and authentication activation (merged into `main`).** PR #7 merged the implementation
+at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`; the CLI prepares
 and protects the global state root, initializes the approved schema-v6 local SQLite store, bootstraps the
 `codex` principal and internal `system` actor, and prints the first bearer token exactly once. Serve uses the
 database-backed `actor_tokens` resolver and exposes the compatibility `ping` tool plus `codex_decide` only
