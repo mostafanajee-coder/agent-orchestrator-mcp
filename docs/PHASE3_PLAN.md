@@ -1,14 +1,14 @@
 # Phase 3 Plan — Store & Database Authority
 
-> Historical Phase 3 baseline. Phase 4 implementation is separately authorized
-> on `codex/phase4-implementation`; the Phase 4 plan and review evidence remain
-> governed by the approved planning snapshot at `65008a97d0c88b6e104994cb23408f7f46ab11f6`.
+> Historical Phase 3 baseline. Phase 4 implementation was subsequently merged
+> through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`; its plan and review
+> evidence originated at `65008a97d0c88b6e104994cb23408f7f46ab11f6`.
 
 > **IMPLEMENTED — PHASE 3 STORE & DATABASE AUTHORITY — REVISION 7 F-1 REMEDIATION**
 >
 > Phase 3 is implemented and retained as the reviewed store/DB baseline. Phase
-> 4 authority/auth activation is tracked separately and must not alter Phase 3
-> history or its approved migrations 001–004.
+> 4 authority/auth activation is complete and must not alter Phase 3 history or
+> its approved migrations 001–004.
 
 Date: 2026-08-30
 Authoritative repository: `C:\AgentProjects\agent-orchestrator-mcp`
