@@ -26,9 +26,10 @@ merged at `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed head
 existing Codex authority boundary. Worker execution, leases, evidence/artifacts, resilience loops, and all
 Phase 6+ behavior remain outside the Phase 5 implementation.
 
-**Phase 6 — Worker runtime (implementation in progress on `codex/phase6-implementation`).** Codex has
-authorized the scoped worker registry, bounded process protocol, run/lease lifecycle, `qa_dispatch`,
-`run_report`, and `run_status` surface on this branch. No Phase 6 change is merged into `main` yet.
+**Phase 6 — Worker runtime (complete locally on `codex/phase6-implementation`; not merged).** Codex has
+authorized and the branch implements the scoped worker registry, bounded process protocol, run/lease
+lifecycle, `qa_dispatch`, `run_report`, and `run_status` surface. The final independent implementation
+review and merge gate remain pending; no Phase 6 change is merged into `main` yet.
 Evidence/artifact handling, recovery loops, remote workers, and all Phase 7+ behavior remain out of scope.
 
 The approved design and phase plans are in
