@@ -65,8 +65,11 @@ has started on `codex/phase10-authority-plan` from published `main` at
 worker pipeline and keeps Codex as the sole authority. The exact external
 worker contract must be verified before implementation authorization. No Phase
 10 source, migration, MCP tool, deployment, push, PR, or implementation work
-has started. The plan is in
-[`docs/PHASE10_PLAN.md`](docs/PHASE10_PLAN.md).
+has started. The plan has been independently reviewed and Codex-adjudicated as
+a bounded proposal; the external worker contract remains to be evidenced
+before any implementation decision. The plan is in
+[`docs/PHASE10_PLAN.md`](docs/PHASE10_PLAN.md), and the adjudication is in
+[`docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md`](docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md).
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and

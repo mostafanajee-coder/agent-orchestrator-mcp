@@ -12,7 +12,8 @@
 > Revision 12 below records the Phase 9 hardening plan and its implementation,
 > merged and published in `main` and `origin/main`.
 > Revision 13 below records the documentation-only Phase 10 plan; Phase 10
-> implementation has not started and is not authorized.
+> implementation has not started and is not authorized. Its Codex adjudication
+> is recorded in the Phase 10 planning documents.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -2113,3 +2114,7 @@ passes independent architecture review and Codex records:
 ```text
 AUTHORIZE PHASE 10 IMPLEMENTATION: YES / NO
 ```
+
+The independent review and Codex finding-by-finding adjudication are recorded
+in
+[`docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md`](PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md).
