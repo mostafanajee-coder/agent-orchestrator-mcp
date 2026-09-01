@@ -1,4 +1,4 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Published / Revision 11 Phase 8 Published / Revision 12 Phase 9 Published)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Published / Revision 11 Phase 8 Published / Revision 12 Phase 9 Published / Revision 13 Phase 10 Plan)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
 > Revision 9 records the scoped Phase 6 worker runtime, now published in
@@ -11,6 +11,8 @@
 > Revision 11 below records the published Phase 8 resilience and recovery implementation;
 > Revision 12 below records the Phase 9 hardening plan and its implementation,
 > merged and published in `main` and `origin/main`.
+> Revision 13 below records the documentation-only Phase 10 plan; Phase 10
+> implementation has not started and is not authorized.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1592,6 +1594,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Revision 10 published; Windows correction and closure recorded at `d0ce68c` |
 | **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation merged and published at `3f03168c` |
 | **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, root `SECURITY.md`, README, two-session Codex drill | Accepted and published in `main`/`origin/main` at `398785ea` |
+| **10** | External deterministic browser worker | First post-V1 integration plan using the existing worker pipeline; no core expansion proposed | Documentation-only plan on `codex/phase10-authority-plan`; implementation not started |
 
 Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
 
@@ -2072,3 +2075,41 @@ separate operation.
 
 The local post-merge record is in
 [`docs/PHASE9_POST_MERGE_CLOSURE.md`](PHASE9_POST_MERGE_CLOSURE.md).
+
+---
+
+## 28. Revision 13 / Phase 10 external deterministic browser worker plan
+
+**Status: documentation-only planning.** Revision 13 starts from the published
+Phase 9 `main` state at
+`c0f678defb5ba0177ef145e1d7f7b8ae82b84bd8`, whose tree is
+`f3759e83ef167f0076e02b033bd5e06f9e90f3ff`. It proposes the first ordered
+post-V1 integration: one external deterministic browser worker using the
+existing local worker registry, process runtime, Worker Protocol V1,
+evidence/artifact admission, and Codex authority boundary.
+
+The complete planning contract is in
+[`docs/PHASE10_PLAN.md`](PHASE10_PLAN.md). The plan introduces no schema
+change, migration, MCP business tool, capability, actor role, worker message,
+protocol-version change, remote/cloud transport, scheduler, autonomous retry,
+telemetry platform, or Phase 11 feature.
+
+The exact external worker identity, version, invocation contract, platform
+support, destination policy, and output compatibility are not assumed. They
+are blocking evidence items before any implementation authorization. If the
+integration requires changing `src/domain/`, `src/store/`, authoritative
+transitions, or durable schema, that is an architecture failure signal and the
+work must return to review.
+
+The governing invariant is:
+
+> **A browser worker may produce bounded advisory observations and artifacts;
+> it may never become an authority, select arbitrary execution policy, or
+> require an AOM core redesign.**
+
+Phase 10 implementation remains unauthorized until an exact planning snapshot
+passes independent architecture review and Codex records:
+
+```text
+AUTHORIZE PHASE 10 IMPLEMENTATION: YES / NO
+```

@@ -59,6 +59,15 @@ published in `main`/`origin/main` at `398785ea48926b52829a0fd1fa4c6d8d8c6e0ef8`;
 post-merge record is in
 [`docs/PHASE9_POST_MERGE_CLOSURE.md`](docs/PHASE9_POST_MERGE_CLOSURE.md).
 
+**Phase 10 — External deterministic browser worker (planning only).** Planning
+has started on `codex/phase10-authority-plan` from published `main` at
+`c0f678defb5ba0177ef145e1d7f7b8ae82b84bd8`. The proposal uses the existing
+worker pipeline and keeps Codex as the sole authority. The exact external
+worker contract must be verified before implementation authorization. No Phase
+10 source, migration, MCP tool, deployment, push, PR, or implementation work
+has started. The plan is in
+[`docs/PHASE10_PLAN.md`](docs/PHASE10_PLAN.md).
+
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
 [docs/PHASE5_PLAN.md](docs/PHASE5_PLAN.md), [docs/PHASE6_PLAN.md](docs/PHASE6_PLAN.md), and
