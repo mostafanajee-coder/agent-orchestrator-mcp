@@ -72,6 +72,8 @@ before any implementation decision. The plan is in
 [`docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md`](docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md).
 The external-worker inventory remains unresolved and is recorded in
 [`docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md`](docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md).
+Chrome is the selected engine candidate, with a dedicated non-personal profile
+policy; the external AOM Worker contract is still unverified.
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and

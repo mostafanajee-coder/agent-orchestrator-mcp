@@ -2102,6 +2102,12 @@ integration requires changing `src/domain/`, `src/store/`, authoritative
 transitions, or durable schema, that is an architecture failure signal and the
 work must return to review.
 
+Chrome is the current engine candidate. The worker must use a dedicated,
+operator-owned or fresh temporary profile, never a personal Chrome profile or
+an already-running browser process. Profile paths, browser flags, executable
+selection, and destination policy remain external configuration and are not
+job-controlled inputs.
+
 The governing invariant is:
 
 > **A browser worker may produce bounded advisory observations and artifacts;

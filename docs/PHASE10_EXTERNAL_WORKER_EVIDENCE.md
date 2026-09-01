@@ -26,16 +26,18 @@ The following observations were made with read-only commands:
 
 | Item | Observation | AOM Worker V1 conclusion |
 |---|---|---|
-| Google Chrome | Installed at the standard Windows application path | Browser executable only; not an AOM worker |
+| Google Chrome | Installed at the standard Windows application path | Selected engine candidate; still not an AOM worker |
 | Microsoft Edge | Installed at the standard Windows application path | Browser executable only; not an AOM worker |
 | Playwright CLI | `C:\Python37\Scripts\playwright.exe`, version `1.35.0` | Test/browser runner; no evidence of AOM NDJSON worker behavior |
 | `agy` | Available as `agy.exe` and separately deferred by architecture | Later model adapter; not the Phase 10 browser worker |
 | Hermes | Used by Antigravity, but not available as a `hermes` command in this PowerShell session | General assistant/reviewer; not treated as an AOM worker without a verified contract |
 
 A browser binary or a test runner is not interchangeable with an AOM worker.
-No executable was invoked beyond the safe Playwright version probe. No browser
-profile, cookie, credential, private destination, or uncontrolled worker output
-was accessed.
+The agreed planning policy is to use a dedicated, operator-owned Chrome
+profile or a fresh temporary profile, never one of the operator's personal
+profiles. No profile was created or opened. No executable was invoked beyond
+the safe Playwright version probe. No cookie, credential, private destination,
+or uncontrolled worker output was accessed.
 
 ## 4. Contract evidence status
 

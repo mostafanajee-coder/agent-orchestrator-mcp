@@ -191,6 +191,34 @@ The candidate operation vocabulary is deliberately small:
 | `assert_url` | Confirm the current page matches a configured destination | No URL chosen by the job |
 | `screenshot` | Request a bounded capture through existing artifact handling | Server owns staging and metadata |
 
+### 7.1 Dedicated Chrome profile policy
+
+Chrome is the selected browser-engine candidate for the planning baseline, but
+the worker must not attach to any of the operator's personal Chrome profiles.
+The external worker must use an operator-owned, dedicated AOM browser profile
+or a fresh temporary profile with these rules:
+
+- the profile data directory is fixed by external worker configuration and is
+  outside cloud-synchronised directories;
+- a logical profile ID maps to a fixed `user_data_dir` and
+  `profile_directory`; jobs never provide either filesystem path or Chrome
+  flag;
+- the preferred deterministic fixture mode creates a fresh profile per run or
+  uses a sanitized template containing no credentials, cookies, or personal
+  browsing state;
+- a persistent dedicated profile is never opened concurrently by multiple
+  runs, and the worker must fail predictably on Chrome's profile lock rather
+  than attach to another process;
+- an already-running personal Chrome process is never reused;
+- there is no silent fallback between Chrome, Edge, or another browser; the
+  configured executable and version are explicit and validated;
+- profile selection does not grant access to credentials, authenticated
+  sessions, browser extensions, or arbitrary external destinations.
+
+The profile policy is an external-worker configuration boundary, not a new AOM
+schema or MCP input. The exact worker, executable, version, and profile
+configuration remain unverified until the evidence gate in §6 is satisfied.
+
 No `eval`, arbitrary script, arbitrary command, credential, cookie, upload,
 download, form submission, click, purchase, deletion, or account operation is
 part of this candidate contract. If the actual worker requires any of those
@@ -385,7 +413,7 @@ BASE 4 + REGISTRY 6 + CONTRACT 8 + PROTOCOL 6
 | P10-CON-03 | Destination policy rejects non-admitted destinations |
 | P10-CON-04 | Worker cannot change run, job, cycle, or destination binding |
 | P10-CON-05 | Worker/job cannot select arbitrary executables or flags |
-| P10-CON-06 | Credentials, cookies, and secret-bearing browser state are excluded |
+| P10-CON-06 | Credentials, cookies, personal profiles, and secret-bearing browser state are excluded |
 | P10-CON-07 | Irreversible external actions are excluded |
 | P10-CON-08 | Browser policy remains external/config-owned rather than authority-owned |
 
