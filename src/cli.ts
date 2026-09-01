@@ -16,6 +16,7 @@ import { readPackageVersion } from './version.js';
 import { readLeaseKey } from './secrets/leaseKey.js';
 import { ProcessRuntime } from './workers/processRuntime.js';
 import type { Phase6WorkerToolOptions } from './mcp/tools/phase6.js';
+import type { Phase7EvidenceArtifactToolOptions } from './mcp/tools/phase7.js';
 import type { Phase4Runtime } from './authority/runtime.js';
 import { cancelRunsForJob } from './domain/runs.js';
 
@@ -50,10 +51,11 @@ function createPhase6Runtime(
     audit: runtime.audit,
     registry,
     leaseKey,
+    artifactsRoot: commandContext.layout.artifacts,
     ...(reportEndpoint === undefined ? {} : { reportEndpoint }),
   });
   return {
-    options: { db: runtime.db, audit: runtime.audit, registry, leaseKey, processRuntime },
+    options: { db: runtime.db, audit: runtime.audit, registry, leaseKey, artifactsRoot: commandContext.layout.artifacts, processRuntime },
     processRuntime,
   };
 }
@@ -78,9 +80,16 @@ export const defaultCommands: CliCommands = {
       try {
         const phase5Config = loadPhase5Config(commandContext);
         const phase6 = createPhase6Runtime(commandContext, runtime);
-        const authority = {
+        const phase7: Phase7EvidenceArtifactToolOptions = {
           db: runtime.db,
           audit: runtime.audit,
+          artifactsRoot: commandContext.layout.artifacts,
+          leaseKey: phase6.options.leaseKey,
+        };
+          const authority = {
+            db: runtime.db,
+            audit: runtime.audit,
+            phase7: { artifactsRoot: commandContext.layout.artifacts, platform: commandContext.platform },
           onJobCancelled: (jobId: string, requestId: string): void => {
             phase6.processRuntime.cancelJob(jobId);
             cancelRunsForJob(runtime.db, runtime.audit, jobId, requestId, phase6.options);
@@ -93,6 +102,7 @@ export const defaultCommands: CliCommands = {
           authority,
           jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
           workers: phase6.options,
+          artifacts: phase7,
           verifyStartup: () => undefined,
           onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
         });
@@ -126,9 +136,16 @@ export const defaultCommands: CliCommands = {
         ? undefined
         : `http://${MCP_HTTP_HOST}:${String(options.port)}${MCP_HTTP_PATH}`;
       const phase6 = createPhase6Runtime(commandContext, runtime, reportEndpoint);
+      const phase7: Phase7EvidenceArtifactToolOptions = {
+        db: runtime.db,
+        audit: runtime.audit,
+        artifactsRoot: commandContext.layout.artifacts,
+        leaseKey: phase6.options.leaseKey,
+      };
       const authority = {
         db: runtime.db,
         audit: runtime.audit,
+        phase7: { artifactsRoot: commandContext.layout.artifacts, platform: commandContext.platform },
         onJobCancelled: (jobId: string, requestId: string): void => {
           phase6.processRuntime.cancelJob(jobId);
           cancelRunsForJob(runtime.db, runtime.audit, jobId, requestId, phase6.options);
@@ -139,6 +156,7 @@ export const defaultCommands: CliCommands = {
         authority,
         jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
         workers: phase6.options,
+        artifacts: phase7,
         ...(options.port === undefined ? {} : { port: options.port }),
       });
       server.once('close', phase6.processRuntime.close.bind(phase6.processRuntime));
@@ -176,7 +194,7 @@ export function renderHelp(version: string): string {
     '  init             Prepare state, initialize schema, and bootstrap Phase 4 authority',
     '  doctor           Report state and DB-file security. Read-only; repairs nothing',
     '  token            Issue, list, or revoke local persistent actor tokens',
-    '  serve            Serve the Phase 5/6 MCP spine (--http or --stdio)',
+    '  serve            Serve the Phase 5/6/7 MCP spine (--http or --stdio)',
     '',
     'Token options:',
     '  token issue --label LABEL [--expires-at UTC_TIMESTAMP]',
@@ -199,9 +217,9 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 6 implementation branch. Persistent auth, Codex authority, job lifecycle, worker runs, and ping.',
+    '  Phase 7 implementation branch. Persistent auth, Codex authority, job lifecycle, worker runs, evidence, and artifacts.',
     '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
-    '  Evidence, artifacts, resilience, remote workers, and later phases remain out of scope.',
+    '  Resilience, remote workers, and later phases remain out of scope.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
 }

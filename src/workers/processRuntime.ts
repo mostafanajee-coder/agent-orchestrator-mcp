@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 
 import type { AuditWriter } from '../authority/audit.js';
 import type { SqliteDatabase } from '../store/db.js';
+import { addRuntimeEvidence } from '../domain/evidence.js';
+import { ensureArtifactStagingDirectory, registerRuntimeArtifact } from '../domain/artifacts.js';
 import {
   loadRunForRuntime,
   renderWorkerArguments,
@@ -14,7 +16,14 @@ import {
   type RunFailureClass,
   type RunSummary,
 } from '../domain/runs.js';
-import { parseWorkerMessage, serializeStartEnvelope, WorkerProtocolError, type WorkerMessage } from './protocol.js';
+import {
+  parseWorkerMessage,
+  serializeStartEnvelope,
+  WorkerProtocolError,
+  type WorkerArtifactMessage,
+  type WorkerEvidenceMessage,
+  type WorkerMessage,
+} from './protocol.js';
 import type { WorkerDefinitionFile } from '../config/phase6.js';
 
 const MAX_LINE_BYTES = 65_536;
@@ -28,6 +37,7 @@ interface ActiveRun {
   readonly worker: WorkerDefinitionFile;
   readonly lease: string;
   readonly child: ChildProcessWithoutNullStreams;
+  readonly artifactStagingDir?: string;
   buffer: Buffer;
   totalOutputBytes: number;
   messageCount: number;
@@ -36,6 +46,8 @@ interface ActiveRun {
   terminal: WorkerMessage | undefined;
   protocolFailure: string | undefined;
   stderrTail: Buffer;
+  readonly evidenceMessages: WorkerEvidenceMessage[];
+  readonly artifactMessages: WorkerArtifactMessage[];
   timeoutTimer: NodeJS.Timeout | undefined;
   forceTimer: NodeJS.Timeout | undefined;
   timedOut: boolean;
@@ -47,6 +59,7 @@ export interface ProcessRuntimeDependencies extends Phase6RunOptions {
   readonly db: SqliteDatabase;
   readonly audit: AuditWriter;
   readonly reportEndpoint?: string;
+  readonly artifactsRoot?: string;
 }
 
 function nowRequestId(): string {
@@ -151,6 +164,37 @@ export class ProcessRuntime {
       return;
     }
 
+    let artifactStagingDir: string | undefined;
+    if (this.dependencies.artifactsRoot !== undefined) {
+      try {
+        artifactStagingDir = ensureArtifactStagingDirectory(
+          this.dependencies.artifactsRoot,
+          started.job_id,
+          started.cycle,
+          started.run_id,
+        );
+      } catch {
+        try {
+          settleRuntimeRun(
+            this.dependencies.db,
+            this.dependencies.audit,
+            lease,
+            nowRequestId(),
+            'FAILED',
+            'NONE',
+            'SPAWN_FAILED',
+            null,
+            undefined,
+            null,
+            this.dependencies,
+          );
+        } catch {
+          // Preserve the runtime failure in the run state when possible.
+        }
+        return;
+      }
+    }
+
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(
@@ -191,6 +235,7 @@ export class ProcessRuntime {
       worker,
       lease,
       child,
+      ...(artifactStagingDir === undefined ? {} : { artifactStagingDir }),
       buffer: Buffer.alloc(0),
       totalOutputBytes: 0,
       messageCount: 0,
@@ -199,6 +244,8 @@ export class ProcessRuntime {
       terminal: undefined,
       protocolFailure: undefined,
       stderrTail: Buffer.alloc(0),
+      evidenceMessages: [],
+      artifactMessages: [],
       timeoutTimer: undefined,
       forceTimer: undefined,
       timedOut: false,
@@ -247,6 +294,7 @@ export class ProcessRuntime {
         params: loaded.request.params,
         workspace: loaded.workspace,
         deadline_at: loaded.deadline_at ?? deadline,
+        ...(artifactStagingDir === undefined ? {} : { artifact_staging_dir: artifactStagingDir }),
         ...(loaded.request.delivery === 'mcp_pull'
           ? {
             lease,
@@ -341,6 +389,18 @@ export class ProcessRuntime {
       active.lastProgressSeq = message.seq;
       return;
     }
+    if (message.type === 'artifact') {
+      if (active.artifactMessages.some((candidate) => candidate.path === message.path)) {
+        active.protocolFailure = 'MALFORMED_OUTPUT';
+        return;
+      }
+      active.artifactMessages.push(message);
+      return;
+    }
+    if (message.type === 'evidence') {
+      active.evidenceMessages.push(message);
+      return;
+    }
     active.terminal = message;
   }
 
@@ -426,6 +486,18 @@ export class ProcessRuntime {
     code: number | null,
     usage?: Record<string, number>,
   ): void {
+    let effectiveStatus = status;
+    let effectiveVerdict = verdict;
+    let effectiveFailure = failure;
+    let effectiveSummary = summary;
+    try {
+      this.recordWorkerOutputs(active);
+    } catch {
+      effectiveStatus = 'MALFORMED';
+      effectiveVerdict = 'NONE';
+      effectiveFailure = 'MALFORMED_OUTPUT';
+      effectiveSummary = null;
+    }
     try {
       if (active.stderrTail.byteLength > 0) {
         setRunStderr(
@@ -439,10 +511,10 @@ export class ProcessRuntime {
         this.dependencies.audit,
         active.lease,
         nowRequestId(),
-        status,
-        verdict,
-        failure,
-        summary,
+        effectiveStatus,
+        effectiveVerdict,
+        effectiveFailure,
+        effectiveSummary,
         usage,
         code,
         this.dependencies,
@@ -450,6 +522,67 @@ export class ProcessRuntime {
     } catch {
       // Preserve the original run state and keep the process runtime from
       // taking down the transport after a concurrent terminal report.
+    }
+  }
+
+  private recordWorkerOutputs(active: ActiveRun): void {
+    if (active.evidenceMessages.length === 0 && active.artifactMessages.length === 0) return;
+    if (this.dependencies.artifactsRoot === undefined || active.artifactStagingDir === undefined) {
+      throw new Error('Phase 7 worker output requires an artifact staging directory.');
+    }
+    const artifactIds = new Map<string, string>();
+    for (const message of active.artifactMessages) {
+      const record = registerRuntimeArtifact(
+        this.dependencies.db,
+        this.dependencies.audit,
+        active.lease,
+        {
+          job_id: active.run.job_id,
+          cycle: active.run.cycle,
+          run_id: active.run.run_id,
+          source_path: message.path,
+          kind: message.kind,
+          ...(message.mime === undefined ? {} : { mime: message.mime }),
+          ...(message.label === undefined ? {} : { label: message.label }),
+        },
+        nowRequestId(),
+        {
+          artifactsRoot: this.dependencies.artifactsRoot,
+          leaseKey: this.dependencies.leaseKey,
+          allowExpired: true,
+          ...(this.dependencies.clock === undefined ? {} : { clock: this.dependencies.clock }),
+        },
+      );
+      artifactIds.set(message.path, record.artifact_id);
+    }
+    for (const message of active.evidenceMessages) {
+      const artifactId = message.artifact_path === undefined
+        ? undefined
+        : artifactIds.get(message.artifact_path);
+      if (message.artifact_path !== undefined && artifactId === undefined) {
+        throw new Error('The worker evidence references an unknown artifact path.');
+      }
+      addRuntimeEvidence(
+        this.dependencies.db,
+        this.dependencies.audit,
+        active.lease,
+        {
+          job_id: active.run.job_id,
+          cycle: active.run.cycle,
+          run_id: active.run.run_id,
+          kind: message.kind,
+          ...(message.severity === undefined ? {} : { severity: message.severity }),
+          summary: message.summary,
+          ...(message.detail === undefined ? {} : { detail: message.detail }),
+          ...(artifactId === undefined ? {} : { artifact_id: artifactId }),
+        },
+        nowRequestId(),
+        {
+          leaseKey: this.dependencies.leaseKey,
+          allowExpired: true,
+          ...(this.dependencies.clock === undefined ? {} : { clock: this.dependencies.clock }),
+        },
+      );
     }
   }
 }

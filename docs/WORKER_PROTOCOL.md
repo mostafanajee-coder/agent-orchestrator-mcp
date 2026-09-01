@@ -1,7 +1,8 @@
 # AOM — PHASE 6 WORKER PROTOCOL
 
-> Normative Phase 6 contract for the authorized implementation branch. This
-> document does not authorize later phases, merge, deployment, or remote use.
+> Normative Phase 6 contract plus the explicitly reviewed Phase 7 message
+> extension on the authorized implementation branch. This document does not
+> authorize later phases, merge, deployment, or remote use.
 
 Version: **1**
 Owner: Phase 6 worker-runtime planning
@@ -16,9 +17,9 @@ and carries bounded progress or result messages back to the orchestrator. A
 worker result is advisory runtime data. It is never a job decision and never
 changes an authoritative job milestone.
 
-Phase 6 protocol messages do not carry evidence or artifact collections. Those
-payloads belong to later phases and must not be smuggled into a generic
-`params`, `detail`, or free-form message field.
+The Phase 6 baseline messages do not carry evidence or artifact collections.
+Revision 10 adds the explicit Phase 7 message types in §12; they are not
+accepted as arbitrary fields on a Phase 6 result.
 
 The protocol is intended for the generic local `process` adapter. External,
 cloud, browser, and remote worker transports are outside this contract.
@@ -345,7 +346,70 @@ The exact `workers.json` registry schema is defined in
 `docs/PHASE6_PLAN.md` §5. This protocol does not add registry fields or permit
 worker-supplied execution policy.
 
-## 12. Implementation and review gate
+## 12. Phase 7 evidence/artifact extension
+
+Revision 10 adds two non-terminal worker message types. They may appear before
+the single terminal `result` or `error` message and are admitted only through
+the Phase 7 domain validators.
+
+### 12.1 `artifact`
+
+```json
+{
+  "type": "artifact",
+  "path": "result.txt",
+  "kind": "report",
+  "mime": "text/plain",
+  "label": "worker result"
+}
+```
+
+`path` is a relative path inside the server-created run staging directory. It
+is not a final database path and cannot contain an absolute/device prefix,
+traversal, alternate data stream, reserved device name, symlink, or reparse
+point. `kind` is at most 64 bytes, `mime` 128 bytes, and `label` 256 bytes.
+
+### 12.2 `evidence`
+
+```json
+{
+  "type": "evidence",
+  "kind": "assertion",
+  "severity": "info",
+  "summary": "bounded worker observation",
+  "detail": { "source": "fixture" },
+  "artifact_path": "result.txt"
+}
+```
+
+`summary` is at most 2,048 bytes and serialized `detail` is at most 65,536
+bytes. `artifact_path`, when present, must match one artifact message from the
+same run. The server assigns the worker trust class and source actor; the
+message cannot select either value.
+
+### 12.3 Ordering and persistence
+
+The Phase 7 pipe sequence is:
+
+```text
+start (with server-created artifact_staging_dir)
+  -> ready?
+  -> progress* | artifact* | evidence*
+  -> result | error
+  -> process completion
+```
+
+The runtime copies staged files into the global artifact root, computes their
+byte count and SHA-256 digest, then records the artifact and evidence through
+the shared admission path. A message never changes an authoritative job state,
+creates a decision, or consumes the run lease. `mcp_pull` uses the same logical
+contracts through the Phase 7 MCP operations.
+
+The Phase 7 extension remains bounded by the Phase 6 line, output, and message
+limits. Unknown fields and unknown message types remain invalid. A malformed
+Phase 7 message cannot produce a successful run.
+
+## 13. Implementation and review gate
 
 This contract became implementable only after:
 
@@ -361,4 +425,6 @@ implementation review and merge gate succeed:
 
 ```text
 PHASE 6 IMPLEMENTATION AUTHORIZED: YES — BRANCH ONLY
+PHASE 7 IMPLEMENTATION AUTHORIZED: YES — codex/phase7-implementation only
+PHASE 7 MERGE AUTHORIZED: NO
 ```

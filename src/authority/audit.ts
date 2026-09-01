@@ -32,6 +32,12 @@ export const AUDIT_ACTION_VALUES = [
   'lease.consumed',
   'lease.rejected',
   'system.runs_settled',
+  'evidence.add',
+  'evidence.rejected',
+  'artifact.register',
+  'artifact.rejected',
+  'artifact.hash_mismatch',
+  'artifact.quota_rejected',
   'codex.decide',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];

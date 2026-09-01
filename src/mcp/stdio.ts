@@ -13,6 +13,7 @@ import { createMcpServerFactory } from './server.js';
 import type { Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import type { Phase6WorkerToolOptions } from './tools/phase6.js';
+import type { Phase7EvidenceArtifactToolOptions } from './tools/phase7.js';
 
 interface CommonStdioServerOptions {
   readonly authInfo: ActorAuthInfo;
@@ -23,6 +24,7 @@ interface CommonStdioServerOptions {
   readonly authority?: Phase4AuthorityToolOptions;
   readonly jobs?: Phase5JobToolOptions;
   readonly workers?: Phase6WorkerToolOptions;
+  readonly artifacts?: Phase7EvidenceArtifactToolOptions;
 }
 
 export interface StdioServerOptions extends CommonStdioServerOptions {
@@ -44,6 +46,7 @@ function startVerifiedStdioServer(options: CommonStdioServerOptions): StdioServe
       ...(options.authority === undefined ? {} : { authority: options.authority }),
       ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
       ...(options.workers === undefined ? {} : { workers: options.workers }),
+      ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
     }),
     stdioOptions,
   );
@@ -69,6 +72,7 @@ export async function startAuthenticatedStdioServer(options: {
   readonly authority?: Phase4AuthorityToolOptions;
   readonly jobs?: Phase5JobToolOptions;
   readonly workers?: Phase6WorkerToolOptions;
+  readonly artifacts?: Phase7EvidenceArtifactToolOptions;
 }): Promise<StdioServerHandle> {
   options.verifyStartup();
   const authInfo = await options.resolver.verifyAccessToken(options.token);
@@ -80,6 +84,7 @@ export async function startAuthenticatedStdioServer(options: {
     ...(options.authority === undefined ? {} : { authority: options.authority }),
     ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
     ...(options.workers === undefined ? {} : { workers: options.workers }),
+    ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
   });
 }
 
@@ -93,6 +98,7 @@ export function startEnvironmentStdioServer(options: {
   readonly authority?: Phase4AuthorityToolOptions;
   readonly jobs?: Phase5JobToolOptions;
   readonly workers?: Phase6WorkerToolOptions;
+  readonly artifacts?: Phase7EvidenceArtifactToolOptions;
 }): StdioServerHandle {
   options.verifyStartup();
   const authInfo = authenticateEnvironmentToken(options.environment);
@@ -104,5 +110,6 @@ export function startEnvironmentStdioServer(options: {
     ...(options.authority === undefined ? {} : { authority: options.authority }),
     ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
     ...(options.workers === undefined ? {} : { workers: options.workers }),
+    ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
   });
 }

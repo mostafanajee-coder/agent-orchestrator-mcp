@@ -1,20 +1,21 @@
 # AOM — PHASE 7 EVIDENCE AND ARTIFACT PLAN
 
-> **Status: documentation-only planning baseline.** This document proposes the
-> Phase 7 architecture and implementation boundary. It does not authorize
-> source changes, migrations, new MCP tools, deployment, push, pull request,
-> or merge.
+> **Status: approved Phase 7 implementation baseline.** This document records
+> the reviewed Revision 10 boundary and the separate Codex authorization for
+> `codex/phase7-implementation`. Merge, deployment, push, and pull request
+> remain unauthorized.
 
 Date: 2026-09-01
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
-Planning branch: `codex/phase7-authority-plan`
+Approved planning snapshot: `96cdaa587a6551e40e833eba1a63ad252dc99bd3`
+Implementation branch: `codex/phase7-implementation`
 Authoritative base: `main` and `origin/main` at
 `88670743f8a443bbf3b71c9f379199deca42d512`
 Tree: `477235e7474e6930c37afcac9149dcb5f5b4388b`
 Proposed architecture amendment: **Revision 10**
 Current schema: **version 6**
 Proposed schema version: **7**, subject to independent review
-Implementation authorization: **NO**
+Implementation authorization: **YES — Codex decision recorded on `codex/phase7-implementation`**
 
 ## 0. Governance and authority
 
@@ -33,13 +34,20 @@ published Phase 6 baseline
   -> implementation review, final merge gate, and post-merge closure
 ```
 
-No wording in this plan is permission to implement. A later implementation
-branch must be created from the exact approved `main` base only after the
-separate authorization decision.
+The original planning snapshot did not itself authorize implementation. The
+separate authorization decision has now been recorded for the implementation
+branch created from the published Phase 6 `main` base:
 
-This planning branch must remain documentation-only. It must not change
-`src/`, tests, migrations, schema fingerprints, package manifests, CI, or
-runtime configuration.
+```text
+AUTHORIZE PHASE 7 IMPLEMENTATION: YES
+```
+
+This authorization covers only the Revision 10 scope in this document. It does
+not authorize Phase 8, Phase 9, deployment, Push, PR creation, or Merge.
+
+The implementation branch may change only the source, tests, migrations,
+schema fingerprints, and runtime wiring required by this plan. It must not
+introduce Phase 8/9 behavior, deployment, Push, PR creation, or Merge.
 
 ## 1. Inherited Phase 6 baseline
 
@@ -185,6 +193,10 @@ never taken from an untrusted request field.
 The operation returns the server-generated `evidence_id`, assigned trust,
 source actor, job/cycle/run binding, and creation time. It never changes an
 authoritative job status.
+
+The first implementation also caps a job at 1,024 evidence rows. The count is
+checked inside the write transaction and existing evidence is never replaced
+or removed when the cap is reached.
 
 Evidence rows are immutable after insertion. Repeating the same idempotency
 request returns the original result; reusing its key with a different request
@@ -550,9 +562,9 @@ Any answer that materially changes scope, schema, authority, or phase ownership
 must be recorded in the review findings and adjudicated by Codex before
 implementation planning is frozen.
 
-## 12. Required review sequence
+## 12. Review and implementation sequence
 
-1. Freeze this documentation-only snapshot.
+1. Freeze the documentation-only planning snapshot.
 2. Provide `PHASE7_PLAN.md`, the Revision 10 section of `ARCHITECTURE.md`,
    `PHASE6_POST_MERGE_CLOSURE.md`, `PHASE6_PLAN.md`, and
    `WORKER_PROTOCOL.md` to one independent architecture reviewer.
@@ -566,16 +578,19 @@ implementation planning is frozen.
 AUTHORIZE PHASE 7 IMPLEMENTATION: YES / NO
 ```
 
-8. If and only if that decision is YES, create the Phase 7 implementation branch
-   from the exact approved published `main` base.
+8. The current branch was created from the exact approved published `main` base
+   and carries this approved planning snapshot. Source work is authorized only
+   within Revision 10 as recorded above.
 
 ## 13. Current authorization state
 
 ```text
 PHASE 6: COMPLETE AND PUBLISHED
-PHASE 7 PLAN: DOCUMENTATION-ONLY
-PHASE 7 IMPLEMENTATION: NOT STARTED
-PHASE 7 IMPLEMENTATION AUTHORIZED: NO
+PHASE 7 PLAN: REVIEWED AND ADJUDICATED
+PHASE 7 IMPLEMENTATION: IN PROGRESS ON codex/phase7-implementation
+PHASE 7 IMPLEMENTATION AUTHORIZED: YES — Codex decision recorded
+PHASE 7 MERGE AUTHORIZED: NO
+PHASE 8 STARTED: NO
 ```
 
-**PHASE 7 ARCHITECTURE PLAN: READY FOR INDEPENDENT REVIEW**
+**PHASE 7 IMPLEMENTATION AUTHORIZED — SCOPE LIMITED TO REVISION 10**

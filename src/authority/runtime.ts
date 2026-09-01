@@ -42,10 +42,10 @@ function openVerifiedDatabase(context: CommandContext): SqliteDatabase {
   try {
     runMigrations(opened.db, { fresh: false });
     const integrity = verifyDatabaseIntegrity(opened.db);
-    if (integrity.schemaVersion !== 6) {
+    if (integrity.schemaVersion !== 7) {
       throw new SecurityError(
-        'Phase 4 requires the database to reach schema version 6 before serving.',
-        'Run the approved Phase 4 init/migration path and retry serve.',
+        'Phase 7 requires the database to reach schema version 7 before serving.',
+        'Run the approved Phase 7 init/migration path and retry serve.',
       );
     }
     const chain = verifyAuditChain(opened.db);

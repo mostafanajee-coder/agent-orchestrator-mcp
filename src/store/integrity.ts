@@ -209,6 +209,17 @@ export const EXPECTED_INDEXES = [
   'ix_audit_session',
 ] as const;
 
+export const EXPECTED_INDEXES_BY_VERSION = {
+  4: EXPECTED_INDEXES,
+  5: EXPECTED_INDEXES,
+  6: EXPECTED_INDEXES,
+  7: [
+    ...EXPECTED_INDEXES,
+    'ix_evidence_job_cycle_created',
+    'ix_artifacts_job_cycle_created',
+  ],
+} as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
+
 export const EXPECTED_TRIGGERS = [
   'trg_decisions_principal_only',
   'trg_auth_status_requires_granting_decision',
@@ -239,6 +250,20 @@ export const EXPECTED_TRIGGERS_BY_VERSION = {
     'trg_actors_identity_immutable',
     'trg_actor_tokens_binding_immutable',
     'trg_actor_tokens_no_reenable',
+  ],
+  7: [
+    ...EXPECTED_TRIGGERS,
+    'trg_actors_identity_immutable',
+    'trg_actor_tokens_binding_immutable',
+    'trg_actor_tokens_no_reenable',
+    'trg_evidence_no_update',
+    'trg_evidence_no_delete',
+    'trg_evidence_no_replace',
+    'trg_evidence_binding',
+    'trg_artifacts_no_update',
+    'trg_artifacts_no_delete',
+    'trg_artifacts_no_replace',
+    'trg_artifacts_binding',
   ],
 } as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
 
@@ -298,7 +323,7 @@ function verifyIndexes(db: SqliteDatabase, version: CanonicalSchemaVersion): voi
   const indexes = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
   ).all().map((row) => (row as SchemaNameRow).name);
-  if (!equalNames(indexes, EXPECTED_INDEXES)) {
+  if (!equalNames(indexes, EXPECTED_INDEXES_BY_VERSION[version])) {
     fail('The database does not contain exactly the approved named index set.');
   }
   verifyCanonicalDefinitions(
@@ -421,7 +446,7 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     const ledger = readMigrationLedger(db);
     validateAppliedPrefix(ledger, false, KNOWN_MIGRATION_VERSIONS);
     const schemaVersion = ledger.versions[ledger.versions.length - 1];
-    if (schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6) {
+    if (schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7) {
       fail('The database has an unsupported schema version.');
     }
     verifyTables(db, schemaVersion);

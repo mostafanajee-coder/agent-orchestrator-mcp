@@ -139,6 +139,8 @@ export interface Phase6RunOptions {
   readonly registry: Phase6WorkerRegistry;
   readonly leaseKey: Buffer;
   readonly clock?: () => number;
+  /** Phase 7 artifact staging root; absent for legacy Phase 6 fixtures. */
+  readonly artifactsRoot?: string;
 }
 
 export type RunLifecycleErrorCode =

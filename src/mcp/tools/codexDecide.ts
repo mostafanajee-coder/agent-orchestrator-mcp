@@ -7,6 +7,7 @@ import {
   AUTHORITATIVE_STATUS_VALUES,
   WORKFLOW_STATE_VALUES,
   applyTransition,
+  type Phase7AuthorityOptions,
   type DecisionErrorCode,
   type DecisionInput,
 } from '../../domain/decide.js';
@@ -56,6 +57,8 @@ export interface Phase4AuthorityToolOptions {
   readonly audit: AuditWriter;
   /** Optional Phase 6 hook for stopping live runs after a committed CANCEL. */
   readonly onJobCancelled?: (jobId: string, requestId: string) => void;
+  /** Phase 7 package-manifest storage; absent for legacy authority fixtures. */
+  readonly phase7?: Phase7AuthorityOptions;
 }
 
 function verifiedAuthority(
@@ -125,7 +128,14 @@ export function registerCodexDecide(
         requestId: requestIdFromContext(context.mcpReq.id),
       };
       try {
-        const result = applyTransition(options.db, options.audit, actor, decisionInput);
+        const result = applyTransition(
+          options.db,
+          options.audit,
+          actor,
+          decisionInput,
+          undefined,
+          options.phase7,
+        );
         const output: CodexDecideOutputValue = {
           ok: true,
           decision_id: result.decisionId,

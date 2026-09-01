@@ -12,7 +12,7 @@ import {
   fingerprintSchemaSql,
 } from './schemaDefinitions.js';
 
-export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3, 4, 5, 6] as const;
+export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3, 4, 5, 6, 7] as const;
 
 export interface Migration {
   readonly version: number;
@@ -104,7 +104,7 @@ function validateMigrationSet(migrations: readonly Migration[]): void {
     versions.some((version, index) => version !== KNOWN_MIGRATION_VERSIONS[index])
   ) {
     fail(
-      'The binary migration set is not exactly the approved known set [1,2,3,4,5,6].',
+      'The binary migration set is not exactly the approved known set [1,2,3,4,5,6,7].',
       'Remove unknown, missing, or future migration files before serving.',
     );
   }

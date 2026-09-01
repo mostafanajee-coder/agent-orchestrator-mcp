@@ -3,6 +3,11 @@ import { z } from 'zod/v4';
 const MAX_SUMMARY_BYTES = 2_048;
 const MAX_PROGRESS_BYTES = 1_024;
 const MAX_ERROR_BYTES = 2_048;
+const MAX_KIND_BYTES = 64;
+const MAX_MIME_BYTES = 128;
+const MAX_LABEL_BYTES = 256;
+const MAX_ARTIFACT_PATH_BYTES = 512;
+const MAX_DETAIL_BYTES = 65_536;
 const MAX_USAGE_FIELDS = 16;
 const MAX_USAGE_VALUE = Number.MAX_SAFE_INTEGER;
 
@@ -51,16 +56,37 @@ const ErrorMessageSchema = z.object({
   message: z.string().trim().min(1).max(MAX_ERROR_BYTES),
 }).strict();
 
+const EvidenceMessageSchema = z.object({
+  type: z.literal('evidence'),
+  kind: z.string().trim().min(1).max(MAX_KIND_BYTES),
+  severity: z.enum(['info', 'warning', 'error', 'critical']).nullable().optional(),
+  summary: z.string().trim().min(1).max(MAX_SUMMARY_BYTES),
+  detail: z.unknown().optional(),
+  artifact_path: z.string().trim().min(1).max(MAX_ARTIFACT_PATH_BYTES).optional(),
+}).strict();
+
+const ArtifactMessageSchema = z.object({
+  type: z.literal('artifact'),
+  path: z.string().trim().min(1).max(MAX_ARTIFACT_PATH_BYTES),
+  kind: z.string().trim().min(1).max(MAX_KIND_BYTES),
+  mime: z.string().trim().min(1).max(MAX_MIME_BYTES).optional(),
+  label: z.string().trim().min(1).max(MAX_LABEL_BYTES).optional(),
+}).strict();
+
 export const WorkerMessageSchema = z.discriminatedUnion('type', [
   ReadyMessageSchema,
   ProgressMessageSchema,
   ResultMessageSchema,
   ErrorMessageSchema,
+  EvidenceMessageSchema,
+  ArtifactMessageSchema,
 ]);
 
 export type WorkerMessage = z.infer<typeof WorkerMessageSchema>;
 export type WorkerResultMessage = z.infer<typeof ResultMessageSchema>;
 export type WorkerErrorMessage = z.infer<typeof ErrorMessageSchema>;
+export type WorkerEvidenceMessage = z.infer<typeof EvidenceMessageSchema>;
+export type WorkerArtifactMessage = z.infer<typeof ArtifactMessageSchema>;
 
 export class WorkerProtocolError extends Error {
   public override readonly name = 'WorkerProtocolError';
@@ -87,6 +113,20 @@ export function parseWorkerMessage(line: string): WorkerMessage {
     (result.data.type === 'progress' && byteLength(result.data.message) > MAX_PROGRESS_BYTES)
     || (result.data.type === 'result' && byteLength(result.data.summary) > MAX_SUMMARY_BYTES)
     || (result.data.type === 'error' && byteLength(result.data.message) > MAX_ERROR_BYTES)
+    || (result.data.type === 'evidence' && (
+      byteLength(result.data.kind) > MAX_KIND_BYTES
+      || byteLength(result.data.summary) > MAX_SUMMARY_BYTES
+      || byteLength(result.data.artifact_path ?? '') > MAX_ARTIFACT_PATH_BYTES
+      || (result.data.detail !== undefined && (() => {
+        try { return byteLength(JSON.stringify(result.data.detail)) > MAX_DETAIL_BYTES; } catch { return true; }
+      })())
+    ))
+    || (result.data.type === 'artifact' && (
+      byteLength(result.data.path) > MAX_ARTIFACT_PATH_BYTES
+      || byteLength(result.data.kind) > MAX_KIND_BYTES
+      || byteLength(result.data.mime ?? '') > MAX_MIME_BYTES
+      || byteLength(result.data.label ?? '') > MAX_LABEL_BYTES
+    ))
   ) {
     throw new WorkerProtocolError('The worker protocol field exceeds its byte bound.');
   }
@@ -103,6 +143,7 @@ export interface StartEnvelope {
   readonly task: string;
   readonly params: Record<string, unknown>;
   readonly workspace: string;
+  readonly artifact_staging_dir?: string;
   readonly deadline_at: string;
   readonly lease?: string;
   readonly report_endpoint?: string;

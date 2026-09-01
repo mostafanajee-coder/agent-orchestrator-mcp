@@ -90,8 +90,8 @@ beforeEach(openTestDatabase);
 afterEach(closeTestDatabase);
 
 describe('migration discovery and exact ledger contract', () => {
-  it('REG-01 discovers exactly the numeric Phase 4 set in order', () => {
-    expect(approvedMigrations().map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6]);
+  it('REG-01 discovers exactly the numeric Phase 7 set in order', () => {
+    expect(approvedMigrations().map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(approvedMigrations().every((migration) => !/\b(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(migration.sql))).toBe(
       true,
     );
@@ -124,38 +124,38 @@ describe('migration discovery and exact ledger contract', () => {
 describe('migration runner', () => {
   it('applies a fresh database atomically and verifies the current schema', () => {
     const result = runMigrations(db, { fresh: true });
-    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4, 5, 6], migrated: true });
-    expect(verifyDatabaseIntegrity(db).appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4, 5, 6, 7], migrated: true });
+    expect(verifyDatabaseIntegrity(db).appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
   it('re-runs a current database without applying anything', () => {
     runMigrations(db, { fresh: true });
     const result = runMigrations(db, { fresh: false });
-    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4, 5, 6], migrated: false });
+    expect(result).toEqual({ appliedVersions: [1, 2, 3, 4, 5, 6, 7], migrated: false });
   });
 
-  it('upgrades an existing {1} database to {1,2,3,4,5,6}', () => {
+  it('upgrades an existing {1} database to {1,2,3,4,5,6,7}', () => {
     applyMigrationOne();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
-  it('upgrades an existing {1,2} database to {1,2,3,4,5,6}', () => {
+  it('upgrades an existing {1,2} database to {1,2,3,4,5,6,7}', () => {
     applyMigrationOne();
     applyMigrationTwo();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
-  it('upgrades an existing schema-v3 database to schema-v6', () => {
+  it('upgrades an existing schema-v3 database to schema-v7', () => {
     applyMigrationOne();
     applyMigrationTwo();
     applyMigrationThree();
     const result = runMigrations(db, { fresh: false });
-    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result.appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(readMigrationLedger(db).versions).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
   it('O1-01/O1-03 refuses migration 005 when a pre-existing audit sequence is non-positive', () => {

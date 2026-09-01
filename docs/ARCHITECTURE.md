@@ -3,8 +3,9 @@
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
 > Revision 9 records the scoped Phase 6 worker runtime, now published in
 > `main` and `origin/main` at `88670743f8a443bbf3b71c9f379199deca42d512`.
-> Revision 10 below is a Phase 7 planning proposal only. This document does
-> not authorize Phase 7 implementation, deployment, or unrelated changes.
+> Revision 10 below is the reviewed Phase 7 implementation baseline. Its
+> separate Codex authorization applies only to `codex/phase7-implementation`;
+> the implementation is not merged into `main`.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1808,8 +1809,9 @@ merged fast-forward into `main`, published to `origin/main`, and closed in
 
 ## 25. Revision 10 / Phase 7 evidence and artifact proposal
 
-**Status: documentation-only planning proposal. Phase 7 implementation is not
-authorized.**
+**Status: Phase 7 implementation authorized on `codex/phase7-implementation`.
+The implementation is not merged into `main`; Phase 7 merge authorization is
+not granted.**
 
 Revision 10 is derived from the published Phase 6 baseline at
 `88670743f8a443bbf3b71c9f379199deca42d512`. It is governed by
@@ -1845,8 +1847,8 @@ and assigns trust. Principal-created evidence is `principal`, worker-created
 evidence is `untrusted`, and `deterministic` remains reserved for a named
 server-owned producer. A client cannot submit a stronger trust value.
 
-Evidence is bounded to a 2,048-byte summary and 65,536-byte serialized detail;
-kind, severity, references, and idempotency are validated. Any supplied
+Evidence is bounded to 1,024 rows per job, a 2,048-byte summary, and 65,536-byte
+serialized detail; kind, severity, references, and idempotency are validated. Any supplied
 decision evidence reference must exist for the same job and cycle, but evidence
 never grants authority or changes a job state.
 
@@ -1890,7 +1892,16 @@ be described as an unqualified atomic filesystem/database operation.
 
 ### 25.7 Phase boundary and authorization
 
-Revision 10 is ready for independent architecture review. The review must
+Revision 10 received independent architecture review and Codex adjudication.
+The following decision authorizes only the scoped implementation branch:
+
+```text
+AUTHORIZE PHASE 7 IMPLEMENTATION: YES
+```
+
+The implementation must remain on `codex/phase7-implementation` and must not
+be merged until its own implementation review and final merge gate. The review
+must
 confirm the proposed schema guards, quotas, trust derivation, path policy,
 worker admission, metadata reads, manifest behavior, and Phase 8 boundary.
 After review, Codex must adjudicate every finding and record a separate

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { unlinkSync } from 'node:fs';
 
 import type { SqliteDatabase } from '../store/db.js';
 import { withImmediateTransaction } from '../store/db.js';
@@ -7,6 +8,13 @@ import type { VerifiedActorAuthInfo } from '../mcp/auth.js';
 import { assertRoleCapabilities, canonicalCapabilitiesJson, hasCapability } from '../authority/capabilities.js';
 import type { Capability } from '../authority/capabilities.js';
 import type { AuditWriter } from '../authority/audit.js';
+import {
+  createManifestFile,
+  MAX_ARTIFACT_BYTES,
+  MAX_JOB_ARTIFACT_BYTES,
+  MAX_JOB_ARTIFACT_ROWS,
+  verifyArtifactFile,
+} from './artifacts.js';
 
 export const DECISION_VALUES = [
   'APPROVE',
@@ -288,6 +296,9 @@ function validateInput(input: DecisionInput): DecisionInput {
   ) {
     throw new DecisionError('INVALID_INPUT', 'evidenceRefs are invalid or exceed the bound.');
   }
+  if (new Set(evidenceRefs).size !== evidenceRefs.length) {
+    throw new DecisionError('INVALID_INPUT', 'evidenceRefs must not contain duplicates.');
+  }
   if (input.idempotencyKey !== undefined && typeof input.idempotencyKey !== 'string') {
     throw new DecisionError('INVALID_INPUT', 'idempotencyKey is invalid.');
   }
@@ -357,6 +368,119 @@ function loadJob(db: SqliteDatabase, jobId: string): JobRow {
   return row;
 }
 
+export interface Phase7AuthorityOptions {
+  readonly artifactsRoot: string;
+  readonly platform?: NodeJS.Platform;
+}
+
+const MAX_MANIFEST_BYTES = 65_536;
+
+function createPackageManifestInTransaction(
+  db: SqliteDatabase,
+  audit: AuditWriter,
+  actor: VerifiedActorAuthInfo,
+  jobId: string,
+  cycle: number,
+  decisionId: string,
+  requestId: string,
+  createdAt: string,
+  options: Phase7AuthorityOptions,
+): { readonly absolute: string } {
+  const evidence = db.prepare(
+    `SELECT evidence_id, run_id, source_actor, trust, kind, severity, summary, artifact_id, created_at
+       FROM evidence WHERE job_id = ? AND cycle = ? ORDER BY created_at, evidence_id`,
+  ).all(jobId, cycle);
+  const artifacts = db.prepare(
+    `SELECT artifact_id, run_id, kind, mime, label, rel_path, bytes, sha256, created_by, created_at
+       FROM artifacts WHERE job_id = ? AND cycle = ? ORDER BY created_at, artifact_id`,
+  ).all(jobId, cycle);
+  const decisions = db.prepare(
+    `SELECT decision_id, cycle, decision, from_state, to_state, created_at
+       FROM decisions WHERE job_id = ? ORDER BY cycle, created_at, decision_id`,
+  ).all(jobId);
+  const content = JSON.stringify({
+    version: 1,
+    job_id: jobId,
+    cycle,
+    package_decision_id: decisionId,
+    generated_at: createdAt,
+    evidence,
+    artifacts,
+    decisions: [...decisions, {
+      decision_id: decisionId,
+      cycle,
+      decision: 'PACKAGE',
+      from_state: 'APPROVED',
+      to_state: 'PACKAGING',
+      created_at: createdAt,
+    }],
+  }) + '\n';
+  const contentBytes = Buffer.byteLength(content, 'utf8');
+  if (contentBytes > MAX_MANIFEST_BYTES || contentBytes > MAX_ARTIFACT_BYTES) {
+    throw new DecisionError('INVALID_TRANSITION', 'The package manifest exceeds its bound.');
+  }
+  const totals = db.prepare(
+    'SELECT count(*) AS count, COALESCE(sum(bytes), 0) AS bytes FROM artifacts WHERE job_id = ?',
+  ).get(jobId) as { readonly count?: unknown; readonly bytes?: unknown };
+  if (Number(totals.count) >= MAX_JOB_ARTIFACT_ROWS
+    || Number(totals.bytes) + contentBytes > MAX_JOB_ARTIFACT_BYTES) {
+    throw new DecisionError('INVALID_TRANSITION', 'The package manifest exceeds the artifact quota.');
+  }
+
+  const artifactId = randomUUID();
+  let absolute: string | undefined;
+  try {
+    const file = createManifestFile(options.artifactsRoot, jobId, cycle, artifactId, content, options.platform);
+    absolute = file.absolute;
+    db.prepare(
+      `INSERT INTO artifacts(artifact_id, job_id, cycle, run_id, kind, mime, label, rel_path, bytes, sha256, created_by, created_at)
+       VALUES (?, ?, ?, NULL, 'manifest', 'application/json', 'manifest', ?, ?, ?, ?, ?)`,
+    ).run(artifactId, jobId, cycle, file.rel_path, file.bytes, file.sha256, actor.actorId, createdAt);
+    audit.appendInTransaction({
+      actorId: actor.actorId,
+      actorRole: actor.role,
+      sessionTokenId: actor.tokenId,
+      requestId,
+      sessionHint: actor.sessionLabel,
+      action: 'artifact.register',
+      jobId,
+      cycle,
+      capability: 'artifact:register',
+      subjectType: 'artifact',
+      subjectId: artifactId,
+      result: 'ok',
+      detail: { kind: 'manifest', bytes: file.bytes },
+      timestamp: createdAt,
+    });
+    return { absolute };
+  } catch (cause) {
+    if (absolute !== undefined) {
+      try { unlinkSync(absolute); } catch { /* best effort rollback of the filesystem side */ }
+    }
+    throw cause;
+  }
+}
+
+function assertEvidenceReferences(
+  db: SqliteDatabase,
+  jobId: string,
+  cycle: number,
+  evidenceRefs: readonly string[],
+): void {
+  if (evidenceRefs.length === 0) return;
+  const placeholders = evidenceRefs.map(() => '?').join(', ');
+  const rows = db.prepare(
+    `SELECT evidence_id FROM evidence
+       WHERE job_id = ? AND cycle = ? AND evidence_id IN (${placeholders})`,
+  ).all(jobId, cycle, ...evidenceRefs) as Array<{ readonly evidence_id?: unknown }>;
+  if (rows.length !== evidenceRefs.length) {
+    throw new DecisionError(
+      'INVALID_INPUT',
+      'Every evidence reference must belong to the same job and cycle as the decision.',
+    );
+  }
+}
+
 function replayIfPresent(
   db: SqliteDatabase,
   actorId: string,
@@ -388,11 +512,14 @@ export function applyTransition(
   actor: VerifiedActorAuthInfo,
   rawInput: DecisionInput,
   clock = () => Date.now(),
+  phase7?: Phase7AuthorityOptions,
 ): DecisionData {
   requireAuthority(actor);
   const input = validateInput(rawInput);
   const hash = requestHash(input);
-  return withImmediateTransaction(db, () => {
+  let createdManifestPath: string | undefined;
+  try {
+    return withImmediateTransaction(db, () => {
     const replay = replayIfPresent(db, actor.actorId, input.idempotencyKey, hash);
     if (replay !== undefined) return replay;
 
@@ -403,6 +530,7 @@ export function applyTransition(
     if (job.version !== input.expectedVersion) {
       throw new DecisionError('STATE_CONFLICT', 'The job version changed before the decision was applied.');
     }
+    assertEvidenceReferences(db, job.job_id, job.cycle, input.evidenceRefs ?? []);
     const transition = TRANSITIONS[input.decision];
     if (!transition.from.includes(job.state)) {
       throw new DecisionError('INVALID_TRANSITION', 'The requested decision is not valid for the current job state.');
@@ -419,11 +547,25 @@ export function applyTransition(
       : transition;
     const nextCycle = selectedTransition.incrementsCycle ? job.cycle + 1 : job.cycle;
     if (input.decision === 'DELIVER') {
-      const manifest = db.prepare(
-        "SELECT 1 AS present FROM artifacts WHERE job_id = ? AND cycle = ? AND kind = 'manifest' LIMIT 1",
-      ).get(job.job_id, job.cycle) as { readonly present?: number } | undefined;
-      if (manifest?.present !== 1) {
+      const manifests = db.prepare(
+        `SELECT artifact_id, job_id, cycle, run_id, kind, mime, label, rel_path, bytes, sha256, created_by, created_at
+           FROM artifacts WHERE job_id = ? AND cycle = ? AND kind = 'manifest'
+          ORDER BY created_at, artifact_id`,
+      ).all(job.job_id, job.cycle) as Array<Record<string, unknown>>;
+      if (manifests.length !== 1) {
         throw new DecisionError('INVALID_TRANSITION', 'A manifest artifact is required before delivery.');
+      }
+      if (phase7 !== undefined) {
+        const manifest = manifests[0];
+        if (manifest === undefined || manifest['run_id'] !== null
+          || manifest['created_by'] !== actor.actorId
+          || !verifyArtifactFile(phase7.artifactsRoot, {
+            rel_path: String(manifest['rel_path']),
+            bytes: Number(manifest['bytes']),
+            sha256: String(manifest['sha256']),
+          }, phase7.platform)) {
+          throw new DecisionError('INVALID_TRANSITION', 'The package manifest could not be verified.');
+        }
       }
     }
 
@@ -433,6 +575,21 @@ export function applyTransition(
     const evidenceJson = input.evidenceRefs === undefined || input.evidenceRefs.length === 0
       ? null
       : JSON.stringify(input.evidenceRefs);
+
+    if (input.decision === 'PACKAGE' && phase7 !== undefined) {
+      const manifest = createPackageManifestInTransaction(
+        db,
+        audit,
+        actor,
+        job.job_id,
+        job.cycle,
+        decisionId,
+        requestId,
+        createdAt,
+        phase7,
+      );
+      createdManifestPath = manifest.absolute;
+    }
     db.prepare(
       'INSERT INTO decisions(decision_id, job_id, cycle, actor_id, session_token_id, request_id, session_hint, decision, rationale, evidence_refs, from_state, to_state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(
@@ -506,7 +663,13 @@ export function applyTransition(
       ).run(actor.actorId, input.idempotencyKey, hash, JSON.stringify(result), createdAt);
     }
     return result;
-  });
+    });
+  } catch (cause) {
+    if (createdManifestPath !== undefined) {
+      try { unlinkSync(createdManifestPath); } catch { /* best effort rollback of the filesystem side */ }
+    }
+    throw cause;
+  }
 }
 
 export function transitionTable(): Readonly<Record<DecisionKind, TransitionSpec>> {
