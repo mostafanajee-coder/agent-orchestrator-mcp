@@ -21,6 +21,8 @@ The implementation branch started from the reviewed planning snapshot:
 | Implementation commit | `d46e956026ae351c4aee7d353b4971924e00b717` |
 | Implementation tree | `f77619aa3b2f9443aaa960b196fb488fe7ad3ffb` |
 | Branch | `codex/phase8-implementation` |
+| Reviewed merge into local `main` | `130d6988422ad38dcd5513361e049d0171386613` |
+| Remote publication | not performed |
 
 No schema migration was added. The implementation remains limited to the
 approved Phase 8 resilience boundary.
@@ -132,21 +134,20 @@ redaction, HTTP audit visibility, and interrupted process shutdown.
 
 ## E. Review and merge status
 
-The local implementation is complete for the authorized Phase 8 scope, but it
-has not yet received the separate independent implementation review or final
-merge decision.
+The local implementation received an independent implementation review with no
+blocking findings and passed the Codex final merge gate. It was then
+fast-forwarded into local `main`. Remote publication and any deployment remain
+separate actions.
 
 ```text
 PHASE 8 ARCHITECTURE REVIEW: ACCEPTED
 PHASE 8 IMPLEMENTATION: COMPLETE LOCALLY
-PHASE 8 IMPLEMENTATION REVIEW: REQUIRED
-PHASE 8 FINAL MERGE GATE: PENDING
-PHASE 8 MERGE: NO
+PHASE 8 IMPLEMENTATION REVIEW: ACCEPTED
+PHASE 8 FINAL MERGE GATE: PASSED
+PHASE 8 MERGE: YES — LOCAL FAST-FORWARD
 PHASE 8 PUSH: NO
 PHASE 9 STARTED: NO
 ```
 
-The next governance step is a comprehensive independent implementation review
-of the exact branch head. That review must verify the source diff, all Phase 8
-acceptance cases, authority boundaries, Windows/POSIX behavior, and full CI
-evidence before Codex considers a separate final merge decision.
+The next governance step, if desired, is a separate remote-publication check
+and Push gate. Phase 9 planning must not begin automatically after publication.

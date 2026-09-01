@@ -21,7 +21,7 @@ Windows artifact-root correction and its documentation closure.
 | Phase 7 reviewed implementation head | `035fbb6f3de5588c420b153c6d47497e326340e0` |
 | Phase 7 Windows correction | `bf789157619a0ec39486f451405e190ad5209d14` |
 | Phase 7 reviewed head ancestor of base | yes |
-| Phase 8 implementation | in progress on `codex/phase8-implementation` at `d46e956` |
+| Phase 8 implementation | merged locally into `main` at `130d698` |
 
 The previous Phase 8 proposal referenced `5b0aa1824f567d1369451c57193f8cbd465ed4ac`.
 That value predates the Windows path-normalization fix and the final Phase 7
@@ -522,8 +522,9 @@ At this planning snapshot:
 ```text
 PHASE 7: COMPLETE, PUBLISHED, AND WINDOWS-FIXED
 PHASE 8 PLAN: APPROVED PLANNING BASELINE
-PHASE 8 IMPLEMENTATION: IN PROGRESS ON codex/phase8-implementation
-PHASE 8 IMPLEMENTATION AUTHORIZED: YES — BRANCH ONLY
+PHASE 8 IMPLEMENTATION: COMPLETE AND MERGED LOCALLY
+PHASE 8 IMPLEMENTATION AUTHORIZED: YES
+PHASE 8 REMOTE PUBLICATION: NO
 PHASE 9: NOT STARTED
 ```
 

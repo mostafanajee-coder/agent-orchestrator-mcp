@@ -1589,7 +1589,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **5** | Job lifecycle | Protected `config.json`, `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34; published at `8867074` |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Revision 10 published; Windows correction and closure recorded at `d0ce68c` |
-| **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation in progress on `codex/phase8-implementation` |
+| **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation merged locally at `130d698`; remote publication pending |
 | **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, `SECURITY.md`, README, two-session Codex drill | The §19 verification checklist, start to finish |
 
 Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
@@ -1937,8 +1937,8 @@ registration, deployment, push, pull request, or merge may begin.
 
 ## 26. Revision 11 / Phase 8 resilience and recovery proposal
 
-**Status: approved planning baseline; implementation in progress on the
-separately authorized Phase 8 branch.** Revision 11 is derived from the
+**Status: approved planning baseline; implementation merged locally.** Revision
+11 is derived from the
 published Phase 7 base at
 `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`, whose tree is
 `471c197bee3855fc210e2ab0adf77ce1f30815c7`. The base is clean and synchronized
@@ -2014,7 +2014,9 @@ IMPLEMENTATION BRANCH: codex/phase8-implementation
 IMPLEMENTATION HEAD: d46e956026ae351c4aee7d353b4971924e00b717
 ```
 
-The authorization is limited to `codex/phase8-implementation`. It does not
-authorize merge, push, deployment, or Phase 9. The implementation head and
-verification evidence are recorded in
+The authorization was limited to `codex/phase8-implementation`; the reviewed
+head was subsequently fast-forwarded into local `main` at
+`130d6988422ad38dcd5513361e049d0171386613`. Remote push, deployment, and
+Phase 9 remain outside this closure. The implementation head and verification
+evidence are recorded in
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](PHASE8_IMPLEMENTATION_REPORT.md).
