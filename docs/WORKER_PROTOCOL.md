@@ -1,14 +1,15 @@
-# AOM — PHASE 6 WORKER PROTOCOL
+# AOM — V1 WORKER PROTOCOL
 
-> Normative Phase 6 contract plus the explicitly reviewed Phase 7 message
-> extension on the authorized implementation branch. This document does not
-> authorize later phases, merge, deployment, or remote use.
+> Normative AOM V1 worker protocol, retaining the published version-1 wire
+> behavior from Phases 6–8 and the reviewed Phase 7 message extension. Phase 9
+> may harden documentation and exposure boundaries but does not add messages or
+> change the protocol version.
 
 Version: **1**
-Owner: Phase 6 worker-runtime planning
+Owner: AOM V1 worker-runtime contract
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
-Governing plan: `docs/PHASE6_PLAN.md`
-Implementation authorization: **YES — scoped to codex/phase6-implementation**
+Governing plans: `docs/PHASE6_PLAN.md`, `docs/PHASE8_PLAN.md`, and `docs/PHASE9_PLAN.md`
+Current implementation: **Phase 8 complete and published; Phase 9 planning only**
 
 ## 1. Purpose and boundary
 
@@ -433,3 +434,13 @@ PHASE 8 IMPLEMENTATION: COMPLETE AND MERGED LOCALLY
 PHASE 8 REMOTE PUBLICATION: YES
 PHASE 9 STARTED: NO
 ```
+
+## 14. Phase 9 hardening boundary
+
+Phase 9 may normalize this document as the AOM V1 Worker Protocol and add
+explicit redaction, diagnostic, and security-documentation requirements. It
+must not change protocol version 1, add a worker message type, broaden the
+private start envelope, expose leases outside their approved worker path, or
+create a new authority path. Phase 8 recovery, reaper, cancellation, shutdown,
+and `STALLED` semantics remain as documented lifecycle effects around the same
+wire contract.

@@ -38,14 +38,20 @@ documentation closure at `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`. Local `main
 the closure commit. The post-merge record is in
 [`docs/PHASE7_POST_MERGE_CLOSURE.md`](docs/PHASE7_POST_MERGE_CLOSURE.md).
 
-**Phase 8 — Resilience and recovery (merged locally).** The reviewed planning baseline is preserved at
+**Phase 8 — Resilience and recovery (merged and published).** The reviewed planning baseline is preserved at
 `809d698c164ad614e2365778e85e40dc65be872b`; the implementation was authorized on
 `codex/phase8-implementation` and merged locally into `main` at reviewed head
-`130d6988422ad38dcd5513361e049d0171386613`. It provides bounded startup recovery, reaping, cancellation
+`130d6988422ad38dcd5513361e049d0171386613` and published in `main`/`origin/main` at `3f03168c161a941c4f7055629e6f433c636e62a7`. It provides bounded startup recovery, reaping, cancellation
 settlement, graceful shutdown, `STALLED` paths, and the principal-only `audit_query` surface, using schema v7
 without a migration. The implementation is now published in `main` and `origin/main`; Phase 9 has not started. The detailed handoff is in
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md) and the local closure is in
 [`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md).
+
+**Phase 9 — Hardening and documentation (planning only).** The documentation-only plan is being prepared on
+`codex/phase9-authority-plan` from the published Phase 8 base `3f03168c161a941c4f7055629e6f433c636e62a7`. It covers
+fixed authenticated request admission, redaction classification, the normative V1 worker protocol, root
+`SECURITY.md`, two-session attribution verification, and cross-platform regression evidence. No Phase 9 source,
+migration, MCP business tool, deployment, Push, PR, or implementation authorization exists.
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
@@ -53,7 +59,8 @@ The approved design and phase plans are in
 [docs/WORKER_PROTOCOL.md](docs/WORKER_PROTOCOL.md), [docs/PHASE6_POST_MERGE_CLOSURE.md](docs/PHASE6_POST_MERGE_CLOSURE.md),
 [docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md), [docs/PHASE8_PLAN.md](docs/PHASE8_PLAN.md),
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md), and
-[`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md).
+[`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md), [docs/PHASE9_PLAN.md](docs/PHASE9_PLAN.md),
+and [SECURITY.md](SECURITY.md).
 The empirical Codex/Inspector protocol observation is recorded in
 [docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 

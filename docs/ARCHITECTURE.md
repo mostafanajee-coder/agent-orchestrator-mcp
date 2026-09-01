@@ -1,4 +1,4 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Published / Revision 11 Phase 8 Proposal)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Published / Revision 11 Phase 8 Published / Revision 12 Phase 9 Proposal)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
 > Revision 9 records the scoped Phase 6 worker runtime, now published in
@@ -8,8 +8,8 @@
 > the implementation and corrective Windows path fix are published in
 > `main` and `origin/main`, with the final documentation closure at
 > `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`.
-> Revision 11 below is the Phase 8 resilience and recovery planning baseline;
-> implementation is separately authorized only on `codex/phase8-implementation`.
+> Revision 11 below records the published Phase 8 resilience and recovery implementation;
+> Revision 12 below is the Phase 9 documentation-only hardening proposal.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1573,9 +1573,9 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 > Phase 5 was subsequently planned, independently reviewed, implemented, and
 > published under its separate authorization record. Revision 9 below records
 > the published Phase 6 implementation. Revision 10 below records the published
-> Phase 7 implementation and Windows correction. Revision 11 below is the current
-> Phase 8 planning baseline. The separate Phase 8 implementation gate does not
-> authorize merge or deployment.
+> Phase 7 implementation and Windows correction. Revision 11 below records the
+> published Phase 8 implementation. Revision 12 below is the current Phase 9
+> planning proposal and does not authorize implementation.
 
 Each phase is independently verifiable and leaves the repo green.
 
@@ -1590,7 +1590,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34; published at `8867074` |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Revision 10 published; Windows correction and closure recorded at `d0ce68c` |
 | **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation merged and published at `70390e4` |
-| **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, `SECURITY.md`, README, two-session Codex drill | The §19 verification checklist, start to finish |
+| **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, root `SECURITY.md`, README, two-session Codex drill | Proposed Revision 12; independent review required |
 
 Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
 
@@ -2016,7 +2016,47 @@ IMPLEMENTATION HEAD: d46e956026ae351c4aee7d353b4971924e00b717
 
 The authorization was limited to `codex/phase8-implementation`; the reviewed
 head was subsequently fast-forwarded into local `main` and published to
-`origin/main` at `70390e414e73175d21943f32f14f43d664f3098b`. Deployment and
-Phase 9 remain outside this closure. The implementation head and verification
-evidence are recorded in
+`origin/main` at `3f03168c161a941c4f7055629e6f433c636e62a7`. Deployment and
+Phase 9 implementation remain outside this closure. The implementation head
+and verification evidence are recorded in
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](PHASE8_IMPLEMENTATION_REPORT.md).
+
+---
+
+## 27. Revision 12 / Phase 9 hardening and documentation proposal
+
+**Status: documentation-only planning.** Revision 12 is derived from the
+published Phase 8 base at
+`3f03168c161a941c4f7055629e6f433c636e62a7`, whose tree is
+`8d34fe5c26d0b0f392cdab750cc8e14d3ab61c80`. Phase 8 is complete and published;
+Phase 9 implementation has not started and is not authorized.
+
+The complete planning contract is in
+[`docs/PHASE9_PLAN.md`](PHASE9_PLAN.md). Revision 12 proposes only:
+
+- a shared authenticated per-token request-admission limiter;
+- a complete redaction/data-classification and sink manifest;
+- normalization of `WORKER_PROTOCOL.md` without changing version 1 wire behavior;
+- the root `SECURITY.md` normative security guide;
+- README and governance-status cleanup;
+- a sanitized two-session attribution drill; and
+- Windows/POSIX regression evidence for the published Phases 4–8.
+
+No schema migration, public capability, MCP business tool, worker message,
+remote/cloud integration, autonomous retry, telemetry platform, deployment, or
+Phase 10 feature is proposed.
+
+The central invariant remains:
+
+> **Hardening may restrict exposure or admission; it may never create or alter an authoritative decision.**
+
+The proposed fixed rate-limit values are 30 credits per verified token with a
+one-credit-per-second refill, in memory only. These values and the exact shared
+HTTP/stdio admission hook require independent review before implementation.
+
+The planned acceptance matrix contains 64 cases. The required governance order
+is documentation freeze, independent architecture review, Codex adjudication,
+documentation-only correction/re-review if needed, a separate explicit
+`AUTHORIZE PHASE 9 IMPLEMENTATION: YES / NO` decision, implementation review,
+and final merge authorization. This planning snapshot does not authorize
+implementation.
