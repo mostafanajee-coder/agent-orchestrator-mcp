@@ -1,4 +1,4 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Published / Revision 11 Phase 8 Published / Revision 12 Phase 9 Local Implementation Candidate)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Published / Revision 11 Phase 8 Published / Revision 12 Phase 9 Published)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
 > Revision 9 records the scoped Phase 6 worker runtime, now published in
@@ -10,7 +10,7 @@
 > `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`.
 > Revision 11 below records the published Phase 8 resilience and recovery implementation;
 > Revision 12 below records the Phase 9 hardening plan and its implementation,
-> merged into local `main` but not published remotely.
+> merged and published in `main` and `origin/main`.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1576,8 +1576,7 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 > the published Phase 6 implementation. Revision 10 below records the published
 > Phase 7 implementation and Windows correction. Revision 11 below records the
 > published Phase 8 implementation. Revision 12 below is the current Phase 9
-> planning baseline; its local implementation candidate is recorded below and
-> is not yet merged or published.
+> hardening baseline, merged and published in `main` and `origin/main`.
 
 Each phase is independently verifiable and leaves the repo green.
 
@@ -1592,7 +1591,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34; published at `8867074` |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Revision 10 published; Windows correction and closure recorded at `d0ce68c` |
 | **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation merged and published at `3f03168c` |
-| **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, root `SECURITY.md`, README, two-session Codex drill | Accepted and fast-forwarded into local `main` at `bea75982`; remote publication pending |
+| **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, root `SECURITY.md`, README, two-session Codex drill | Accepted and published in `main`/`origin/main` at `398785ea` |
 
 Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
 
@@ -2027,7 +2026,7 @@ and verification evidence are recorded in
 
 ## 27. Revision 12 / Phase 9 hardening and documentation proposal
 
-**Status: implementation complete and merged into local `main`; not published remotely.** Revision 12 is derived from the
+**Status: implementation complete, merged, and published.** Revision 12 is derived from the
 published Phase 8 base at
 `3f03168c161a941c4f7055629e6f433c636e62a7`, whose tree is
 `8d34fe5c26d0b0f392cdab750cc8e14d3ab61c80`. Phase 8 is complete and published.
@@ -2036,8 +2035,8 @@ from corrected planning snapshot `a75ec06542660cd4d3a338bed514186549a381bd`
 and is locally complete at
 `f17ba7788c6b364646eaf7e31c12422bc4d1e20c`. The accepted implementation was
 fast-forwarded into local `main` at
-`bea75982ec6c53539a3c13a8260d70f7d0160786`; `origin/main` remains at
-`3f03168c161a941c4f7055629e6f433c636e62a7` because no push was performed.
+`bea75982ec6c53539a3c13a8260d70f7d0160786` and published in `main` and
+`origin/main` at `398785ea48926b52829a0fd1fa4c6d8d8c6e0ef8`.
 
 The complete planning contract is in
 [`docs/PHASE9_PLAN.md`](PHASE9_PLAN.md). Revision 12 proposes only:
@@ -2060,15 +2059,16 @@ The central invariant remains:
 
 The implemented fixed rate-limit values are 30 credits per verified token with
 a one-credit-per-second refill, in memory only. The shared HTTP/stdio admission
-hook is implemented locally and was independently implementation-reviewed
-before the local fast-forward.
+hook is implemented and was independently implementation-reviewed before the
+local fast-forward and publication.
 
 The planned acceptance matrix contains 64 cases. The required governance order
 is documentation freeze, independent architecture review, Codex adjudication,
 documentation-only correction/re-review if needed, a separate explicit
 `AUTHORIZE PHASE 9 IMPLEMENTATION: YES / NO` decision, implementation review,
-and final merge authorization. The source implementation is complete and merged
-into local `main`; remote publication remains a separate operation.
+and final merge authorization. The source implementation is complete, merged
+into local `main`, and published to `origin/main`; later-phase work remains a
+separate operation.
 
 The local post-merge record is in
 [`docs/PHASE9_POST_MERGE_CLOSURE.md`](PHASE9_POST_MERGE_CLOSURE.md).

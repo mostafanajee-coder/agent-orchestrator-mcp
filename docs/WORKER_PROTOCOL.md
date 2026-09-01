@@ -10,7 +10,7 @@ Owner: AOM V1 worker-runtime contract
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
 Governing plans: `docs/PHASE6_PLAN.md`, `docs/PHASE8_PLAN.md`, and `docs/PHASE9_PLAN.md`
 Current implementation: **Phase 8 complete and published; Phase 9 hardening
-merged into local main and not published remotely**
+merged and published in main/origin**
 
 ## 1. Purpose and boundary
 
@@ -434,7 +434,7 @@ PHASE 8 IMPLEMENTATION AUTHORIZED: YES
 PHASE 8 IMPLEMENTATION: COMPLETE AND MERGED LOCALLY
 PHASE 8 REMOTE PUBLICATION: YES
 PHASE 9 IMPLEMENTATION: COMPLETE AND MERGED INTO LOCAL main
-PHASE 9 REMOTE PUBLICATION: NOT PERFORMED
+PHASE 9 REMOTE PUBLICATION: COMPLETE — origin/main at 398785ea
 PHASE 10 STARTED: NO
 ```
 

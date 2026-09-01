@@ -3,10 +3,11 @@
 ## 1. Status and authority
 
 This report records the independently reviewed Phase 9 implementation snapshot.
-After that review, the accepted branch was fast-forwarded into local `main`.
+After that review, the accepted branch was fast-forwarded into local `main` and
+published to `origin/main`.
 The post-merge state is recorded in
 [`docs/PHASE9_POST_MERGE_CLOSURE.md`](PHASE9_POST_MERGE_CLOSURE.md).
-No remote publication, pull request, or deployment has occurred.
+No pull request or deployment has occurred.
 
 | Item | Verified value |
 |---|---|
@@ -18,12 +19,12 @@ No remote publication, pull request, or deployment has occurred.
 | `main` during implementation | `3f03168c161a941c4f7055629e6f433c636e62a7` |
 | `origin/main` during implementation | `3f03168c161a941c4f7055629e6f433c636e62a7` |
 | Phase 9 implementation authorization | `YES` — dedicated local branch only |
-| Phase 9 merge authorization at review snapshot | `NO`; local fast-forward was authorized afterward |
+| Phase 9 merge authorization at review snapshot | `NO`; local fast-forward and publication were authorized afterward |
 | Phase 10 | Not started |
 
 The implementation was authorized by the principal Codex decision after the
 Phase 9 planning review. The authorization is limited to the Phase 9 scope and
-does not authorize a merge or publication.
+does not authorize unrelated later-phase work or deployment.
 
 ## 2. Implemented scope
 
@@ -137,12 +138,12 @@ the complete prior regression set. After the review, Codex must adjudicate its
 findings and issue a separate final merge decision.
 
 At the time of this implementation report, before the subsequent local
-fast-forward:
+fast-forward and publication:
 
 ```text
 PHASE 9 IMPLEMENTATION: COMPLETE LOCALLY
 PHASE 9 IMPLEMENTATION REVIEW: PENDING
 PHASE 9 MERGE: NOT YET AUTHORIZED AT REPORT TIME
-PHASE 9 PUSH/PR: NOT PERFORMED
+PHASE 9 PUSH/PR: PUSH COMPLETED LATER; NO PR CREATED
 PHASE 10: NOT STARTED
 ```

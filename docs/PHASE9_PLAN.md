@@ -4,8 +4,8 @@
 > This document defines the Phase 9 hardening and normative-documentation
 > boundary. The plan itself did not authorize source changes; a separate Codex
 > decision authorized implementation on the dedicated branch, followed by a
-> separate local fast-forward after implementation review. It still does not
-> authorize deployment or remote publication.
+> separate fast-forward and publication after implementation review. It does
+> not authorize deployment or later-phase implementation.
 
 ## 1. Authority and authoritative baseline
 
@@ -16,16 +16,16 @@ from the exact published Phase 8 `main` state:
 |---|---|
 | Authoritative base branch | `main` |
 | Authoritative base commit | `3f03168c161a941c4f7055629e6f433c636e62a7` |
-| `origin/main` | `3f03168c161a941c4f7055629e6f433c636e62a7` |
+| `origin/main` at planning snapshot | `3f03168c161a941c4f7055629e6f433c636e62a7` |
 | Base tree | `8d34fe5c26d0b0f392cdab750cc8e14d3ab61c80` |
 | Phase 8 implementation | merged and published |
 | Phase 8 CI | passed on Windows and Ubuntu |
 | Phase 9 implementation branch | `codex/phase9-implementation` |
 | Phase 9 implementation head | `f17ba7788c6b364646eaf7e31c12422bc4d1e20c` |
 | Phase 9 implementation tree | `503ab723ac23abe12ed5a85cae82db0900b2edc6` |
-| Phase 9 implementation | complete and merged into local `main`; not published remotely |
-| Local `main` after Phase 9 fast-forward | `bea75982ec6c53539a3c13a8260d70f7d0160786` |
-| `origin/main` after Phase 9 work | `3f03168c161a941c4f7055629e6f433c636e62a7` — unchanged |
+| Phase 9 implementation | complete, merged, and published |
+| Local `main` after Phase 9 publication | `398785ea48926b52829a0fd1fa4c6d8d8c6e0ef8` |
+| `origin/main` after Phase 9 publication | `398785ea48926b52829a0fd1fa4c6d8d8c6e0ef8` |
 | Phase 9 implementation authorization | `YES` — dedicated branch only |
 
 The previous planning report proposed a nested security-document path. The
@@ -316,12 +316,12 @@ or recovery semantics may regress.
 | WP9 | Implement shared rate-limit admission | completed locally under explicit authorization |
 | WP10 | Implement redaction/error-shaping corrections | completed locally under explicit authorization |
 | WP11 | Finalize normative documentation without scope expansion | completed locally; report recorded |
-| WP12 | Execute two-session and Windows/POSIX regression gates | Windows local gates passed; POSIX CI evidence pending |
-| WP13 | Independent implementation review | merge prerequisite |
-| WP14 | Codex final merge gate and post-merge closure | local fast-forward complete; remote publication pending |
+| WP12 | Execute two-session and Windows/POSIX regression gates | Windows and POSIX gates passed |
+| WP13 | Independent implementation review | completed; accepted |
+| WP14 | Codex final merge gate and post-merge closure | complete; published |
 
-WP13 independent implementation review is complete. WP14 local fast-forward and
-post-merge closure are complete; remote publication remains outside this record.
+WP13 independent implementation review is complete. WP14 local fast-forward,
+publication, and post-merge closure are complete.
 
 ## 12. Acceptance matrix
 
@@ -486,8 +486,8 @@ PHASE 9 IMPLEMENTATION: COMPLETE AND MERGED INTO LOCAL main
 PHASE 9 IMPLEMENTATION AUTHORIZED: YES — DEDICATED BRANCH ONLY
 PHASE 9 IMPLEMENTATION REVIEW: ACCEPTED
 PHASE 9 LOCAL MERGE: COMPLETE — FAST-FORWARD TO bea75982
-PHASE 9 REMOTE PUBLICATION: NOT PERFORMED
+PHASE 9 REMOTE PUBLICATION: COMPLETE — origin/main at 398785ea
 PHASE 10: NOT STARTED
 ```
 
-**PHASE 9 IMPLEMENTATION — READY FOR INDEPENDENT IMPLEMENTATION REVIEW**
+**PHASE 9 POST-MERGE CLOSURE — COMPLETE**

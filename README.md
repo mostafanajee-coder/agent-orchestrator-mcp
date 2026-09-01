@@ -43,19 +43,20 @@ the closure commit. The post-merge record is in
 `codex/phase8-implementation` and fast-forwarded into `main` at reviewed head
 `130d6988422ad38dcd5513361e049d0171386613` and published in `main`/`origin/main` at `3f03168c161a941c4f7055629e6f433c636e62a7`. It provides bounded startup recovery, reaping, cancellation
 settlement, graceful shutdown, `STALLED` paths, and the principal-only `audit_query` surface, using schema v7
-without a migration. The implementation is now published in `main` and `origin/main`; the Phase 9 implementation is on its dedicated local branch and is not merged. The detailed handoff is in
+without a migration. The implementation is now published in `main` and `origin/main`; Phase 9 is the current published hardening layer. The detailed handoff is in
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md) and the local closure is in
 [`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md).
 
-**Phase 9 — Hardening and documentation (merged locally; not published).** The implementation branch
+**Phase 9 — Hardening and documentation (merged and published).** The implementation branch
 `codex/phase9-implementation` starts from the reviewed planning snapshot
 `a75ec06542660cd4d3a338bed514186549a381bd` and contains the local implementation at
 `f17ba7788c6b364646eaf7e31c12422bc4d1e20c`. It adds fixed post-authentication per-token request admission
 for HTTP and stdio, centralized redaction/error shaping, lease-aware worker-output redaction, two-session
 attribution coverage, and regression tests. The implementation is limited to Phase 9: no migration, new
 business tool, protocol-version change, deployment, or Phase 10 work has been performed. The accepted
-implementation was fast-forwarded into local `main` at `bea75982ec6c53539a3c13a8260d70f7d0160786`; it has
-not been pushed to `origin/main` and no PR was created. The post-merge record is in
+implementation was fast-forwarded into local `main` at `bea75982ec6c53539a3c13a8260d70f7d0160786` and
+published in `main`/`origin/main` at `398785ea48926b52829a0fd1fa4c6d8d8c6e0ef8`; no PR was created. The
+post-merge record is in
 [`docs/PHASE9_POST_MERGE_CLOSURE.md`](docs/PHASE9_POST_MERGE_CLOSURE.md).
 
 The approved design and phase plans are in

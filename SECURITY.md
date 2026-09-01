@@ -156,8 +156,9 @@ The Phase 9 implementation places a fixed in-memory request limiter after
 successful authentication and before tool/domain execution. Its V1 policy is
 30 credits per verified `token_id`, refilled at one credit per second, with one
 credit per authenticated MCP request. `tools/list` and `ping` count as normal
-requests. Restart resets the limiter. The implementation is merged into the
-local `main` branch and is not published to `origin/main`.
+requests. Restart resets the limiter. The implementation is merged and
+published in `main` and `origin/main` at
+`398785ea48926b52829a0fd1fa4c6d8d8c6e0ef8`.
 
 Rate limiting is transport admission control, not an authority or persistence
 mechanism. A rejection cannot consume an idempotency key, open a decision
@@ -166,7 +167,8 @@ decision. Unknown credentials remain under the existing authentication and
 loopback protections; no pre-auth global limiter is assumed.
 
 The shared HTTP/stdio hook was independently implementation-reviewed before
-the local fast-forward. This document does not authorize remote publication.
+the local fast-forward. Remote publication is complete; this document does not
+authorize unrelated changes or later-phase implementation.
 
 ## 12. Data classification and redaction
 
