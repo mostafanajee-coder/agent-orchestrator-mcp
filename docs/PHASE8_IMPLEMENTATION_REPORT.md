@@ -22,7 +22,7 @@ The implementation branch started from the reviewed planning snapshot:
 | Implementation tree | `f77619aa3b2f9443aaa960b196fb488fe7ad3ffb` |
 | Branch | `codex/phase8-implementation` |
 | Reviewed merge into local `main` | `130d6988422ad38dcd5513361e049d0171386613` |
-| Remote publication | not performed |
+| Remote publication | complete at `70390e414e73175d21943f32f14f43d664f3098b` |
 
 No schema migration was added. The implementation remains limited to the
 approved Phase 8 resilience boundary.
@@ -136,8 +136,8 @@ redaction, HTTP audit visibility, and interrupted process shutdown.
 
 The local implementation received an independent implementation review with no
 blocking findings and passed the Codex final merge gate. It was then
-fast-forwarded into local `main`. Remote publication and any deployment remain
-separate actions.
+fast-forwarded into local `main` and published to `origin/main`. No deployment
+was performed.
 
 ```text
 PHASE 8 ARCHITECTURE REVIEW: ACCEPTED
@@ -145,7 +145,7 @@ PHASE 8 IMPLEMENTATION: COMPLETE LOCALLY
 PHASE 8 IMPLEMENTATION REVIEW: ACCEPTED
 PHASE 8 FINAL MERGE GATE: PASSED
 PHASE 8 MERGE: YES — LOCAL FAST-FORWARD
-PHASE 8 PUSH: NO
+PHASE 8 PUSH: YES
 PHASE 9 STARTED: NO
 ```
 

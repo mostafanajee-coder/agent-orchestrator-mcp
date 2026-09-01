@@ -12,6 +12,7 @@ into `main` after all merge-gate preconditions matched.
 | Local merge mode | fast-forward |
 | Local `main` after merge | `130d6988422ad38dcd5513361e049d0171386613` |
 | `origin/main` at closure start | `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3` |
+| Final `origin/main` after Push | `70390e414e73175d21943f32f14f43d664f3098b` |
 | Reviewed head is ancestor of local `main` | yes |
 | Working tree before closure documentation | clean |
 | Phase 9 | not started |
@@ -34,12 +35,12 @@ rerun successfully before the final full CI pass.
 
 ## 3. Publication boundary
 
-The local merge is complete, but it has not been pushed to `origin/main`. No
-pull request was created or merged, and no deployment was performed.
+The local merge was pushed to `origin/main` successfully. No pull request was
+created or merged, and no deployment was performed.
 
 ```text
 PHASE 8 LOCAL MERGE: YES
-PHASE 8 REMOTE PUBLICATION: NO
+PHASE 8 REMOTE PUBLICATION: YES
 PHASE 9 STARTED: NO
 ```
 
@@ -48,4 +49,4 @@ Push gate. Phase 9 must not begin automatically after publication.
 
 ## 4. Exact final verdict
 
-**PHASE 8 MERGED LOCALLY SUCCESSFULLY — REMOTE PUBLICATION PENDING**
+**PHASE 8 MERGED AND PUBLISHED SUCCESSFULLY — REMOTE CI VERIFIED**

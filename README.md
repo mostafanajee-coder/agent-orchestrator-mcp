@@ -43,7 +43,7 @@ the closure commit. The post-merge record is in
 `codex/phase8-implementation` and merged locally into `main` at reviewed head
 `130d6988422ad38dcd5513361e049d0171386613`. It provides bounded startup recovery, reaping, cancellation
 settlement, graceful shutdown, `STALLED` paths, and the principal-only `audit_query` surface, using schema v7
-without a migration. Remote publication is still pending; Phase 9 has not started. The detailed handoff is in
+without a migration. The implementation is now published in `main` and `origin/main`; Phase 9 has not started. The detailed handoff is in
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md) and the local closure is in
 [`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md).
 
