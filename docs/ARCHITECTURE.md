@@ -1,12 +1,15 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Proposal)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Published / Revision 11 Phase 8 Proposal)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
 > Revision 9 records the scoped Phase 6 worker runtime, now published in
 > `main` and `origin/main` at `88670743f8a443bbf3b71c9f379199deca42d512`.
-> Revision 10 below is the reviewed Phase 7 implementation baseline. Its
-> separate Codex authorization applies only to `codex/phase7-implementation`;
+> Revision 10 below is the reviewed and published Phase 7 implementation baseline. Its
+> separate Codex authorization applied only to `codex/phase7-implementation`;
 > the implementation and corrective Windows path fix are published in
-> `main` and `origin/main` at `bf789157619a0ec39486f451405e190ad5209d14`.
+> `main` and `origin/main`, with the final documentation closure at
+> `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`.
+> Revision 11 below is the documentation-only Phase 8 resilience and recovery proposal;
+> it does not authorize implementation.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1565,8 +1568,9 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 > describes the authorized Phase 4 scope on `codex/phase4-implementation`.
 > Phase 5 was subsequently planned, independently reviewed, implemented, and
 > published under its separate authorization record. Revision 9 below records
-> the published Phase 6 implementation. Revision 10 below is the current Phase 7
-> planning proposal and does not authorize implementation.
+> the published Phase 6 implementation. Revision 10 below records the published
+> Phase 7 implementation and Windows correction. Revision 11 below is the current
+> Phase 8 planning proposal and does not authorize implementation.
 
 Each phase is independently verifiable and leaves the repo green.
 
@@ -1579,8 +1583,8 @@ Each phase is independently verifiable and leaves the repo green.
 | **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, decision-scoped idempotency/CAS, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
 | **5** | Job lifecycle | Protected `config.json`, `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34; published at `8867074` |
-| **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Proposed Revision 10; implementation not authorized |
-| **8** | Resilience | Reaper, crash recovery, cancellation, graceful shutdown, `STALLED` paths, `audit_query` | Invariants 27, 35 |
+| **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Revision 10 published; Windows correction and closure recorded at `d0ce68c` |
+| **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Proposed Revision 11; independent review required |
 | **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, `SECURITY.md`, README, two-session Codex drill | The §19 verification checklist, start to finish |
 
 Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
@@ -1657,8 +1661,9 @@ reviewed implementation was merged at
 published in `main` at `530e2441636e6517096b1319c4510b1e56626592`. Phase 6 is
 complete and published in `main` and `origin/main` at
 `88670743f8a443bbf3b71c9f379199deca42d512`; its post-merge closure is recorded
-in `docs/PHASE6_POST_MERGE_CLOSURE.md`. Phase 7 planning is recorded below and
-does not authorize implementation.
+in `docs/PHASE6_POST_MERGE_CLOSURE.md`. Phase 7 is published and closed at
+`d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`. Phase 8 planning is recorded below
+and does not authorize implementation.
 
 ---
 
@@ -1811,9 +1816,9 @@ merged fast-forward into `main`, published to `origin/main`, and closed in
 ## 25. Revision 10 / Phase 7 evidence and artifact proposal
 
 **Status: Phase 7 implementation and the corrective Windows path fix are
-published in `main` and `origin/main` at
-`bf789157619a0ec39486f451405e190ad5209d14`. The implementation handoff is
-recorded in `docs/PHASE7_IMPLEMENTATION_REPORT.md`; post-merge closure is
+published in `main` and `origin/main`. The final documentation closure is
+`d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`; the implementation handoff is
+recorded in `docs/PHASE7_IMPLEMENTATION_REPORT.md` and post-merge closure is
 recorded in `docs/PHASE7_POST_MERGE_CLOSURE.md`.**
 
 Revision 10 is derived from the published Phase 6 baseline at
@@ -1896,6 +1901,11 @@ be described as an unqualified atomic filesystem/database operation.
 
 ### 25.7 Phase boundary and authorization
 
+The gate below is the historical pre-merge Phase 7 record. It is retained for
+provenance; the gate was satisfied, the implementation was merged, the
+Windows correction was verified, and the closure was published above. It does
+not authorize Phase 8.
+
 Revision 10 received independent architecture review and Codex adjudication.
 The following decision authorizes only the scoped implementation branch:
 
@@ -1916,4 +1926,79 @@ AUTHORIZE PHASE 7 IMPLEMENTATION: YES / NO
 ```
 
 Until that decision is explicitly `YES`, no Phase 7 source, migration, MCP
+registration, deployment, push, pull request, or merge may begin.
+
+---
+
+## 26. Revision 11 / Phase 8 resilience and recovery proposal
+
+**Status: documentation-only planning.** Revision 11 is derived from the
+published Phase 7 base at
+`d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`, whose tree is
+`471c197bee3855fc210e2ab0adf77ce1f30815c7`. The base is clean and synchronized
+with `origin/main`. The Phase 7 implementation head and the Windows
+path-normalization correction are ancestors of this base.
+
+The complete planning contract is in
+[`docs/PHASE8_PLAN.md`](PHASE8_PLAN.md). Revision 11 proposes the smallest
+resilience layer around the completed Phase 5–7 lifecycle:
+
+- startup reconciliation of active runs left by a previous process;
+- one bounded per-process reaper for stale, deadline, lease, and ownership
+  loss cases;
+- orphan handling, late-report rejection, and mechanical cancellation
+  settlement;
+- bounded graceful shutdown with HTTP/stdio parity;
+- mechanical entry into the existing non-authoritative `STALLED` state; and
+- one bounded, read-only, principal-only `audit_query` proposal.
+
+The invariant is unchanged and absolute:
+
+> **Recovery may stop, orphan, cancel, or stall work; it may never decide the job.**
+
+### 26.1 Persistence boundary
+
+The proposed baseline is schema v7 with no migration. Existing job fields
+(`deadline_at`, `stale_after_s`, `updated_at`, `version`, and `state_reason`),
+existing run statuses, derived lease eligibility, and the append-only audit
+ledger are the candidate representation. This is conditional on independent
+review confirming that no required recovery fact is being hidden in an
+unrelated field. A missing fact requires a documented plan revision before
+implementation authorization.
+
+The plan uses existing run statuses (`ORPHANED`, `TIMEOUT`, and `CANCELLED`)
+and does not invent an `EXPIRED` lease status. An expired, consumed, mismatched,
+or terminal-run lease is simply unusable under the existing eligibility rule.
+
+### 26.2 Authority and query boundary
+
+The internal `system` actor may reconcile runtime state, append bounded audit
+events, and enter `STALLED`; it has no public capability and cannot write an
+authoritative decision. The existing `codex_decide` path remains the sole
+authority writer.
+
+`audit_query` is proposed as a principal-only read operation with opaque,
+sequence-based pagination, page size 100 by default and 200 maximum. Workers
+and the system actor have no access. Observer access and any new
+`audit:read` capability are not silently added; they require a separate review
+decision. Filters are limited initially to existing indexed scope (`job_id`,
+`session_token_id`, and sequence cursor), with broader filtering deferred.
+
+### 26.3 Scope and governance
+
+Revision 11 excludes evidence/artifact redesign, remote or cloud workers,
+automatic retries, distributed scheduling, telemetry, backup/restore,
+deployment, and all Phase 9 work. The acceptance matrix in the plan contains
+56 named cases: 48 Phase 8 behavior cases and 8 regression/scope cases.
+
+The required order is: freeze the documentation-only snapshot, independent
+architecture review, Codex finding-by-finding adjudication, documentation-only
+corrections if needed, final plan freeze, and then a separate explicit
+decision:
+
+```text
+AUTHORIZE PHASE 8 IMPLEMENTATION: YES / NO
+```
+
+Until that decision is explicitly `YES`, no Phase 8 source, migration, MCP
 registration, deployment, push, pull request, or merge may begin.

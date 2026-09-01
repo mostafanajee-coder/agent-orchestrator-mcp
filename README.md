@@ -33,15 +33,22 @@ protocol, run/lease lifecycle, `qa_dispatch`, `run_report`, and `run_status` sur
 recovery loops, remote workers, and all Phase 7+ behavior remain out of scope for Phase 6.
 
 **Phase 7 — Evidence and artifacts (merged and published).** The reviewed implementation was fast-forwarded into
-`main`, followed by the Windows path-normalization fix at `bf789157619a0ec39486f451405e190ad5209d14`. Local
-`main` and `origin/main` now match at that fix. The post-merge record is in
-[`docs/PHASE7_POST_MERGE_CLOSURE.md`](docs/PHASE7_POST_MERGE_CLOSURE.md); Phase 8 has not started.
+`main`, followed by the Windows path-normalization fix at `bf789157619a0ec39486f451405e190ad5209d14` and the
+documentation closure at `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`. Local `main` and `origin/main` now match at
+the closure commit. The post-merge record is in
+[`docs/PHASE7_POST_MERGE_CLOSURE.md`](docs/PHASE7_POST_MERGE_CLOSURE.md).
+
+**Phase 8 — Resilience and recovery (planning only).** The documentation-only plan is being prepared on
+`codex/phase8-authority-plan` from the authoritative Phase 7 base `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`.
+It covers bounded startup recovery, reaping, cancellation settlement, graceful shutdown, `STALLED` paths, and a
+principal-only `audit_query` proposal. No Phase 8 source, migration, MCP registration, Push, PR, deployment, or
+implementation authorization exists.
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
 [docs/PHASE5_PLAN.md](docs/PHASE5_PLAN.md), [docs/PHASE6_PLAN.md](docs/PHASE6_PLAN.md), and
 [docs/WORKER_PROTOCOL.md](docs/WORKER_PROTOCOL.md), [docs/PHASE6_POST_MERGE_CLOSURE.md](docs/PHASE6_POST_MERGE_CLOSURE.md),
-and [docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md).
+[docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md), and [docs/PHASE8_PLAN.md](docs/PHASE8_PLAN.md).
 The empirical Codex/Inspector protocol observation is recorded in
 [docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 
