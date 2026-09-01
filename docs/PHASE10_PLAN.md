@@ -32,8 +32,53 @@ contract, or credentials are assumed by this plan.
 The current environment inventory is recorded in
 [`docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md`](PHASE10_EXTERNAL_WORKER_EVIDENCE.md).
 It did not identify an AOM Worker V1 executable or verify an external worker
-contract; WP2 and WP3 therefore remain open blockers before implementation
-authorization.
+contract. The ChatGPT-to-AOM connection and the Codex/Antigravity subordinate
+interfaces are also not verified. The controller and worker-contract work
+packages therefore remain open blockers before implementation authorization.
+
+### 1.1 Final product control model
+
+The intended product runtime topology is distinct from the development
+governance topology:
+
+```text
+ChatGPT
+   |
+   | MCP
+   v
+AOM control plane
+   |
+   +-- execution/review workers
+   +-- Codex when exposed through a verified worker interface
+   +-- Antigravity/Hermes review paths when exposed through verified interfaces
+   +-- future specialized workers
+```
+
+ChatGPT is the intended top-level runtime controller. AOM remains the MCP
+control plane, authority-enforcement layer, persistence/state layer, worker
+coordination layer, and evidence/artifact aggregation layer.
+
+The V1 principal actor is literally named `codex`, but that is a historical
+actor identifier, not a requirement that the Codex application or executable
+must be the permanent runtime controller. The authority model remains one
+authenticated principal plus role, capabilities, and session attribution.
+ChatGPT must use the existing principal model rather than creating a second
+competing principal or authority system.
+
+During project development, Codex remains the final architecture,
+implementation, and merge adjudicator. That governance role must not be
+interpreted as the final product runtime topology.
+
+The AOM-side distinction is verified by the existing actor/capability checks;
+the actual ChatGPT-to-local-AOM connection is not yet verified and remains a
+Phase 10 integration blocker.
+
+### 1.2 No authority renaming in this phase
+
+Phase 10 does not rename the V1 `codex` actor, `codex_decide`, database
+identities, or historical Phase 3–9 records. In this plan, `codex` means the
+historical V1 principal actor identifier. It does not mean that the Codex
+executable must permanently control the final product runtime.
 
 ## 2. Objective
 
@@ -62,8 +107,26 @@ the authority model, implementation must stop and return to architecture review.
 | Browser credentials or third-party login automation | Excluded; they introduce secret custody and irreversible-action concerns. |
 | Artifact retention, dashboard, backup, or maintenance work | Deferred; these are not the ordered first post-V1 integration. |
 
-Selecting the browser worker is a planning decision only. It does not identify
-an executable or claim that an external worker is currently compatible.
+Selecting the browser worker is a conditional planning fallback only. It does
+not identify an executable or claim that an external worker is currently
+compatible. The first gate is ChatGPT-to-AOM connectivity, followed by the
+search for a verified subordinate execution interface.
+
+### 3.1 Controller-first decision tree
+
+Phase 10 must evaluate integration surfaces in this order:
+
+1. Can ChatGPT reach this AOM instance through a supported MCP path? If not or
+   if unknown, the plan remains blocked on controller connectivity.
+2. If yes, can Codex expose a callable, bounded, browser-capable subordinate
+   interface? If yes, evaluate a thin adapter.
+3. If not, can Antigravity expose a callable, bounded, browser-capable
+   subordinate interface? If yes, evaluate a thin adapter.
+4. If neither interface is available, a dedicated external browser worker is
+   the preferred fallback.
+
+No option is selected merely because an interactive application can display a
+browser or because Chrome/Playwright is installed.
 
 ## 4. Scope
 
@@ -88,6 +151,9 @@ an executable or claim that an external worker is currently compatible.
     behavior.
 13. Update the architecture and governance record for the first post-V1
     integration.
+14. Verify the intended ChatGPT-to-AOM MCP path and assess Codex and
+    Antigravity/Hermes as possible subordinate interfaces before selecting a
+    browser implementation path.
 
 ### 4.2 Explicit exclusions
 
@@ -250,6 +316,39 @@ The plan must resolve all of the following before implementation authorization:
 No new AOM capability, actor, MCP tool, schema table, or migration is justified
 merely to register a browser worker.
 
+### 8.1 Final controller and subordinate-interface assessment
+
+The intended product controller is ChatGPT connected to AOM through MCP. The
+current AOM implementation exposes local loopback HTTP and stdio transports,
+but this repository does not prove that a particular ChatGPT product surface
+can reach this local instance. A supported local connector or bridge may be
+required; a public endpoint must not be introduced implicitly. This is an
+integration question, not a reason to create a second principal.
+
+The installed Codex CLI exposes a non-interactive `codex exec` command with
+stdin prompts and optional JSONL output, and it exposes `codex mcp-server` over
+stdio. These are real callable interfaces, but neither is currently proven to
+be an AOM Worker V1 contract or to expose browser control, profile selection,
+or deterministic browser output. A Codex subordinate path would require a
+separate worker identity and a thin bounded adapter; the V1 `codex` principal
+must not be reused as a worker identity.
+
+Antigravity and Hermes are known as an interactive review path from user
+experience, but no supported callable Antigravity CLI/API/subprocess protocol
+is exposed in the current environment. Their internal delegation must not be
+treated as an AOM interface. Any future path requires task input, bounded
+machine-readable output, lifecycle/cancellation, identity, and failure
+contracts before it can become a worker.
+
+Current classifications:
+
+| Interface | Classification |
+|---|---|
+| ChatGPT → local AOM MCP | `UNVERIFIED` — local connector/bridge not proven |
+| Codex non-interactive execution | `POSSIBLE BUT REQUIRES AN ADAPTER` |
+| Codex browser capability through that interface | `UNVERIFIED` |
+| Antigravity/Hermes subordinate execution | `NOT CURRENTLY EXPOSED` / `UNVERIFIED` |
+
 ## 9. Worker Protocol V1 mapping
 
 The existing protocol remains version 1 and unchanged:
@@ -278,7 +377,7 @@ structured captures enter through existing artifact staging and registration:
 - the worker cannot select an absolute storage path;
 - artifact labels and worker text remain redacted before exposure;
 - an artifact does not imply that the browser assertion is true;
-- package and delivery behavior remain existing Codex-authority transitions.
+- package and delivery behavior remain existing authenticated-principal authority transitions; the V1 actor is named `codex` and the intended runtime controller is ChatGPT.
 
 The plan must explicitly distinguish deterministic fixture observations from
 live-site observations. Public or mutable sites are not acceptance fixtures.
@@ -286,8 +385,9 @@ live-site observations. Public or mutable sites are not acceptance fixtures.
 ## 11. Lifecycle, recovery, and failure behavior
 
 Browser runs use the existing `qa_dispatch` → run/lease → Worker Protocol V1
-→ evidence/artifact → Codex decision flow. No separate browser lifecycle is
-created.
+→ evidence/artifact → authenticated-principal decision flow. The V1 principal
+actor is named `codex`; the intended product runtime controller is ChatGPT. No
+separate browser lifecycle is created.
 
 | Condition | Required AOM treatment |
 |---|---|
@@ -303,6 +403,37 @@ created.
 | Browser credential request | Reject; credentials are outside Phase 10 |
 
 Automatic retries and replacement runs are explicitly excluded.
+
+### 11.1 Output and context compression contract
+
+Workers should perform bounded work internally and return an information-dense
+result sufficient for the authenticated principal to decide. The default AOM
+surface should contain only:
+
+- status and concise exact summary;
+- important findings, severity, and confidence where relevant;
+- evidence and artifact references;
+- unresolved blockers and recommended next action.
+
+Raw chain-of-thought, complete internal transcripts, repetitive console output,
+and duplicated evidence are not default AOM outputs. Detailed material remains
+in bounded evidence/artifacts and is fetched only when needed. Compression must
+not remove the facts required to make a safe decision, and no persistence
+redesign is proposed for this requirement.
+
+### 11.2 Browser integration option comparison
+
+| Option | Current interface evidence | Adapter | Profile/session control | Determinism and authority |
+|---|---|---|---|---|
+| A. Dedicated external browser worker | Chrome and Playwright are present, but no AOM Worker V1 executable is identified | Required; worker must emit AOM V1 NDJSON | Dedicated/temporary profile controlled by external configuration | Best fallback; mechanical and subordinate if contract is verified |
+| B. Codex browser capability | `codex exec` is callable and machine-readable output is available, but browser control is unverified | Required | Unverified; interactive state must not be assumed | Model-mediated and not yet proven deterministic; separate worker identity required |
+| C. Antigravity browser capability | Interactive IDE/review path is known, but no callable interface is exposed | Required if an interface is later verified | Unverified | Not currently assessable as an AOM worker; authority remains separate |
+| D. Hybrid agent adapter | Depends on a verified callable agent interface and bounded result contract | Required | Must be explicit and operator-owned | Not selected; internal reasoning remains outside AOM and output advisory |
+
+No option is approved for implementation by this comparison. The decision tree
+is controller-first: verify ChatGPT connectivity, then verify Codex and
+Antigravity callable surfaces, and use Option A only as the narrow fallback if
+the other interfaces cannot satisfy the contract.
 
 ## 12. Schema, tool, and protocol impact
 
@@ -354,25 +485,29 @@ worker release.
 | WP | Scope | Gate |
 |---|---|---|
 | WP0 | Record Phase 9 published baseline and clean starting point | documentation only |
-| WP1 | Draft Phase 10 plan and proposed Revision 13 architecture delta | documentation only |
-| WP2 | Identify the exact external browser worker and owner | blocking evidence |
-| WP3 | Verify invocation, version, input, output, limits, and platform contract | blocking evidence |
-| WP4 | Freeze AOM/external-worker trust and ownership boundary | architecture decision |
-| WP5 | Freeze declarative task and destination-policy contract | architecture decision |
-| WP6 | Map the contract to Worker Protocol V1 | scope gate |
-| WP7 | Map assertions/captures to evidence/artifact admission | scope gate |
-| WP8 | Freeze lifecycle, timeout, cancellation, recovery, and failure behavior | lifecycle gate |
-| WP9 | Define deterministic fixtures and Windows/POSIX evidence | verification gate |
-| WP10 | Freeze compatibility/version policy and non-goals | architecture gate |
-| WP11 | Freeze the 48-case acceptance matrix | evidence gate |
-| WP12 | Freeze the documentation-only planning snapshot | clean-tree gate |
-| WP13 | Independent architecture review | required before authorization |
-| WP14 | Codex adjudication and documentation corrections | required before authorization |
-| WP15 | Targeted re-review if a substantive blocker changes the plan | conditional |
-| WP16 | Separate Codex implementation-authorization decision | explicit YES/NO |
-| WP17 | Future implementation and full regression review | not authorized by this plan |
+| WP1 | Freeze product runtime topology and development/runtime authority distinction | documentation only |
+| WP2 | Verify whether ChatGPT can reach the local AOM MCP service | blocking integration evidence |
+| WP3 | Assess Codex as a callable subordinate executor, without assuming browser access | blocking integration evidence |
+| WP4 | Assess Antigravity/Hermes as a callable subordinate review path | blocking integration evidence |
+| WP5 | Compare browser options A–D and select only an evidence-supported candidate | architecture decision |
+| WP6 | Identify the exact external browser worker if the dedicated-worker fallback is selected | blocking evidence |
+| WP7 | Verify invocation, version, input, output, limits, and platform contract | blocking evidence |
+| WP8 | Freeze AOM/worker trust, profile, destination, and ownership boundaries | architecture decision |
+| WP9 | Freeze declarative task and destination-policy contract | architecture decision |
+| WP10 | Map the selected contract to Worker Protocol V1 | scope gate |
+| WP11 | Map assertions/captures to evidence/artifact admission | scope gate |
+| WP12 | Freeze lifecycle, timeout, cancellation, recovery, and failure behavior | lifecycle gate |
+| WP13 | Define deterministic fixtures and Windows/POSIX evidence | verification gate |
+| WP14 | Freeze compatibility/version policy, output compression, and non-goals | architecture gate |
+| WP15 | Freeze the 48-case acceptance matrix | evidence gate |
+| WP16 | Freeze the documentation-only planning snapshot | clean-tree gate |
+| WP17 | Independent architecture review | required before authorization |
+| WP18 | Codex adjudication and documentation corrections | required before authorization |
+| WP19 | Targeted re-review if a substantive blocker changes the plan | conditional |
+| WP20 | Separate Codex implementation-authorization decision | explicit YES/NO |
+| WP21 | Future implementation and full regression review | not authorized by this plan |
 
-WP17 is future work only. This document authorizes none of it.
+WP21 is future work only. This document authorizes none of it.
 
 ## 15. Acceptance matrix
 
@@ -447,7 +582,7 @@ BASE 4 + REGISTRY 6 + CONTRACT 8 + PROTOCOL 6
 | P10-AUTH-02 | Browser FAIL cannot reject a job |
 | P10-AUTH-03 | Browser worker cannot access `codex_decide` |
 | P10-AUTH-04 | Browser worker receives no principal capability |
-| P10-AUTH-05 | Codex remains the sole authoritative decision actor |
+| P10-AUTH-05 | The single authenticated principal remains the sole authoritative actor regardless of client brand |
 | P10-AUTH-06 | No browser-output field selects an authoritative transition |
 
 ### LIFECYCLE — P10-LIFE-01 through P10-LIFE-06
@@ -476,14 +611,21 @@ BASE 4 + REGISTRY 6 + CONTRACT 8 + PROTOCOL 6
 
 The following decisions are blocking before implementation authorization:
 
-1. Exact external worker identity, version, owner, and executable location.
-2. Exact invocation and Worker Protocol V1 compatibility.
-3. Exact declarative operation schema and bounds.
-4. Destination/host allowlist ownership and enforcement evidence.
-5. Screenshot/evidence compatibility with existing admission paths.
-6. Supported Windows/POSIX worker and browser versions.
-7. Version mismatch and unavailable-worker behavior.
-8. Proof that no credentials or arbitrary code are required.
+1. Whether ChatGPT can reach the local AOM MCP service through a supported
+   connector or requires a local bridge.
+2. Whether Codex exposes a callable subordinate interface with browser control
+   and bounded machine-readable output.
+3. Whether Antigravity/Hermes exposes a callable subordinate interface with
+   bounded machine-readable output and lifecycle control.
+4. Exact external worker identity, version, owner, and executable location if
+   the dedicated-worker fallback is selected.
+5. Exact invocation and Worker Protocol V1 compatibility.
+6. Exact declarative operation schema and bounds.
+7. Destination/host allowlist ownership and enforcement evidence.
+8. Screenshot/evidence compatibility with existing admission paths.
+9. Supported Windows/POSIX worker and browser versions.
+10. Version mismatch and unavailable-worker behavior.
+11. Proof that no credentials or arbitrary code are required.
 
 Primary risks are external contract drift, browser nondeterminism, destination
 policy ambiguity, trust overstatement, platform mismatch, and pressure to add
@@ -495,24 +637,28 @@ not permission to widen implementation.
 The required sequence is:
 
 1. Keep Phase 9 published state unchanged.
-2. Review this documentation-only Phase 10 proposal independently.
-3. Resolve every blocking external-worker decision with safe evidence.
-4. Apply documentation-only corrections if required.
-5. Freeze the exact planning snapshot with base SHA, planning SHA, tree SHA,
+2. Verify whether ChatGPT can reach AOM through a supported local MCP path;
+   classify the result without assuming loopback reachability.
+3. Assess Codex and Antigravity/Hermes as subordinate interfaces without
+   assuming browser control or machine-readable worker behavior.
+4. Compare the browser options and resolve every blocking worker-contract
+   decision with safe evidence.
+5. Apply documentation-only corrections if required.
+6. Freeze the exact planning snapshot with base SHA, planning SHA, tree SHA,
    changed paths, and clean tree.
-6. Obtain independent architecture review of that exact snapshot.
-7. Codex adjudicates every finding.
-8. Conduct targeted re-review if a substantive architecture blocker changes.
-9. Codex records a separate decision:
+7. Obtain independent architecture review of that exact snapshot.
+8. Codex adjudicates every finding.
+9. Conduct targeted re-review if a substantive architecture blocker changes.
+10. Codex records a separate decision:
 
    ```text
    AUTHORIZE PHASE 10 IMPLEMENTATION: YES / NO
    ```
 
-10. Only an explicit `YES` permits a separately frozen implementation branch.
-11. Future implementation must remain within this plan and pass all 48 cases
+11. Only an explicit `YES` permits a separately frozen implementation branch.
+12. Future implementation must remain within this plan and pass all 48 cases
     plus complete Phase 4–9 regressions.
-12. Independent implementation review and a separate Codex merge/publication
+13. Independent implementation review and a separate Codex merge/publication
     gate are required afterward.
 
 Documentation approval never authorizes implementation.
@@ -525,6 +671,9 @@ PHASE 10: PLANNING ONLY
 PHASE 10 IMPLEMENTATION: NOT STARTED
 PHASE 10 IMPLEMENTATION AUTHORIZED: NO
 PHASE 10 PLAN: CODEX-ADJUDICATED BOUNDED PROPOSAL
+PHASE 10 CHATGPT-AOM CONNECTIVITY: UNVERIFIED
+PHASE 10 CODEX SUBORDINATE INTERFACE: POSSIBLE BUT REQUIRES AN ADAPTER
+PHASE 10 ANTIGRAVITY/HERMES INTERFACE: NOT CURRENTLY EXPOSED
 PHASE 10 EXTERNAL WORKER: NOT IDENTIFIED
 PHASE 10 EXTERNAL WORKER CONTRACT: NOT YET VERIFIED
 ```

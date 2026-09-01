@@ -67,7 +67,8 @@ worker contract must be verified before implementation authorization. No Phase
 10 source, migration, MCP tool, deployment, push, PR, or implementation work
 has started. The plan has been independently reviewed and Codex-adjudicated as
 a bounded proposal; the external worker contract remains to be evidenced
-before any implementation decision. The plan is in
+before any implementation decision, and ChatGPT-to-local-AOM connectivity has
+not yet been verified. The plan is in
 [`docs/PHASE10_PLAN.md`](docs/PHASE10_PLAN.md), and the adjudication is in
 [`docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md`](docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md).
 The external-worker inventory remains unresolved and is recorded in

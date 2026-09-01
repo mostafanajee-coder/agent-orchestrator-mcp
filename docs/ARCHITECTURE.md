@@ -2108,6 +2108,14 @@ an already-running browser process. Profile paths, browser flags, executable
 selection, and destination policy remain external configuration and are not
 job-controlled inputs.
 
+The intended final product runtime controller is ChatGPT connected to AOM over
+MCP. The current V1 `codex` actor is the single principal identity, not a
+requirement that the Codex executable be the runtime controller. Codex remains
+the development governance authority while the product is being built. The
+actual ChatGPT-to-local-AOM connector or bridge, and callable subordinate
+interfaces for Codex or Antigravity/Hermes, remain unverified; no second
+principal or authority path is introduced to solve that uncertainty.
+
 The governing invariant is:
 
 > **A browser worker may produce bounded advisory observations and artifacts;

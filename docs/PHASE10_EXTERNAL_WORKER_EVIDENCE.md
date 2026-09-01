@@ -43,6 +43,12 @@ or uncontrolled worker output was accessed.
 
 The following required facts remain **UNVERIFIED**:
 
+- supported ChatGPT-to-local-AOM MCP connectivity or the need for a local
+  bridge;
+- a callable Codex subordinate interface with browser control and AOM V1
+  output;
+- a callable Antigravity/Hermes subordinate interface with bounded machine-
+  readable output;
 - exact external worker identity, release, owner, and installation location;
 - exact argv, stdin, stdout, and exit-code behavior;
 - native Worker Protocol V1 compatibility or the shape of an external wrapper;
@@ -59,14 +65,41 @@ The generic marker search in the separate Hermes source tree found unrelated
 uses of terms such as `protocol_version`, `worker_id`, and `NDJSON`; those
 matches are not an AOM Worker V1 contract and are not treated as proof.
 
-## 5. Gate decision
+## 5. Controller and subordinate-interface evidence
 
-WP2 (identify the exact worker) and WP3 (verify its contract) are not yet
-satisfied. This is a deliberate pre-implementation blocker, not evidence of a
-defect in the published AOM core.
+The AOM repository exposes local loopback HTTP and stdio MCP entry points. No
+supported ChatGPT connector or bridge to this particular local service was
+verified from the available repository and shell evidence. A ChatGPT client may
+be able to use the existing principal token if such a connector is configured,
+but that end-to-end path is currently **UNVERIFIED**.
+
+The installed Codex CLI is version `codex-cli 0.151.0-alpha.7.1`. Its help
+documents `codex exec` with stdin prompts and optional JSONL output, and
+`codex mcp-server` over stdio. This proves a callable Codex CLI surface, but
+does not prove AOM Worker V1 framing, browser control, profile selection, or
+deterministic browser output. Classification: **POSSIBLE BUT REQUIRES AN
+ADAPTER** for subordinate execution; browser capability remains **UNVERIFIED**.
+
+Antigravity and Hermes are available as an interactive user workflow, but no
+callable Antigravity CLI/API/subprocess contract was exposed in this shell.
+Antigravity IDE directories and browser recordings are not a machine-readable
+worker interface. Classification: **NOT CURRENTLY EXPOSED / UNVERIFIED**.
+
+These observations do not change the authority model and do not authorize
+building an adapter or worker.
+
+## 6. Gate decision
+
+WP2 through WP7 (controller connectivity, subordinate-interface assessment,
+option selection, and worker-contract verification) are not yet satisfied.
+This is a deliberate pre-implementation blocker, not evidence of a defect in
+the published AOM core.
 
 ```text
 PHASE 10 PLAN: CODEX-ADJUDICATED BOUNDED PROPOSAL
+CHATGPT-AOM CONNECTIVITY: NOT VERIFIED
+CODEX BROWSER INTERFACE: NOT VERIFIED
+ANTIGRAVITY/HERMES CALLABLE INTERFACE: NOT EXPOSED
 EXTERNAL BROWSER WORKER: NOT IDENTIFIED
 EXTERNAL WORKER CONTRACT: NOT VERIFIED
 PHASE 10 IMPLEMENTATION: NOT STARTED
@@ -75,13 +108,15 @@ PHASE 10 MERGE/PUSH/PR: NOT AUTHORIZED
 PHASE 11: NOT STARTED
 ```
 
-## 6. Required next evidence
+## 7. Required next evidence
 
-To continue the Phase 10 gate, provide or identify one exact external worker
-repository/executable and its safe version/invocation documentation. The next
-read-only evidence package must establish the contract items in
-[`docs/PHASE10_PLAN.md`](PHASE10_PLAN.md) §6 without including credentials,
-cookies, private browser state, or raw uncontrolled transcripts.
+To continue the Phase 10 gate, first establish whether the intended ChatGPT
+client can reach this local AOM MCP service through a supported connector or
+bridge. Then provide or identify one exact subordinate browser-capable worker
+or adapter and its safe version/invocation documentation. The next read-only
+evidence package must establish the contract items in
+[`docs/PHASE10_PLAN.md`](PHASE10_PLAN.md) §6 and §8.1 without including
+credentials, cookies, private browser state, or raw uncontrolled transcripts.
 
 Until that evidence exists, no `workers.json` entry, adapter, wrapper, browser
 task implementation, migration, MCP tool, or Phase 10 source change may be
