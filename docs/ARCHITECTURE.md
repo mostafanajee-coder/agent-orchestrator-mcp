@@ -1355,13 +1355,13 @@ POSIX equivalent: `$XDG_STATE_HOME/agent-orchestrator-mcp` (default `~/.local/st
 agent-orchestrator-mcp/
 ├── package.json  tsconfig.json  vitest.config.ts  .editorconfig
 ├── README.md  LICENSE
+├── SECURITY.md                     # threat model, Windows ACL model, bootstrap
 ├── config/
 │   └── orchestrator.example.jsonc     # actors, workers, workspace_roots, port, limits
 ├── docs/
 │   ├── ARCHITECTURE.md                # this report, maintained
-│   ├── WORKER_PROTOCOL.md             # the NDJSON contract
-│   └── SECURITY.md                    # threat model, Windows ACL model, bootstrap
-├── src/
+│   └── WORKER_PROTOCOL.md             # the NDJSON contract
+└── src/
 │   ├── index.ts                       # CLI: serve --http|--stdio, init, token, migrate, doctor
 │   ├── config/                        # zod-validated config, state root resolution, workspace roots
 │   ├── mcp/
@@ -1589,7 +1589,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **5** | Job lifecycle | Protected `config.json`, `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34; published at `8867074` |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Revision 10 published; Windows correction and closure recorded at `d0ce68c` |
-| **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation merged and published at `70390e4` |
+| **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation merged and published at `3f03168c` |
 | **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, root `SECURITY.md`, README, two-session Codex drill | Proposed Revision 12; independent review required |
 
 Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
