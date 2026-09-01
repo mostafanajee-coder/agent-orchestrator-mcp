@@ -73,6 +73,20 @@ function lineBytes(value: Buffer): number {
   return value.byteLength;
 }
 
+function signalProcessGroup(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  if (process.platform !== 'win32' && child.pid !== undefined) {
+    try {
+      // The child is spawned detached on POSIX, so its PID is also the
+      // process-group ID. A negative PID signals the complete worker tree.
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall back to the direct child if it exited between the checks.
+    }
+  }
+  child.kill(signal);
+}
+
 function redactRuntimeText(value: string): string {
   return value
     .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
@@ -146,6 +160,7 @@ export class ProcessRuntime {
           cwd: loaded.workspace,
           env: boundedEnvironment(worker.environment_allowlist),
           shell: false,
+          detached: process.platform !== 'win32',
           windowsHide: true,
           stdio: ['pipe', 'pipe', 'pipe'],
         },
@@ -337,9 +352,9 @@ export class ProcessRuntime {
           stdio: 'ignore',
           windowsHide: true,
         });
-        killer.on('error', () => active.child.kill());
+        killer.on('error', () => signalProcessGroup(active.child, 'SIGTERM'));
       } else {
-        active.child.kill('SIGTERM');
+        signalProcessGroup(active.child, 'SIGTERM');
       }
     } catch {
       // The close event still settles the run using the recorded reason.
@@ -347,7 +362,7 @@ export class ProcessRuntime {
     if (active.forceTimer === undefined) {
       active.forceTimer = setTimeout(() => {
         try {
-          active.child.kill('SIGKILL');
+          signalProcessGroup(active.child, 'SIGKILL');
         } catch {
           // Process already exited.
         }
