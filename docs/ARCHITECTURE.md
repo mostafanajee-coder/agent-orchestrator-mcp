@@ -1809,9 +1809,11 @@ merged fast-forward into `main`, published to `origin/main`, and closed in
 
 ## 25. Revision 10 / Phase 7 evidence and artifact proposal
 
-**Status: Phase 7 implementation authorized on `codex/phase7-implementation`.
+**Status: Phase 7 implementation is complete locally on
+`codex/phase7-implementation`.
 The implementation is not merged into `main`; Phase 7 merge authorization is
-not granted.**
+not granted. The implementation handoff is recorded in
+`docs/PHASE7_IMPLEMENTATION_REPORT.md`.**
 
 Revision 10 is derived from the published Phase 6 baseline at
 `88670743f8a443bbf3b71c9f379199deca42d512`. It is governed by
