@@ -29,6 +29,12 @@ published V1 architecture explicitly orders the external browser worker before
 the later `agy` adapter. No browser-worker executable, version, invocation
 contract, or credentials are assumed by this plan.
 
+The current environment inventory is recorded in
+[`docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md`](PHASE10_EXTERNAL_WORKER_EVIDENCE.md).
+It did not identify an AOM Worker V1 executable or verify an external worker
+contract; WP2 and WP3 therefore remain open blockers before implementation
+authorization.
+
 ## 2. Objective
 
 Phase 10 will determine whether one external deterministic browser worker can
@@ -491,6 +497,7 @@ PHASE 10: PLANNING ONLY
 PHASE 10 IMPLEMENTATION: NOT STARTED
 PHASE 10 IMPLEMENTATION AUTHORIZED: NO
 PHASE 10 PLAN: CODEX-ADJUDICATED BOUNDED PROPOSAL
+PHASE 10 EXTERNAL WORKER: NOT IDENTIFIED
 PHASE 10 EXTERNAL WORKER CONTRACT: NOT YET VERIFIED
 ```
 

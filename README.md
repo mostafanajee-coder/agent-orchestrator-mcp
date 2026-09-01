@@ -70,6 +70,8 @@ a bounded proposal; the external worker contract remains to be evidenced
 before any implementation decision. The plan is in
 [`docs/PHASE10_PLAN.md`](docs/PHASE10_PLAN.md), and the adjudication is in
 [`docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md`](docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md).
+The external-worker inventory remains unresolved and is recorded in
+[`docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md`](docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md).
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and

@@ -2118,3 +2118,8 @@ AUTHORIZE PHASE 10 IMPLEMENTATION: YES / NO
 The independent review and Codex finding-by-finding adjudication are recorded
 in
 [`docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md`](PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md).
+
+The current external-worker inventory is recorded in
+[`docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md`](PHASE10_EXTERNAL_WORKER_EVIDENCE.md);
+the exact worker contract remains unverified and implementation remains
+unauthorized.
