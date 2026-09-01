@@ -1,8 +1,10 @@
 # AOM — Phase 8 Resilience and Recovery Plan
 
-> **Status: planning only.** This document defines a proposed Phase 8 scope and
-> review package. It does not authorize source changes, schema migrations, MCP
-> tool registration, deployment, Push, PR creation, or Merge.
+> **Status: approved planning baseline with separately authorized implementation.**
+> This document remains the Phase 8 scope and review contract. Its implementation
+> authorization is recorded separately below and is limited to
+> `codex/phase8-implementation`; it does not authorize deployment, Push, PR
+> creation, or Merge.
 
 ## 1. Authority, baseline, and purpose
 
@@ -19,7 +21,7 @@ Windows artifact-root correction and its documentation closure.
 | Phase 7 reviewed implementation head | `035fbb6f3de5588c420b153c6d47497e326340e0` |
 | Phase 7 Windows correction | `bf789157619a0ec39486f451405e190ad5209d14` |
 | Phase 7 reviewed head ancestor of base | yes |
-| Phase 8 implementation | not started |
+| Phase 8 implementation | in progress on `codex/phase8-implementation` at `d46e956` |
 
 The previous Phase 8 proposal referenced `5b0aa1824f567d1369451c57193f8cbd465ed4ac`.
 That value predates the Windows path-normalization fix and the final Phase 7
@@ -351,7 +353,8 @@ Resource limits are fixed in the implementation plan, not delegated to workers:
 | WP11 | Freeze the acceptance/regression matrix | WP10 |
 | WP12 | Independent review package, Codex adjudication, and final plan freeze | WP11 |
 
-No implementation work package begins during this planning cycle.
+The planning document alone does not authorize implementation. The separate
+Codex authorization recorded in §14 permits the scoped implementation branch.
 
 ## 12. Acceptance and regression matrix
 
@@ -505,14 +508,23 @@ The required sequence is:
    final merge authorization are separate later gates.
 10. Phase 9 planning cannot start automatically after a Phase 8 merge.
 
+Codex has now recorded the required separate authorization:
+
+```text
+AUTHORIZE PHASE 8 IMPLEMENTATION: YES
+IMPLEMENTATION BRANCH: codex/phase8-implementation
+IMPLEMENTATION SCOPE: this plan only
+MERGE/PUSH/DEPLOYMENT: NOT AUTHORIZED
+```
+
 At this planning snapshot:
 
 ```text
 PHASE 7: COMPLETE, PUBLISHED, AND WINDOWS-FIXED
-PHASE 8 PLAN: DOCUMENTATION-ONLY
-PHASE 8 IMPLEMENTATION: NOT STARTED
-PHASE 8 IMPLEMENTATION AUTHORIZED: NO
+PHASE 8 PLAN: APPROVED PLANNING BASELINE
+PHASE 8 IMPLEMENTATION: IN PROGRESS ON codex/phase8-implementation
+PHASE 8 IMPLEMENTATION AUTHORIZED: YES — BRANCH ONLY
 PHASE 9: NOT STARTED
 ```
 
-**PHASE 8 ARCHITECTURE PLAN — READY FOR INDEPENDENT REVIEW**
+**PHASE 8 IMPLEMENTATION AUTHORIZED — SCOPE LIMITED TO THIS PLAN**

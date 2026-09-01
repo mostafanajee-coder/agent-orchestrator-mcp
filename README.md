@@ -38,17 +38,20 @@ documentation closure at `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`. Local `main
 the closure commit. The post-merge record is in
 [`docs/PHASE7_POST_MERGE_CLOSURE.md`](docs/PHASE7_POST_MERGE_CLOSURE.md).
 
-**Phase 8 — Resilience and recovery (planning only).** The documentation-only plan is being prepared on
-`codex/phase8-authority-plan` from the authoritative Phase 7 base `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`.
-It covers bounded startup recovery, reaping, cancellation settlement, graceful shutdown, `STALLED` paths, and a
-principal-only `audit_query` proposal. No Phase 8 source, migration, MCP registration, Push, PR, deployment, or
-implementation authorization exists.
+**Phase 8 — Resilience and recovery (implementation in progress).** The reviewed planning baseline is preserved at
+`809d698c164ad614e2365778e85e40dc65be872b`; Codex has authorized implementation only on
+`codex/phase8-implementation`, whose current source head is `d46e956`. It provides bounded startup recovery,
+reaping, cancellation settlement, graceful shutdown, `STALLED` paths, and the principal-only `audit_query` surface.
+The implementation uses schema v7 without a migration. It has not been pushed, merged, or deployed; Phase 9 has not
+started. The detailed handoff is in
+[`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md).
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
 [docs/PHASE5_PLAN.md](docs/PHASE5_PLAN.md), [docs/PHASE6_PLAN.md](docs/PHASE6_PLAN.md), and
 [docs/WORKER_PROTOCOL.md](docs/WORKER_PROTOCOL.md), [docs/PHASE6_POST_MERGE_CLOSURE.md](docs/PHASE6_POST_MERGE_CLOSURE.md),
-[docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md), and [docs/PHASE8_PLAN.md](docs/PHASE8_PLAN.md).
+[docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md), [docs/PHASE8_PLAN.md](docs/PHASE8_PLAN.md), and
+[`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md).
 The empirical Codex/Inspector protocol observation is recorded in
 [docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 

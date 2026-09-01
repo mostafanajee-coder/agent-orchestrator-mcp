@@ -8,8 +8,8 @@
 > the implementation and corrective Windows path fix are published in
 > `main` and `origin/main`, with the final documentation closure at
 > `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`.
-> Revision 11 below is the documentation-only Phase 8 resilience and recovery proposal;
-> it does not authorize implementation.
+> Revision 11 below is the Phase 8 resilience and recovery planning baseline;
+> implementation is separately authorized only on `codex/phase8-implementation`.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1285,7 +1285,11 @@ failure. A normal retry starts from the known failed-init artifact boundary.
 
 **Durability:** WAL + `synchronous=NORMAL` survives process crash (`FULL` via config). Every state change is one `IMMEDIATE` transaction — no half-transitioned job exists.
 
-**Graceful shutdown:** stop accepting requests, cancel live runs (`CANCELLED`, not `FAILED`), checkpoint WAL, close.
+**Graceful shutdown (Revision 11):** stop accepting new dispatches, request
+bounded worker termination, retain a valid normal result completed during the
+drain, and reconcile unresolved runtime work as `ORPHANED`; shutdown itself is
+never an authoritative `CANCEL`. The explicit Codex `CANCEL` path remains the
+only source of `JOB_CANCELLED`.
 
 ---
 
@@ -1570,7 +1574,8 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 > published under its separate authorization record. Revision 9 below records
 > the published Phase 6 implementation. Revision 10 below records the published
 > Phase 7 implementation and Windows correction. Revision 11 below is the current
-> Phase 8 planning proposal and does not authorize implementation.
+> Phase 8 planning baseline. The separate Phase 8 implementation gate does not
+> authorize merge or deployment.
 
 Each phase is independently verifiable and leaves the repo green.
 
@@ -1584,7 +1589,7 @@ Each phase is independently verifiable and leaves the repo green.
 | **5** | Job lifecycle | Protected `config.json`, `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
 | **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34; published at `8867074` |
 | **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Revision 10 published; Windows correction and closure recorded at `d0ce68c` |
-| **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Proposed Revision 11; independent review required |
+| **8** | Resilience | Reaper, crash recovery, cancellation settlement, graceful shutdown, `STALLED` paths, `audit_query` | Revision 11 approved plan; implementation in progress on `codex/phase8-implementation` |
 | **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, `SECURITY.md`, README, two-session Codex drill | The §19 verification checklist, start to finish |
 
 Phases 1–4 deliver the authority guarantee — the reason this project exists — before any worker code is written; Phase 3 in particular proves it at the SQL layer with no application code in the way.
@@ -1932,7 +1937,8 @@ registration, deployment, push, pull request, or merge may begin.
 
 ## 26. Revision 11 / Phase 8 resilience and recovery proposal
 
-**Status: documentation-only planning.** Revision 11 is derived from the
+**Status: approved planning baseline; implementation in progress on the
+separately authorized Phase 8 branch.** Revision 11 is derived from the
 published Phase 7 base at
 `d0ce68cb7fa2c0bdeb4e9de8ed15fd611bc253c3`, whose tree is
 `471c197bee3855fc210e2ab0adf77ce1f30815c7`. The base is clean and synchronized
@@ -1940,7 +1946,7 @@ with `origin/main`. The Phase 7 implementation head and the Windows
 path-normalization correction are ancestors of this base.
 
 The complete planning contract is in
-[`docs/PHASE8_PLAN.md`](PHASE8_PLAN.md). Revision 11 proposes the smallest
+[`docs/PHASE8_PLAN.md`](PHASE8_PLAN.md). Revision 11 defines and implements the smallest
 resilience layer around the completed Phase 5–7 lifecycle:
 
 - startup reconciliation of active runs left by a previous process;
@@ -1991,14 +1997,24 @@ automatic retries, distributed scheduling, telemetry, backup/restore,
 deployment, and all Phase 9 work. The acceptance matrix in the plan contains
 56 named cases: 48 Phase 8 behavior cases and 8 regression/scope cases.
 
-The required order is: freeze the documentation-only snapshot, independent
-architecture review, Codex finding-by-finding adjudication, documentation-only
-corrections if needed, final plan freeze, and then a separate explicit
-decision:
+The pre-implementation order was: freeze the documentation-only snapshot,
+independent architecture review, Codex finding-by-finding adjudication,
+documentation-only corrections if needed, final plan freeze, and then a
+separate explicit decision. That gate is now satisfied for the branch below:
 
 ```text
 AUTHORIZE PHASE 8 IMPLEMENTATION: YES / NO
 ```
 
-Until that decision is explicitly `YES`, no Phase 8 source, migration, MCP
-registration, deployment, push, pull request, or merge may begin.
+The recorded authorization is:
+
+```text
+AUTHORIZE PHASE 8 IMPLEMENTATION: YES
+IMPLEMENTATION BRANCH: codex/phase8-implementation
+IMPLEMENTATION HEAD: d46e956026ae351c4aee7d353b4971924e00b717
+```
+
+The authorization is limited to `codex/phase8-implementation`. It does not
+authorize merge, push, deployment, or Phase 9. The implementation head and
+verification evidence are recorded in
+[`docs/PHASE8_IMPLEMENTATION_REPORT.md`](PHASE8_IMPLEMENTATION_REPORT.md).
