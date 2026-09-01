@@ -12,6 +12,7 @@ import type { SqliteDatabase } from '../store/db.js';
 import { withImmediateTransaction } from '../store/db.js';
 import type { Phase6WorkerRegistry, WorkerDefinitionFile } from '../config/phase6.js';
 import type { VerifiedActorAuthInfo } from '../mcp/auth.js';
+import { redactSensitiveText } from '../security/redaction.js';
 import {
   createLeaseMaterial,
   LeaseError,
@@ -249,6 +250,10 @@ function nowIso(options: Phase6RunOptions): string {
 
 function bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8');
+}
+
+function safeWorkerText(value: string, secretValues: readonly string[] = []): string {
+  return redactSensitiveText(value, secretValues, { redactAbsolutePaths: true });
 }
 
 function fail(code: RunLifecycleErrorCode, message: string): never {
@@ -735,6 +740,7 @@ function settleRun(
   exitCode: number | null,
   options: Phase6RunOptions,
   allowExpired: boolean,
+  secretValues: readonly string[] = [],
 ): ReportResult {
   const timestamp = nowIso(options);
   return withImmediateTransaction(db, () => {
@@ -843,6 +849,7 @@ function settleRun(
         ...(summary === null ? {} : { summary }),
         ...(failureClass === null ? {} : { failure_class: failureClass }),
       },
+      secretValues,
       timestamp,
     });
     audit.appendInTransaction({
@@ -858,6 +865,7 @@ function settleRun(
       subjectType: 'run',
       subjectId: current.run_id,
       result: 'ok',
+      secretValues,
       timestamp,
     });
     const jobState = settleJobIfComplete(db, audit, current.job_id, current.cycle, requestId, timestamp);
@@ -895,11 +903,12 @@ export function reportRun(
     'SUCCEEDED',
     input.verdict,
     null,
-    input.summary,
+    safeWorkerText(input.summary, [input.lease]),
     input.usage,
     0,
     options,
     false,
+    [input.lease],
   );
 }
 
@@ -932,11 +941,12 @@ export function settleRuntimeRun(
     status,
     verdict,
     failureClass,
-    summary,
+    summary === null ? null : safeWorkerText(summary, [lease]),
     usage,
     exitCode,
     options,
     true,
+    [lease],
   );
 }
 

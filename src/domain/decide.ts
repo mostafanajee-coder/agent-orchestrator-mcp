@@ -8,6 +8,7 @@ import type { VerifiedActorAuthInfo } from '../mcp/auth.js';
 import { assertRoleCapabilities, canonicalCapabilitiesJson, hasCapability } from '../authority/capabilities.js';
 import type { Capability } from '../authority/capabilities.js';
 import type { AuditWriter } from '../authority/audit.js';
+import { redactSensitiveDetail } from '../security/redaction.js';
 import {
   createManifestFile,
   MAX_ARTIFACT_BYTES,
@@ -404,8 +405,8 @@ function createPackageManifestInTransaction(
     cycle,
     package_decision_id: decisionId,
     generated_at: createdAt,
-    evidence,
-    artifacts,
+    evidence: redactSensitiveDetail(evidence, [], { redactAbsolutePaths: true }),
+    artifacts: redactSensitiveDetail(artifacts, [], { redactAbsolutePaths: true }),
     decisions: [...decisions, {
       decision_id: decisionId,
       cycle,

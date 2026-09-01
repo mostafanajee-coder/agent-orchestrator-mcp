@@ -24,6 +24,7 @@ import {
   registerArtifact,
 } from '../../domain/artifacts.js';
 import type { SqliteDatabase } from '../../store/db.js';
+import { redactSensitiveText } from '../../security/redaction.js';
 import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
 
 export interface Phase7EvidenceArtifactToolOptions {
@@ -106,12 +107,20 @@ function readerActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo
 }
 
 function evidenceFailure(error: unknown, id: string): z.infer<typeof EvidenceFailure> {
-  if (error instanceof EvidenceError) return { ok: false, request_id: id, error: { code: error.code, message: error.message } };
+  if (error instanceof EvidenceError) return {
+    ok: false,
+    request_id: id,
+    error: { code: error.code, message: redactSensitiveText(error.message, [], { redactAbsolutePaths: true }) },
+  };
   return { ok: false, request_id: id, error: { code: 'INTERNAL_ERROR', message: 'The evidence operation failed.' } };
 }
 
 function artifactFailure(error: unknown, id: string): z.infer<typeof ArtifactFailure> {
-  if (error instanceof ArtifactError) return { ok: false, request_id: id, error: { code: error.code, message: error.message } };
+  if (error instanceof ArtifactError) return {
+    ok: false,
+    request_id: id,
+    error: { code: error.code, message: redactSensitiveText(error.message, [], { redactAbsolutePaths: true }) },
+  };
   return { ok: false, request_id: id, error: { code: 'INTERNAL_ERROR', message: 'The artifact operation failed.' } };
 }
 

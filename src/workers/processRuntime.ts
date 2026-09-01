@@ -25,6 +25,7 @@ import {
   type WorkerMessage,
 } from './protocol.js';
 import type { WorkerDefinitionFile } from '../config/phase6.js';
+import { redactSensitiveText } from '../security/redaction.js';
 
 const MAX_LINE_BYTES = 65_536;
 const MAX_STDERR_BYTES = 65_536;
@@ -102,10 +103,8 @@ function signalProcessGroup(child: ChildProcessWithoutNullStreams, signal: NodeJ
   child.kill(signal);
 }
 
-function redactRuntimeText(value: string): string {
-  return value
-    .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
-    .replace(/(authorization|password|secret|credential|token|api[_-]?key|lease[_-]?key)\s*[:=]\s*[^,;\s}]+/gi, '$1=[REDACTED]');
+function redactRuntimeText(value: string, secretValues: readonly string[] = []): string {
+  return redactSensitiveText(value, secretValues, { redactAbsolutePaths: true });
 }
 
 /**
@@ -611,7 +610,7 @@ export class ProcessRuntime {
         setRunStderr(
           this.dependencies.db,
           active.run.run_id,
-          redactRuntimeText(active.stderrTail.toString('utf8')),
+          redactRuntimeText(active.stderrTail.toString('utf8'), [active.lease]),
         );
       }
       settleRuntimeRun(

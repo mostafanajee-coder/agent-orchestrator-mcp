@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { SqliteDatabase } from '../store/db.js';
 import { withImmediateTransaction } from '../store/db.js';
+import { redactSensitiveDetail, redactSensitiveText } from '../security/redaction.js';
 
 import { CAPABILITY_VALUES } from './capabilities.js';
 import type { ActorRole, Capability } from './capabilities.js';
@@ -64,6 +65,8 @@ export interface AuditEventInput {
   readonly toAuthStatus?: string | null;
   readonly result: AuditResult;
   readonly detail?: unknown;
+  /** Ephemeral values to remove from this event; never persisted. */
+  readonly secretValues?: readonly string[];
   readonly timestamp?: string;
 }
 
@@ -160,30 +163,11 @@ function requiredAction(value: AuditAction): AuditAction {
 }
 
 function redactString(value: string, secretValues: readonly string[] = []): string {
-  let redacted = value;
-  for (const secret of secretValues) {
-    if (secret !== '') redacted = redacted.split(secret).join('[REDACTED]');
-  }
-  return redacted
-    .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
-    .replace(/(authorization|password|secret|credential|access[_-]?token|api[_-]?key|token_sha256|digest|lease[_-]?key)\s*[:=]\s*[^,;\s}]+/gi, '$1=[REDACTED]');
+  return redactSensitiveText(value, secretValues, { redactAbsolutePaths: true });
 }
 
 function redactDetail(value: unknown, secretValues: readonly string[]): unknown {
-  if (typeof value === 'string') return redactString(value, secretValues);
-  if (Array.isArray(value)) return value.map((child) => redactDetail(child, secretValues));
-  if (value !== null && typeof value === 'object') {
-    const output: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value)) {
-      if (/^(token|bearer|authorization|password|secret|credential|access[_-]?token|api[_-]?key|token_sha256|digest|lease[_-]?key)$/i.test(key)) {
-        output[key] = '[REDACTED]';
-      } else {
-        output[key] = redactDetail(child, secretValues);
-      }
-    }
-    return output;
-  }
-  return value;
+  return redactSensitiveDetail(value, secretValues, { redactAbsolutePaths: true });
 }
 
 function detailJson(value: unknown, secretValues: readonly string[]): string | null {
@@ -294,14 +278,18 @@ export class AuditWriter {
     if (input.result !== 'ok' && input.result !== 'denied' && input.result !== 'error') {
       throw new AuditError('result is invalid.');
     }
+    const secretValues = [
+      ...this.secretValues,
+      ...(input.secretValues ?? []),
+    ].filter((value) => value !== '');
     const row: AuditRow = {
       seq,
       ts: timestamp,
-      actorId: requiredText(input.actorId, 'actorId', this.secretValues),
+      actorId: requiredText(input.actorId, 'actorId', secretValues),
       actorRole: input.actorRole,
       sessionTokenId: boundedText(input.sessionTokenId, 'sessionTokenId'),
-      requestId: requiredText(input.requestId, 'requestId', this.secretValues),
-      sessionHint: boundedText(input.sessionHint, 'sessionHint', this.secretValues),
+      requestId: requiredText(input.requestId, 'requestId', secretValues),
+      sessionHint: boundedText(input.sessionHint, 'sessionHint', secretValues),
       action: requiredAction(input.action),
       jobId: boundedText(input.jobId, 'jobId'),
       cycle: input.cycle ?? null,
@@ -313,7 +301,7 @@ export class AuditWriter {
       fromAuthStatus: boundedText(input.fromAuthStatus, 'fromAuthStatus'),
       toAuthStatus: boundedText(input.toAuthStatus, 'toAuthStatus'),
       result: input.result,
-      detailJson: detailJson(input.detail, this.secretValues),
+      detailJson: detailJson(input.detail, secretValues),
       prevHash: tail.prevHash,
       hash: '',
     };

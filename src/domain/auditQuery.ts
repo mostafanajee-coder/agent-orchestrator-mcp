@@ -1,11 +1,11 @@
 import { verifyAuditRange } from '../authority/audit.js';
 import type { SqliteDatabase } from '../store/db.js';
+import { redactSensitiveDetail } from '../security/redaction.js';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
 const MAX_CURSOR_BYTES = 2_048;
 const MAX_DETAIL_BYTES = 4_096;
-const SENSITIVE_KEY = /^(token|bearer|authorization|password|secret|credential|access[_-]?token|api[_-]?key|token_sha256|digest|lease[_-]?key|nonce)$/i;
 
 export const AUDIT_QUERY_DEFAULT_LIMIT = DEFAULT_LIMIT;
 export const AUDIT_QUERY_MAX_LIMIT = MAX_LIMIT;
@@ -149,24 +149,6 @@ function decodeCursor(
   };
 }
 
-function redact(value: unknown, depth = 0): unknown {
-  if (depth > 8) return '[REDACTED]';
-  if (typeof value === 'string') {
-    return value
-      .replace(/Bearer\s+[^\s,;}]+/gi, 'Bearer [REDACTED]')
-      .replace(/(authorization|password|secret|credential|access[_-]?token|api[_-]?key|token_sha256|digest|lease[_-]?key|nonce)\s*[:=]\s*[^,;\s}]+/gi, '$1=[REDACTED]');
-  }
-  if (Array.isArray(value)) return value.map((child) => redact(child, depth + 1));
-  if (value !== null && typeof value === 'object') {
-    const output: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value)) {
-      output[key] = SENSITIVE_KEY.test(key) ? '[REDACTED]' : redact(child, depth + 1);
-    }
-    return output;
-  }
-  return value;
-}
-
 function safeDetail(value: unknown): { readonly json: string | null; readonly truncated: boolean } {
   if (value === null || value === undefined) return { json: null, truncated: false };
   let parsed: unknown;
@@ -177,7 +159,7 @@ function safeDetail(value: unknown): { readonly json: string | null; readonly tr
   }
   let json: string;
   try {
-    json = JSON.stringify(redact(parsed));
+    json = JSON.stringify(redactSensitiveDetail(parsed, [], { redactAbsolutePaths: true }));
   } catch {
     return { json: null, truncated: true };
   }

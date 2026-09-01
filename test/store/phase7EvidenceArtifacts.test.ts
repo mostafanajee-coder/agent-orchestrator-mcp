@@ -302,4 +302,36 @@ describe('Phase 7 evidence and artifact domain', () => {
     }, 'runtime-evidence', artifacts);
     expect((evidence as EvidenceRecord).trust).toBe('untrusted');
   });
+
+  it('redacts worker-controlled secrets before evidence and artifact retention', () => {
+    const run = dispatch();
+    const staging = ensureArtifactStagingDirectory(fixture.layout.artifacts, 'job-1', 0, run.runId);
+    writeFileSync(join(staging, 'secret.txt'), 'worker artifact', 'utf8');
+    const artifact = registerRuntimeArtifact(fixture.db, audit, run.lease, {
+      job_id: 'job-1',
+      cycle: 0,
+      run_id: run.runId,
+      source_path: 'secret.txt',
+      kind: 'report',
+      label: 'Bearer worker-secret',
+    }, 'runtime-secret-artifact', artifacts);
+    const evidence = addRuntimeEvidence(fixture.db, audit, run.lease, {
+      job_id: 'job-1',
+      cycle: 0,
+      run_id: run.runId,
+      kind: 'report',
+      summary: `Bearer worker-secret lease=${run.lease}`,
+      detail: { lease: run.lease, token_id: 'safe-token-id', note: 'safe' },
+      artifact_id: artifact.artifact_id,
+    }, 'runtime-secret-evidence', artifacts);
+
+    expect(evidence.summary).toContain('[REDACTED]');
+    expect(evidence.summary).not.toContain(run.lease);
+    expect(evidence.detail).toEqual({ lease: '[REDACTED]', token_id: 'safe-token-id', note: 'safe' });
+    expect(artifact.label).toBe('Bearer [REDACTED]');
+    const persisted = JSON.stringify(fixture.db.prepare(
+      'SELECT detail_json FROM evidence UNION ALL SELECT label FROM artifacts UNION ALL SELECT detail_json FROM audit_log',
+    ).all());
+    expect(persisted).not.toContain(run.lease);
+  });
 });

@@ -21,6 +21,8 @@ import type { Phase8ToolOptions } from './mcp/tools/phase8.js';
 import type { Phase4Runtime } from './authority/runtime.js';
 import { cancelRunsForJob } from './domain/runs.js';
 import { Phase8Lifecycle } from './domain/recovery.js';
+import { RequestRateLimiter } from './mcp/admission.js';
+import { redactSensitiveText } from './security/redaction.js';
 
 export const CLI_NAME = 'agent-orchestrator-mcp';
 export { EXIT_OK, EXIT_INTERNAL, EXIT_SECURITY, EXIT_USAGE } from './errors.js';
@@ -87,9 +89,12 @@ export const defaultCommands: CliCommands = {
           audit: runtime.audit,
           getOwnedRunIds: () => new Set(phase6.processRuntime.activeRunIds()),
           onReconciled: (runId, outcome): void => phase6.processRuntime.stopRun(runId, outcome),
-          onReaperError: (message): void => io.err(`${CLI_NAME}: ${message}`),
+          onReaperError: (message): void => io.err(
+            `${CLI_NAME}: ${redactSensitiveText(message, [], { redactAbsolutePaths: true })}`,
+          ),
         });
         const phase8Tools: Phase8ToolOptions = { db: runtime.db };
+        const rateLimiter = new RequestRateLimiter();
         const phase7: Phase7EvidenceArtifactToolOptions = {
           db: runtime.db,
           audit: runtime.audit,
@@ -114,6 +119,7 @@ export const defaultCommands: CliCommands = {
           workers: { ...phase6.options, acceptingWork: () => !phase8.isShuttingDown() },
           artifacts: phase7,
           phase8: phase8Tools,
+          rateLimiter,
           verifyStartup: () => undefined,
           onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
         });
@@ -156,10 +162,13 @@ export const defaultCommands: CliCommands = {
         audit: runtime.audit,
         getOwnedRunIds: () => new Set(phase6.processRuntime.activeRunIds()),
         onReconciled: (runId, outcome): void => phase6.processRuntime.stopRun(runId, outcome),
-        onReaperError: (message): void => io.err(`${CLI_NAME}: ${message}`),
+        onReaperError: (message): void => io.err(
+          `${CLI_NAME}: ${redactSensitiveText(message, [], { redactAbsolutePaths: true })}`,
+        ),
       });
       phase8Lifecycle = phase8;
       const phase8Tools: Phase8ToolOptions = { db: runtime.db };
+      const rateLimiter = new RequestRateLimiter();
       const phase7: Phase7EvidenceArtifactToolOptions = {
         db: runtime.db,
         audit: runtime.audit,
@@ -182,6 +191,7 @@ export const defaultCommands: CliCommands = {
         workers: { ...phase6.options, acceptingWork: () => !phase8.isShuttingDown() },
         artifacts: phase7,
         phase8: phase8Tools,
+        rateLimiter,
         ...(options.port === undefined ? {} : { port: options.port }),
       });
       server.once('close', () => {
@@ -436,14 +446,16 @@ function renderDoctor(report: DoctorReport): string[] {
 
 function reportError(io: CliIo, error: unknown): CliResult {
   if (error instanceof SecurityError) {
-    io.err(`${CLI_NAME}: security check failed: ${error.message}`);
-    if (error.remedy !== undefined) io.err(`  ${error.remedy}`);
+    io.err(`${CLI_NAME}: security check failed: ${redactSensitiveText(error.message, [], { redactAbsolutePaths: true })}`);
+    if (error.remedy !== undefined) {
+      io.err(`  ${redactSensitiveText(error.remedy, [], { redactAbsolutePaths: true })}`);
+    }
   } else if (error instanceof UsageError) {
-    io.err(`${CLI_NAME}: ${error.message}`);
+    io.err(`${CLI_NAME}: ${redactSensitiveText(error.message, [], { redactAbsolutePaths: true })}`);
     io.err(`Run '${CLI_NAME} --help' to see the available commands.`);
   } else {
     const message = error instanceof Error ? error.message : String(error);
-    io.err(`${CLI_NAME}: unexpected failure: ${message}`);
+    io.err(`${CLI_NAME}: unexpected failure: ${redactSensitiveText(message, [], { redactAbsolutePaths: true })}`);
   }
   return { exitCode: exitCodeFor(error) };
 }

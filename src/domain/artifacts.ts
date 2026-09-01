@@ -26,6 +26,7 @@ import type { AuditWriter } from '../authority/audit.js';
 import type { VerifiedActorAuthInfo } from '../mcp/auth.js';
 import type { SqliteDatabase } from '../store/db.js';
 import { withImmediateTransaction } from '../store/db.js';
+import { redactSensitiveText } from '../security/redaction.js';
 import {
   requireActiveWorkerLease,
   type ActiveWorkerLease,
@@ -186,6 +187,14 @@ function fail(code: ArtifactErrorCode, message: string): never {
 
 function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
+}
+
+function secretValues(lease: string | undefined): readonly string[] {
+  return lease === undefined ? [] : [lease];
+}
+
+function safeText(value: string, lease: string | undefined): string {
+  return redactSensitiveText(value, secretValues(lease), { redactAbsolutePaths: true });
 }
 
 function nowIso(options: ArtifactOptions): string {
@@ -432,7 +441,12 @@ function writeBytesAndHash(content: Buffer, finalPath: string): { readonly bytes
 function parseInput(raw: unknown): ArtifactRegisterInput {
   const parsed = ArtifactRegisterInputSchema.safeParse(raw);
   if (!parsed.success) fail('INVALID_INPUT', 'The artifact input is invalid.');
-  const input = parsed.data;
+  const input: ArtifactRegisterInput = {
+    ...parsed.data,
+    kind: safeText(parsed.data.kind, parsed.data.lease),
+    ...(parsed.data.mime === undefined ? {} : { mime: safeText(parsed.data.mime, parsed.data.lease) }),
+    ...(parsed.data.label === undefined ? {} : { label: safeText(parsed.data.label, parsed.data.lease) }),
+  };
   if (byteLength(input.job_id) > MAX_IDENTIFIER_BYTES
     || byteLength(input.run_id ?? '') > MAX_IDENTIFIER_BYTES
     || byteLength(input.source_path) > MAX_SOURCE_PATH_BYTES
@@ -545,10 +559,10 @@ function parseStored(row: ArtifactSqlRow): ArtifactRecord {
     job_id: String(row.job_id),
     cycle: Number(row.cycle),
     run_id: row.run_id === null || row.run_id === undefined ? null : String(row.run_id),
-    kind: String(row.kind),
-    mime: row.mime === null || row.mime === undefined ? null : String(row.mime),
-    label: row.label === null || row.label === undefined ? null : String(row.label),
-    rel_path: String(row.rel_path),
+    kind: safeText(String(row.kind), undefined),
+    mime: row.mime === null || row.mime === undefined ? null : safeText(String(row.mime), undefined),
+    label: row.label === null || row.label === undefined ? null : safeText(String(row.label), undefined),
+    rel_path: safeText(String(row.rel_path), undefined),
     bytes: Number(row.bytes),
     sha256: String(row.sha256),
     created_by: String(row.created_by),
@@ -565,6 +579,7 @@ function readIdempotency(
   actorId: string,
   key: string,
   hash: string,
+  lease: string | undefined,
 ): ArtifactRecord | undefined {
   const row = db.prepare(
     'SELECT request_hash, response_json FROM idempotency WHERE actor_id = ? AND key = ?',
@@ -575,7 +590,13 @@ function readIdempotency(
     const parsed: unknown = JSON.parse(String(row.response_json));
     const result = ArtifactRecordSchema.safeParse(parsed);
     if (!result.success) fail('INTERNAL_ERROR', 'The stored artifact idempotency response is invalid.');
-    return result.data;
+    return {
+      ...result.data,
+      kind: safeText(result.data.kind, lease),
+      mime: result.data.mime === null ? null : safeText(result.data.mime, lease),
+      label: result.data.label === null ? null : safeText(result.data.label, lease),
+      rel_path: safeText(result.data.rel_path, lease),
+    };
   } catch (cause) {
     if (cause instanceof ArtifactError) throw cause;
     fail('INTERNAL_ERROR', 'The stored artifact idempotency response is invalid.');
@@ -689,6 +710,7 @@ function insertArtifactInTransaction(
     subjectId: record.artifact_id,
     result: 'ok',
     detail: { kind: record.kind, bytes: record.bytes, run_id: record.run_id },
+    secretValues: secretValues(input.lease),
     timestamp: record.created_at,
   });
   return record;
@@ -720,6 +742,7 @@ function recordArtifactRejection(
       subjectType: 'artifact',
       result: 'denied',
       detail: { code: error.code },
+      secretValues: secretValues(input.lease),
     });
   } catch {
     // A rejected request must not hide its original typed error.
@@ -813,7 +836,7 @@ export function registerArtifact(
   const input = parseInput(rawInput);
   const context = actorContext(db, actor, input, options);
   const hash = requestHash(input);
-  const replay = readIdempotency(db, actor.actorId, input.idempotency_key, hash);
+  const replay = readIdempotency(db, actor.actorId, input.idempotency_key, hash, input.lease);
   if (replay !== undefined) return replay;
   const job = loadJob(db, input.job_id);
   const platform = platformOf(options);
@@ -860,7 +883,7 @@ export function registerArtifact(
       created_at: nowIso(options),
     };
     const result = withImmediateTransaction(db, () => {
-      const replayInside = readIdempotency(db, actor.actorId, input.idempotency_key, hash);
+      const replayInside = readIdempotency(db, actor.actorId, input.idempotency_key, hash, input.lease);
       if (replayInside !== undefined) return replayInside;
       const inserted = insertArtifactInTransaction(db, audit, input, context, record, requestId, options);
       db.prepare(

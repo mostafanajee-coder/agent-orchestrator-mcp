@@ -16,6 +16,7 @@ import {
   type AuditQueryResult,
 } from '../../domain/auditQuery.js';
 import type { SqliteDatabase } from '../../store/db.js';
+import { redactSensitiveText } from '../../security/redaction.js';
 import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
 
 export interface Phase8ToolOptions {
@@ -125,7 +126,11 @@ function failure(error: unknown, id: string): {
   readonly structuredContent: z.infer<typeof AuditQueryFailure>;
 } {
   const value = error instanceof AuditQueryError
-    ? { ok: false as const, request_id: id, error: { code: error.code, message: error.message } }
+    ? {
+      ok: false as const,
+      request_id: id,
+      error: { code: error.code, message: redactSensitiveText(error.message, [], { redactAbsolutePaths: true }) },
+    }
     : { ok: false as const, request_id: id, error: { code: 'INTERNAL_ERROR' as const, message: 'The audit query failed.' } };
   return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }

@@ -24,6 +24,7 @@ import {
   type RunSummary,
 } from '../../domain/runs.js';
 import type { SqliteDatabase } from '../../store/db.js';
+import { redactSensitiveText } from '../../security/redaction.js';
 import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
 import type { ProcessRuntime } from '../../workers/processRuntime.js';
 
@@ -137,7 +138,11 @@ function failure(error: unknown, currentRequestId: string): {
   readonly structuredContent: z.infer<typeof Phase6Failure>;
 } {
   const result: z.infer<typeof Phase6Failure> = error instanceof RunLifecycleError
-    ? { ok: false, request_id: currentRequestId, error: { code: error.code, message: error.message } }
+    ? {
+      ok: false,
+      request_id: currentRequestId,
+      error: { code: error.code, message: redactSensitiveText(error.message, [], { redactAbsolutePaths: true }) },
+    }
     : { ok: false, request_id: currentRequestId, error: { code: 'INTERNAL_ERROR', message: 'The worker operation failed.' } };
   return {
     content: [{ type: 'text', text: JSON.stringify(result) }],

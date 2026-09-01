@@ -24,6 +24,7 @@ import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import type { Phase6WorkerToolOptions } from './tools/phase6.js';
 import type { Phase7EvidenceArtifactToolOptions } from './tools/phase7.js';
 import type { Phase8ToolOptions } from './tools/phase8.js';
+import type { RequestRateLimiter } from './admission.js';
 
 export const MCP_HTTP_HOST = '127.0.0.1';
 export const MCP_HTTP_PATH = '/mcp';
@@ -45,6 +46,8 @@ export interface HttpServerOptions {
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
   readonly phase8?: Phase8ToolOptions;
+  /** Shared post-authentication request admission; absent for compatibility fixtures. */
+  readonly rateLimiter?: RequestRateLimiter;
   /** Fail-closed startup gate; it runs before this server binds. */
   readonly verifyStartup: () => void;
 }
@@ -134,6 +137,26 @@ function pathFromUrl(url: string | undefined): string {
   return question === -1 ? raw : raw.slice(0, question);
 }
 
+function tokenIdFromSdkAuth(auth: SdkAuthInfo): string | undefined {
+  const candidate = auth.extra?.['tokenId'];
+  return typeof candidate === 'string' && candidate.trim() !== '' ? candidate : undefined;
+}
+
+function sendRateLimitResponse(
+  response: ServerResponse,
+  retryAfterMs: number,
+): void {
+  sendJson(response, 429, {
+    jsonrpc: '2.0',
+    error: {
+      code: -32029,
+      message: 'Request rate limit exceeded.',
+      data: { code: 'RATE_LIMITED', retry_after_ms: retryAfterMs },
+    },
+    id: null,
+  }, { 'retry-after': String(Math.max(1, Math.ceil(retryAfterMs / 1_000))) });
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -141,6 +164,7 @@ async function handleRequest(
   authGate: ReturnType<typeof requireBearerAuth>,
   validateHost: ReturnType<typeof localhostHostValidation>,
   validateOrigin: ReturnType<typeof localhostOriginValidation>,
+  rateLimiter: RequestRateLimiter | undefined,
 ): Promise<void> {
   if (!validateHost(request, response)) return;
   if (!validateOrigin(request, response)) return;
@@ -160,6 +184,21 @@ async function handleRequest(
   if (auth instanceof Response) {
     await writeWebResponse(response, auth);
     return;
+  }
+
+  if (rateLimiter !== undefined) {
+    const tokenId = tokenIdFromSdkAuth(auth);
+    if (tokenId === undefined) {
+      request.resume();
+      sendJson(response, 500, { error: 'authenticated_identity_unavailable' });
+      return;
+    }
+    const admission = rateLimiter.consume(tokenId);
+    if (!admission.allowed) {
+      request.resume();
+      sendRateLimitResponse(response, admission.retryAfterMs ?? 60_000);
+      return;
+    }
   }
 
   const body = await readBoundedBody(request);
@@ -225,6 +264,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
       authGate,
       validateHost,
       validateOrigin,
+      options.rateLimiter,
     ).catch((error: unknown) => {
       if (error instanceof RequestBodyTooLargeError) {
         if (!response.headersSent) {

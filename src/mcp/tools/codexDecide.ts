@@ -14,6 +14,7 @@ import {
 import { hasCapability } from '../../authority/capabilities.js';
 import type { AuditWriter } from '../../authority/audit.js';
 import type { SqliteDatabase } from '../../store/db.js';
+import { redactSensitiveText } from '../../security/redaction.js';
 import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
 
 export const CodexDecideInput = z.object({
@@ -163,7 +164,7 @@ export function registerCodexDecide(
           if ((DECISION_ERROR_CODES as readonly string[]).includes(code as string)) {
             return failure(
               code as DecisionErrorCode,
-              error.message,
+              redactSensitiveText(error.message, [], { redactAbsolutePaths: true }),
             );
           }
         }

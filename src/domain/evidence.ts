@@ -12,6 +12,7 @@ import type { AuditWriter } from '../authority/audit.js';
 import type { VerifiedActorAuthInfo } from '../mcp/auth.js';
 import type { SqliteDatabase } from '../store/db.js';
 import { withImmediateTransaction } from '../store/db.js';
+import { redactSensitiveDetail, redactSensitiveText } from '../security/redaction.js';
 import {
   requireActiveWorkerLease,
   type ActiveWorkerLease,
@@ -155,6 +156,18 @@ function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
+function secretValues(lease: string | undefined): readonly string[] {
+  return lease === undefined ? [] : [lease];
+}
+
+function safeText(value: string, lease: string | undefined): string {
+  return redactSensitiveText(value, secretValues(lease), { redactAbsolutePaths: true });
+}
+
+function safeDetail(value: unknown, lease: string | undefined): unknown {
+  return redactSensitiveDetail(value, secretValues(lease), { redactAbsolutePaths: true });
+}
+
 function nowIso(options: WorkerLeaseOptions): string {
   return new Date((options.clock ?? (() => Date.now()))()).toISOString();
 }
@@ -176,13 +189,20 @@ function detailJson(value: unknown): string | null {
 function parseInput(raw: unknown): { readonly input: EvidenceAddInput; readonly detail: string | null } {
   const parsed = EvidenceAddInputSchema.safeParse(raw);
   if (!parsed.success) fail('INVALID_INPUT', 'The evidence input is invalid.');
-  if (byteLength(parsed.data.job_id) > MAX_IDENTIFIER_BYTES
-    || byteLength(parsed.data.run_id ?? '') > MAX_IDENTIFIER_BYTES
-    || byteLength(parsed.data.kind) > MAX_KIND_BYTES
-    || byteLength(parsed.data.summary) > MAX_SUMMARY_BYTES) {
+  const lease = parsed.data.lease;
+  const input: EvidenceAddInput = {
+    ...parsed.data,
+    kind: safeText(parsed.data.kind, lease),
+    summary: safeText(parsed.data.summary, lease),
+    ...(parsed.data.detail === undefined ? {} : { detail: safeDetail(parsed.data.detail, lease) }),
+  };
+  if (byteLength(input.job_id) > MAX_IDENTIFIER_BYTES
+    || byteLength(input.run_id ?? '') > MAX_IDENTIFIER_BYTES
+    || byteLength(input.kind) > MAX_KIND_BYTES
+    || byteLength(input.summary) > MAX_SUMMARY_BYTES) {
     fail('INVALID_INPUT', 'An evidence field exceeds its byte bound.');
   }
-  return { input: parsed.data, detail: detailJson(parsed.data.detail) };
+  return { input, detail: detailJson(input.detail) };
 }
 
 function validActor(actor: VerifiedActorAuthInfo): boolean {
@@ -275,6 +295,7 @@ function readIdempotency(
   actorId: string,
   key: string,
   hash: string,
+  lease: string | undefined,
 ): EvidenceRecord | undefined {
   const row = db.prepare(
     'SELECT request_hash, response_json FROM idempotency WHERE actor_id = ? AND key = ?',
@@ -285,7 +306,12 @@ function readIdempotency(
     const parsed: unknown = JSON.parse(String(row.response_json));
     const result = EvidenceRecordSchema.safeParse(parsed);
     if (!result.success) fail('INTERNAL_ERROR', 'The stored evidence idempotency response is invalid.');
-    return result.data;
+    return {
+      ...result.data,
+      kind: safeText(result.data.kind, lease),
+      summary: safeText(result.data.summary, lease),
+      detail: result.data.detail === null ? null : safeDetail(result.data.detail, lease),
+    };
   } catch (cause) {
     if (cause instanceof EvidenceError) throw cause;
     fail('INTERNAL_ERROR', 'The stored evidence idempotency response is invalid.');
@@ -311,7 +337,7 @@ function parseStored(row: EvidenceSqlRow): EvidenceRecord {
   let detail: unknown | null = null;
   if (row.detail_json !== null && row.detail_json !== undefined) {
     try {
-      detail = JSON.parse(String(row.detail_json)) as unknown;
+      detail = safeDetail(JSON.parse(String(row.detail_json)), undefined);
     } catch {
       fail('INTERNAL_ERROR', 'An evidence detail record is not valid JSON.');
     }
@@ -323,11 +349,11 @@ function parseStored(row: EvidenceSqlRow): EvidenceRecord {
     run_id: row.run_id === null || row.run_id === undefined ? null : String(row.run_id),
     source_actor: String(row.source_actor),
     trust: row.trust as EvidenceRecord['trust'],
-    kind: String(row.kind),
+    kind: safeText(String(row.kind), undefined),
     severity: row.severity === null || row.severity === undefined
       ? null
       : row.severity as EvidenceRecord['severity'],
-    summary: String(row.summary),
+    summary: safeText(String(row.summary), undefined),
     detail,
     artifact_id: row.artifact_id === null || row.artifact_id === undefined ? null : String(row.artifact_id),
     created_at: String(row.created_at),
@@ -452,6 +478,7 @@ function insertEvidenceInTransaction(
       trust: context.trust,
       ...(input.run_id === undefined ? {} : { run_id: input.run_id }),
     },
+    secretValues: secretValues(input.lease),
     timestamp: createdAt,
   });
   const row = db.prepare(
@@ -474,7 +501,7 @@ export function addEvidence(
   const hash = requestHash(input, detail);
   try {
     return withImmediateTransaction(db, () => {
-      const replay = readIdempotency(db, actor.actorId, input.idempotency_key, hash);
+      const replay = readIdempotency(db, actor.actorId, input.idempotency_key, hash, input.lease);
       if (replay !== undefined) return replay;
       const record = insertEvidenceInTransaction(db, audit, input, detail, context, requestId, options);
       db.prepare(
@@ -498,6 +525,7 @@ export function addEvidence(
           subjectType: 'evidence',
           result: 'denied',
           detail: { code: cause.code },
+          secretValues: secretValues(input.lease),
         });
       } catch {
         // A rejected request must not hide its original typed error.

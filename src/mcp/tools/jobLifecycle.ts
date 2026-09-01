@@ -30,6 +30,7 @@ import {
 } from '../../domain/jobs.js';
 import type { AuditWriter } from '../../authority/audit.js';
 import type { SqliteDatabase } from '../../store/db.js';
+import { redactSensitiveText } from '../../security/redaction.js';
 import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
 
 export interface Phase5JobToolOptions extends JobLifecycleOptions {
@@ -205,7 +206,11 @@ function failure(
   currentRequestId: string,
 ): { readonly content: [{ readonly type: 'text'; readonly text: string }]; readonly structuredContent: JobFailureValue } {
   const result: JobFailureValue = error instanceof JobLifecycleError
-    ? { ok: false, request_id: currentRequestId, error: { code: error.code, message: error.message } }
+    ? {
+      ok: false,
+      request_id: currentRequestId,
+      error: { code: error.code, message: redactSensitiveText(error.message, [], { redactAbsolutePaths: true }) },
+    }
     : { ok: false, request_id: currentRequestId, error: { code: 'INTERNAL_ERROR', message: 'The job lifecycle operation failed.' } };
   return {
     content: [{ type: 'text', text: JSON.stringify(result) }],

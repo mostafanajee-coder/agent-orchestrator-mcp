@@ -1,5 +1,6 @@
 import {
   serveStdio,
+  StdioServerTransport,
   type StdioServerHandle,
 } from '@modelcontextprotocol/server/stdio';
 import type { Transport } from '@modelcontextprotocol/server';
@@ -15,6 +16,7 @@ import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import type { Phase6WorkerToolOptions } from './tools/phase6.js';
 import type { Phase7EvidenceArtifactToolOptions } from './tools/phase7.js';
 import type { Phase8ToolOptions } from './tools/phase8.js';
+import { RateLimitedTransport, type RequestRateLimiter } from './admission.js';
 
 interface CommonStdioServerOptions {
   readonly authInfo: ActorAuthInfo;
@@ -27,6 +29,7 @@ interface CommonStdioServerOptions {
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
   readonly phase8?: Phase8ToolOptions;
+  readonly rateLimiter?: RequestRateLimiter;
 }
 
 export interface StdioServerOptions extends CommonStdioServerOptions {
@@ -35,10 +38,14 @@ export interface StdioServerOptions extends CommonStdioServerOptions {
 }
 
 function startVerifiedStdioServer(options: CommonStdioServerOptions): StdioServerHandle {
+  const baseTransport = options.transport ?? new StdioServerTransport();
+  const transport = options.rateLimiter === undefined
+    ? baseTransport
+    : new RateLimitedTransport(baseTransport, options.rateLimiter, options.authInfo.tokenId);
   const stdioOptions = {
     legacy: 'serve' as const,
+    transport,
     ...(options.onerror === undefined ? {} : { onerror: options.onerror }),
-    ...(options.transport === undefined ? {} : { transport: options.transport }),
   };
   return serveStdio(
     createMcpServerFactory({
@@ -77,6 +84,7 @@ export async function startAuthenticatedStdioServer(options: {
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
   readonly phase8?: Phase8ToolOptions;
+  readonly rateLimiter?: RequestRateLimiter;
 }): Promise<StdioServerHandle> {
   options.verifyStartup();
   const authInfo = await options.resolver.verifyAccessToken(options.token);
@@ -90,6 +98,7 @@ export async function startAuthenticatedStdioServer(options: {
     ...(options.workers === undefined ? {} : { workers: options.workers }),
     ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
     ...(options.phase8 === undefined ? {} : { phase8: options.phase8 }),
+    ...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
   });
 }
 
@@ -105,6 +114,7 @@ export function startEnvironmentStdioServer(options: {
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
   readonly phase8?: Phase8ToolOptions;
+  readonly rateLimiter?: RequestRateLimiter;
 }): StdioServerHandle {
   options.verifyStartup();
   const authInfo = authenticateEnvironmentToken(options.environment);
@@ -118,5 +128,6 @@ export function startEnvironmentStdioServer(options: {
     ...(options.workers === undefined ? {} : { workers: options.workers }),
     ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
     ...(options.phase8 === undefined ? {} : { phase8: options.phase8 }),
+    ...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
   });
 }
