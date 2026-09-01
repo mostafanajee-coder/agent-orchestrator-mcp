@@ -830,7 +830,9 @@ The documentation-only Phase 6 planning snapshot consists of:
 2. `docs/WORKER_PROTOCOL.md` — the normative bounded NDJSON contract;
 3. `docs/ARCHITECTURE.md` — the proposed Revision 9 Phase 6 delta, explicitly
    marked as proposed and not implementation authorization;
-4. `README.md` — status-only update identifying Phase 6 as planning-only.
+4. `README.md` — historical status-only update identifying the Phase 6 planning
+   snapshot; current publication status is recorded in
+   `docs/PHASE6_POST_MERGE_CLOSURE.md`.
 
 The same snapshot carries status-only reconciliation in
 `docs/PHASE5_PLAN.md` and `docs/PHASE5_IMPLEMENTATION_REPORT.md`. Those two
@@ -908,9 +910,10 @@ AUTHORIZE PHASE 6 IMPLEMENTATION: YES
 PHASE 5 BASELINE: COMPLETE AND PUBLISHED
 PHASE 6 PLANNING BASELINE: REVIEWED AND ADJUDICATED
 PHASE 6 IMPLEMENTATION AUTHORIZED: YES — Codex decision recorded
-PHASE 6 IMPLEMENTATION: COMPLETE LOCALLY ON codex/phase6-implementation
-PHASE 6 IMPLEMENTATION BRANCH: NOT MERGED
+PHASE 6 IMPLEMENTATION: COMPLETE AND PUBLISHED ON main
+PHASE 6 PUBLISHED HEAD: 88670743f8a443bbf3b71c9f379199deca42d512
+PHASE 6 POST-MERGE CLOSURE: COMPLETE
 PHASE 7 STARTED: NO
 ```
 
-**PHASE 6 IMPLEMENTATION COMPLETE LOCALLY — INDEPENDENT IMPLEMENTATION REVIEW REQUIRED**
+**PHASE 6 COMPLETE AND PUBLISHED — PHASE 7 IMPLEMENTATION NOT AUTHORIZED**

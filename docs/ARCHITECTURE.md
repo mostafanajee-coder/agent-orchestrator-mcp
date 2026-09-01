@@ -1,10 +1,10 @@
-# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Proposal)
+# Agent Orchestrator MCP — V1 Architecture (Revision 7 Approved / Revision 8 Phase 4 Baseline / Revision 9 Phase 6 Published / Revision 10 Phase 7 Proposal)
 
 > **Status:** Revision 7 remains the approved Phase 3 baseline. Revision 8 is the approved Phase 4 planning baseline originating at `65008a97d0c88b6e104994cb23408f7f46ab11f6`; its implementation was merged through PR #7 at `ea07fbcae4264fb91601ba03b1bbc84c57e8b7a5`.
-> `main` is the authoritative merged Phase 4 state. This document alone does
-> not authorize Phase 5/6 implementation, deployment, or unrelated changes;
-> the separate Phase 5 plan records the explicit Codex authorization and its
-> narrow implementation scope.
+> Revision 9 records the scoped Phase 6 worker runtime, now published in
+> `main` and `origin/main` at `88670743f8a443bbf3b71c9f379199deca42d512`.
+> Revision 10 below is a Phase 7 planning proposal only. This document does
+> not authorize Phase 7 implementation, deployment, or unrelated changes.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1559,11 +1559,12 @@ Each of 15a–15d asserts the statement is ABORTed, the table's rows are byte-fo
 
 ## 21. Implementation Phases
 
-> **Historical Revision 8 implementation baseline:** The Phase 4 row below
+> **Historical implementation baselines:** The Phase 4 row below
 > describes the authorized Phase 4 scope on `codex/phase4-implementation`.
 > Phase 5 was subsequently planned, independently reviewed, implemented, and
-> published under its separate authorization record. Revision 9 below is the
-> current Phase 6 planning proposal and does not authorize implementation.
+> published under its separate authorization record. Revision 9 below records
+> the published Phase 6 implementation. Revision 10 below is the current Phase 7
+> planning proposal and does not authorize implementation.
 
 Each phase is independently verifiable and leaves the repo green.
 
@@ -1575,8 +1576,8 @@ Each phase is independently verifiable and leaves the repo green.
 | **3** | Store & DB authority | Migrations `001`–`004`, all tables, seeds, **triggers T1–T8** (freeze triggers created *after* the seed inserts), canonical schema verification, repositories, init/serve SQL integrity checks, and doctor filesystem/security diagnosis | Invariants 7–15, **15a–15j** plus F-1 replacement cases (raw SQL), 16; failed-init cleanup/build-copy/transaction gates; doctor explicitly reports SQL integrity not checked by design |
 | **4** | Authority core | Capabilities, roles, transition table, `applyTransition`, `codex_decide`, decision-scoped idempotency/CAS, audit log + chain + session attribution, startup invariants | Invariants 1–6, 17–20, 28, 36 |
 | **5** | Job lifecycle | Protected `config.json`, `job_create`, `job_start`, `job_resume` (+ workspace allowlist), `job_get`, `job_list`, cycles, broader lifecycle idempotency/CAS | Invariants 21, 22, 24, 29 with the Phase 5/6 owner split; integration to `APPROVED` with no workers |
-| **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34 |
-| **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, path jail, hashing, trust classes, size caps | Invariant 30 |
+| **6** | Worker runtime | Adapter interface, `ProcessRuntime`, NDJSON parser, fixture workers, atomic `qa_dispatch`, leases, `run_report`, `run_status` | Invariants 23, 25, 26, 33, 34; published at `8867074` |
+| **7** | Evidence & artifacts | `evidence_add`, `artifact_register`, bounded metadata reads, path jail, hashing, trust classes, size caps | Proposed Revision 10; implementation not authorized |
 | **8** | Resilience | Reaper, crash recovery, cancellation, graceful shutdown, `STALLED` paths, `audit_query` | Invariants 27, 35 |
 | **9** | Hardening & docs | Rate limits, redaction sweep, `WORKER_PROTOCOL.md`, `SECURITY.md`, README, two-session Codex drill | The §19 verification checklist, start to finish |
 
@@ -1592,7 +1593,7 @@ Only what genuinely blocks or materially changes implementation. *(State locatio
 
 1. **How will each Codex session receive a distinct token?** Codex reads the bearer token from an environment variable named in `config.toml`, so distinct per-session tokens require launching each session with a different value for that variable. If all sessions inherit one environment, they will share one token and session attribution degrades from *verified* (`session_token_id`) to *claimed* (`session_hint`). The design already handles both, so this is **not blocking implementation** — but it determines how strong the audit answer to "which session decided this?" actually is, and it is worth confirming how sessions are launched. *Affects Phase 4 documentation, not code.*
 
-2. **Retention policy for the shared artifact root.** One global root now accumulates artifacts from every project, so growth is unbounded until `prune` exists (LATER). V1 records `bytes` per artifact, so the question is only whether a **hard cap or a warning threshold** should exist in V1 — e.g. refuse new artifact registration above N GB, or surface the total in a later artifact/prune report. Recommendation: warn from the later artifact owner only; no hard cap in V1. *Blocking Phase 7 only if a cap is wanted.*
+2. **Retention policy for the shared artifact root.** One global root accumulates artifacts from every project. Proposed Phase 7 fixes a per-artifact and per-job admission cap, while deletion, pruning, and archival remain later-phase concerns. A retention policy is not required to begin Phase 7 planning; any deletion policy must be reviewed separately and must not weaken append-only metadata.
 
 3. **`agy` prompt-delivery contract.** Deferred by decision, but recorded here so it is not forgotten: the installed CLI documents `--input-format text|stream-json` for print mode and does not document plain-text stdin prompts with `-p`. This must be verified empirically at the start of the agy phase rather than assumed. *Not blocking V1.*
 
@@ -1601,8 +1602,9 @@ Only what genuinely blocks or materially changes implementation. *(State locatio
 ## 23. FINAL RECOMMENDATION
 
 **Revision 7 remains the approved architecture for the merged Phase 3 baseline.**
-Revision 8 is the approved Phase 4 implementation baseline on the separate
-implementation branch. Revision 5 remains the historical doctor-boundary correction;
+Revision 8 is the approved Phase 4 implementation baseline and is merged.
+Revision 9 is the published Phase 6 worker-runtime baseline at
+`88670743f8a443bbf3b71c9f379199deca42d512`. Revision 5 remains the historical doctor-boundary correction;
 Revision 6 remains the historical job-row/schema correction; Revision 7
 preserves both and adds the narrow SQLite row-replacement integrity correction
 described above.
@@ -1651,25 +1653,28 @@ reviewed implementation was merged at
 `7d7c3f61a118c26d4da0347f6c3ceb9ec286d0ea` from reviewed head
 `4ba475005a0f6d0b9504e7dc82d71d88f23a27e8`, and the closure record was
 published in `main` at `530e2441636e6517096b1319c4510b1e56626592`. Phase 6 is
-currently planning-only; its proposed Revision 9 delta is recorded below and
-is not implementation authorization.
+complete and published in `main` and `origin/main` at
+`88670743f8a443bbf3b71c9f379199deca42d512`; its post-merge closure is recorded
+in `docs/PHASE6_POST_MERGE_CLOSURE.md`. Phase 7 planning is recorded below and
+does not authorize implementation.
 
 ---
 
-## 24. Revision 9 / Phase 6 worker runtime proposal
+## 24. Revision 9 / Phase 6 worker runtime (published)
 
-**Status: Phase 6 implementation authorized on `codex/phase6-implementation`;
-not merged into `main`.**
+**Status: Phase 6 implementation complete and published in `main` and
+`origin/main` at `88670743f8a443bbf3b71c9f379199deca42d512`.**
 
-Revision 9 is the Phase 6 planning amendment derived from the published Phase
+Revision 9 is the Phase 6 amendment derived from the published Phase
 5 baseline `530e2441636e6517096b1319c4510b1e56626592`. It is governed by
 `docs/PHASE6_PLAN.md` and `docs/WORKER_PROTOCOL.md`. The separate Codex
-authorization permits the scoped source implementation on the implementation
-branch; this proposal does not authorize Phase 7+ behavior or merge.
+authorization permitted the scoped source implementation; the implementation
+and post-merge closure are now complete. This section does not authorize Phase
+7+ behavior.
 
 ### 24.1 Purpose and ownership
 
-Phase 6 proposes the smallest local worker-runtime layer around the existing
+Phase 6 delivered the smallest local worker-runtime layer around the existing
 job lifecycle. Workers may execute bounded tasks and return advisory results;
 they may not make an authoritative job decision. `codex_decide` remains the
 single authority path, and the internal `system` actor may perform only the
@@ -1677,7 +1682,7 @@ mechanical non-authoritative settlement required to close a run set.
 
 ### 24.2 Proposed worker registry
 
-Phase 6 proposes a separate protected state-root registry at
+Phase 6 delivered a separate protected state-root registry at
 `<state_root>\workers.json`. The existing Phase 5 `config.json` remains the
 owner of Phase 5 workspace and cycle settings. The registry is server-owned
 configuration and has no MCP administration tool.
@@ -1732,8 +1737,8 @@ responsibilities, even though their structural tables already exist.
 
 ### 24.4 Proposed tool delta
 
-The following MCP operations are approved for the scoped Phase 6 implementation
-branch, but are not yet active on `main`:
+The following MCP operations were approved for the scoped Phase 6 implementation
+and are active on the published Phase 6 baseline:
 
 | Tool | Caller | Purpose |
 |---|---|---|
@@ -1742,9 +1747,9 @@ branch, but are not yet active on `main`:
 | `run_status` | verified principal or observer with `job:read` | Read bounded run status |
 
 No worker-administration, arbitrary process-launch, evidence, artifact,
-recovery, or second-decision tool is approved. The tools are not registered in
-the current Phase 5-complete `main`; they are registered only on the Phase 6
-implementation branch.
+recovery, or second-decision tool is part of the published Phase 6 surface.
+Evidence and artifact admission are reserved for the separate Phase 7 proposal
+below.
 
 ### 24.5 Proposed process and protocol boundary
 
@@ -1771,7 +1776,8 @@ private start envelope. Pipe mode keeps the lease runtime-owned.
 
 ### 24.6 Persistence and transaction boundary
 
-The planning baseline introduces no migration and no schema-definition change.
+The published Phase 6 implementation introduced no migration and no
+schema-definition change.
 `qa_dispatch` creates all run and lease rows and the non-authoritative
 `QA_RUNNING` transition in one immediate transaction, then starts processes
 after commit. Report settlement consumes the lease and updates the run in one
@@ -1793,6 +1799,106 @@ separate implementation decision for the implementation branch:
 AUTHORIZE PHASE 6 IMPLEMENTATION: YES
 ```
 
-This decision authorizes only the scoped work on
-`codex/phase6-implementation`. The Phase 6 implementation remains unmerged
-until its independent implementation review and Codex final merge gate.
+This decision authorized only the scoped work on
+`codex/phase6-implementation`. That implementation was subsequently reviewed,
+merged fast-forward into `main`, published to `origin/main`, and closed in
+`docs/PHASE6_POST_MERGE_CLOSURE.md`. It does not authorize Phase 7.
+
+---
+
+## 25. Revision 10 / Phase 7 evidence and artifact proposal
+
+**Status: documentation-only planning proposal. Phase 7 implementation is not
+authorized.**
+
+Revision 10 is derived from the published Phase 6 baseline at
+`88670743f8a443bbf3b71c9f379199deca42d512`. It is governed by
+`docs/PHASE7_PLAN.md` and is intended to activate the existing `evidence` and
+`artifacts` structures in a bounded, attributable, append-only manner. The
+presence of those tables in schema version 6 does not mean their runtime write
+paths are active.
+
+### 25.1 Purpose and ownership
+
+Phase 7 owns the smallest evidence/artifact admission layer around completed
+worker runs. It allows bounded observations and files to be associated with a
+job, cycle, and optional run, and allows Codex to inspect bounded metadata and
+cite evidence. Worker output remains advisory; `codex_decide` remains the only
+authoritative decision path.
+
+### 25.2 Proposed persistence amendment
+
+The existing schema-v6 `evidence` and `artifacts` columns remain the data
+contract unless independent review proves a missing column is necessary. The
+proposed schema version is 7, with a reviewed migration for append-only guards,
+job/cycle/run binding checks, and only the indexes required by bounded reads.
+Canonical schema fingerprints and startup migration checks must be updated
+together during a separately authorized implementation.
+
+Phase 7 does not introduce deletion, replacement, pruning, retention cleanup,
+or a recovery loop. Filesystem residue after a process crash belongs to Phase 8.
+
+### 25.3 Evidence and trust boundary
+
+The server derives `source_actor` from the verified caller or active run lease
+and assigns trust. Principal-created evidence is `principal`, worker-created
+evidence is `untrusted`, and `deterministic` remains reserved for a named
+server-owned producer. A client cannot submit a stronger trust value.
+
+Evidence is bounded to a 2,048-byte summary and 65,536-byte serialized detail;
+kind, severity, references, and idempotency are validated. Any supplied
+decision evidence reference must exist for the same job and cycle, but evidence
+never grants authority or changes a job state.
+
+### 25.4 Artifact boundary
+
+The orchestrator copies bytes into the global artifact root, computes the byte
+count and SHA-256 digest, and stores metadata only in SQLite. Clients provide
+only a relative source name within an approved source root. The server chooses
+the final relative path and rejects traversal, absolute/device paths, alternate
+data streams, reserved names, symlinks, reparse points, and out-of-root files.
+
+The planning caps are 16 MiB per artifact, 256 MiB total and 256 rows per job,
+with bounded kind, MIME, label, and stored-path fields. Artifact metadata is
+append-only and a failed copy or metadata transaction cannot be reported as a
+successful registration.
+
+### 25.5 Proposed MCP surface
+
+Phase 7 proposes exactly four operations:
+
+| Operation | Surface |
+|---|---|
+| `evidence_add` | Append one bounded, server-classified evidence record. |
+| `artifact_register` | Copy and register one bounded artifact file. |
+| `evidence_list` | Read bounded evidence metadata with an opaque cursor. |
+| `artifact_list` | Read bounded artifact metadata with an opaque cursor. |
+
+No artifact bytes are exposed through MCP in Phase 7. Worker output is
+normalized through the same admission rules in pipe and local pull modes. No
+reaper, `audit_query`, remote worker, arbitrary file-read, or second-decision
+operation is introduced.
+
+### 25.6 Packaging and decision linkage
+
+The `PACKAGE` path is planned to create one server-generated canonical manifest
+artifact for the current job/cycle. It contains bounded evidence and artifact
+metadata and decision-chain identifiers, not raw worker streams. `DELIVER`
+continues to require a valid current-cycle manifest. Manifest creation must
+have an explicit filesystem staging and SQLite transaction boundary; it cannot
+be described as an unqualified atomic filesystem/database operation.
+
+### 25.7 Phase boundary and authorization
+
+Revision 10 is ready for independent architecture review. The review must
+confirm the proposed schema guards, quotas, trust derivation, path policy,
+worker admission, metadata reads, manifest behavior, and Phase 8 boundary.
+After review, Codex must adjudicate every finding and record a separate
+decision:
+
+```text
+AUTHORIZE PHASE 7 IMPLEMENTATION: YES / NO
+```
+
+Until that decision is explicitly `YES`, no Phase 7 source, migration, MCP
+registration, deployment, push, pull request, or merge may begin.

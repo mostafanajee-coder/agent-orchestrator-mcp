@@ -2,7 +2,8 @@
 
 > This report records the local Phase 6 implementation snapshot after the
 > independent planning review and explicit Codex implementation authorization.
-> It is a handoff for independent implementation review, not merge approval.
+> It is a historical pre-merge handoff record, not the post-merge status record.
+> The published status is recorded in `docs/PHASE6_POST_MERGE_CLOSURE.md`.
 
 Date: 2026-08-31
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
