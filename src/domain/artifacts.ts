@@ -246,19 +246,28 @@ function assertNoLinksAtOrBelow(root: string, target: string, platform: NodeJS.P
   }
 }
 
-function ensureDirectoryWithinRoot(root: string, target: string, platform: NodeJS.Platform): void {
+function ensureDirectoryWithinRoot(root: string, target: string, platform: NodeJS.Platform): string {
   const api = pathApi(platform);
   let resolvedRoot: string;
+  const requestedRoot = api.resolve(root);
+  const requestedTarget = api.resolve(target);
   try {
     resolvedRoot = realpathSync.native(root);
   } catch {
     fail('PATH_REJECTED', 'The artifact root could not be inspected.');
   }
-  const resolvedTarget = api.resolve(target);
-  if (!isContained(resolvedRoot, resolvedTarget, platform)) {
+  const relative = api.relative(requestedRoot, requestedTarget);
+  if (relative.startsWith('..') || api.isAbsolute(relative) || !isContained(
+    requestedRoot,
+    requestedTarget,
+    platform,
+  )) {
     fail('PATH_REJECTED', 'The artifact directory escapes its root.');
   }
-  const relative = api.relative(resolvedRoot, resolvedTarget);
+  // Build the target from the resolved root. On Windows, the original and
+  // realpath forms can differ by short-name/long-name representation even
+  // when they identify the same directory.
+  const resolvedTarget = api.join(resolvedRoot, relative);
   let current = resolvedRoot;
   for (const segment of relative.split(/[\\/]/).filter((value) => value !== '')) {
     current = api.join(current, segment);
@@ -285,6 +294,7 @@ function ensureDirectoryWithinRoot(root: string, target: string, platform: NodeJ
     }
   }
   assertNoLinksAtOrBelow(resolvedRoot, resolvedTarget, platform);
+  return resolvedTarget;
 }
 
 export function artifactStagingDirectory(
@@ -312,15 +322,14 @@ export function ensureArtifactStagingDirectory(
   platform: NodeJS.Platform = process.platform,
 ): string {
   const staging = artifactStagingDirectory(artifactsRoot, jobId, cycle, runId, platform);
-  ensureDirectoryWithinRoot(artifactsRoot, staging, platform);
-  return staging;
+  return ensureDirectoryWithinRoot(artifactsRoot, staging, platform);
 }
 
 function sourceFile(root: string, sourcePath: string, platform: NodeJS.Platform): string {
   const parts = relativeParts(sourcePath, platform);
   const api = pathApi(platform);
   const resolvedRoot = realpathSync.native(root);
-  const candidate = api.resolve(root, ...parts);
+  const candidate = api.join(resolvedRoot, ...parts);
   if (!isContained(resolvedRoot, candidate, platform)) fail('PATH_REJECTED', 'The artifact source path escapes its root.');
   try {
     assertNoLinksAtOrBelow(resolvedRoot, candidate, platform);
@@ -750,11 +759,12 @@ export function createManifestFile(
     cycle,
     run_id: null,
   }, 'manifest.json', platform, 'package');
-  ensureDirectoryWithinRoot(artifactsRoot, dirname(path.absolute), platform);
+  const directory = ensureDirectoryWithinRoot(artifactsRoot, dirname(path.absolute), platform);
+  const absolute = pathApi(platform).join(directory, pathApi(platform).basename(path.absolute));
   const root = realpathSync.native(artifactsRoot);
-  assertNoLinksAtOrBelow(root, dirname(path.absolute), platform);
-  const result = writeBytesAndHash(Buffer.from(content, 'utf8'), path.absolute);
-  return { absolute: path.absolute, rel_path: path.relative, ...result };
+  assertNoLinksAtOrBelow(root, directory, platform);
+  const result = writeBytesAndHash(Buffer.from(content, 'utf8'), absolute);
+  return { absolute, rel_path: path.relative, ...result };
 }
 
 export function verifyArtifactFile(
@@ -766,7 +776,7 @@ export function verifyArtifactFile(
   try {
     parts = relativeParts(record.rel_path, platform);
     const root = realpathSync.native(artifactsRoot);
-    const absolute = pathApi(platform).resolve(artifactsRoot, ...parts);
+    const absolute = pathApi(platform).join(root, ...parts);
     if (!isContained(root, absolute, platform)) return false;
     assertNoLinksAtOrBelow(root, absolute, platform);
     const fd = openSync(absolute, 'r');
@@ -827,11 +837,14 @@ export function registerArtifact(
     cycle: input.cycle,
     run_id: input.run_id ?? null,
   }, safeFileName(input.source_path, platform), platform);
+  let storedAbsolutePath: string | undefined;
   try {
-    ensureDirectoryWithinRoot(options.artifactsRoot, dirname(path.absolute), platform);
+    const directory = ensureDirectoryWithinRoot(options.artifactsRoot, dirname(path.absolute), platform);
+    const absolute = pathApi(platform).join(directory, pathApi(platform).basename(path.absolute));
+    storedAbsolutePath = absolute;
     const root = realpathSync.native(options.artifactsRoot);
-    assertNoLinksAtOrBelow(root, dirname(path.absolute), platform);
-    const copied = copyAndHash(source, path.absolute);
+    assertNoLinksAtOrBelow(root, directory, platform);
+    const copied = copyAndHash(source, absolute);
     const record: ArtifactRecord = {
       artifact_id: artifactId,
       job_id: input.job_id,
@@ -856,11 +869,13 @@ export function registerArtifact(
       return inserted;
     });
     if (result.artifact_id !== record.artifact_id) {
-      try { unlinkSync(path.absolute); } catch { /* best effort after an idempotent replay */ }
+      try { unlinkSync(absolute); } catch { /* best effort after an idempotent replay */ }
     }
     return result;
   } catch (cause) {
-    try { unlinkSync(path.absolute); } catch { /* best effort cleanup */ }
+    if (storedAbsolutePath !== undefined) {
+      try { unlinkSync(storedAbsolutePath); } catch { /* best effort cleanup */ }
+    }
     if (cause instanceof ArtifactError) {
       recordArtifactRejection(audit, context, input, requestId, cause);
       throw cause;
