@@ -8,7 +8,7 @@ Date: 2026-08-31
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
 Implementation branch: `codex/phase6-implementation`
 Authoritative base: `530e2441636e6517096b1319c4510b1e56626592`
-Source implementation head: `c458d2d3c8d1d54f15e9b16f481c59c188eea3b1`
+Source implementation head: `031c66df9e8c4c923e3b48ad75d0529837275488`
 Phase 6 authorization: `AUTHORIZE PHASE 6 IMPLEMENTATION: YES`
 Phase 6 implementation review: **REQUIRED**
 Merge authorization: **NO**
@@ -41,8 +41,9 @@ advisory and can only settle the non-authoritative run/job lifecycle.
 
 ## 2. Implementation snapshot
 
-The source snapshot immediately before this report was `c458d2d3c8d1d54f15e9b16f481c59c188eea3b1`.
-It is based directly on `main@530e2441636e6517096b1319c4510b1e56626592`.
+The source snapshot immediately before this report was
+`031c66df9e8c4c923e3b48ad75d0529837275488`. It is based directly on
+`main@530e2441636e6517096b1319c4510b1e56626592`.
 The report commit itself is documentation-only and is a successor to the
 source head above. The implementation branch has not been pushed and no pull
 request has been created.
@@ -80,6 +81,7 @@ test/unit/phase4Matrix.test.ts
 test/unit/phase6Config.test.ts
 test/unit/phase6Lease.test.ts
 test/unit/phase6Protocol.test.ts
+test/unit/phase6RuntimePolicy.test.ts
 ```
 
 No files under `src/store/migrations/`, `src/store/schemaDefinitions.ts`,
@@ -93,7 +95,7 @@ No files under `src/store/migrations/`, `src/store/schemaDefinitions.ts`,
 | WP2 — worker protocol | `src/workers/protocol.ts`, `test/unit/phase6Protocol.test.ts` |
 | WP3 — run persistence | `src/domain/runs.ts`, `test/store/phase6Runs.test.ts` |
 | WP4 — lease handling | `src/workers/lease.ts`, `src/secrets/leaseKey.ts`, `test/unit/phase6Lease.test.ts` |
-| WP5 — process runtime | `src/workers/processRuntime.ts`, `test/integration/phase6Runtime.test.ts` |
+| WP5 — process runtime | `src/workers/processRuntime.ts`, `test/integration/phase6Runtime.test.ts`, `test/unit/phase6RuntimePolicy.test.ts` |
 | WP6/WP7 — dispatch and settlement | `src/domain/runs.ts`, `src/mcp/tools/phase6.ts`, HTTP/domain tests |
 | WP8 — failure/timeout/cancellation | `src/workers/processRuntime.ts`, `src/mcp/tools/codexDecide.ts` |
 | WP9/WP10 — MCP and transport parity | `src/mcp/server.ts`, `src/mcp/http.ts`, `src/mcp/stdio.ts`, integration tests |
@@ -114,7 +116,9 @@ Pipe-mode results and local pull-mode reports share one settlement path.
 The protocol parser enforces versioned NDJSON, one terminal message, bounded
 lines, total output, message count, progress text, summaries, and usage fields.
 Missing, malformed, duplicate, oversized, timed-out, cancelled, and failed
-process outcomes are mapped deterministically.
+process outcomes are mapped deterministically. POSIX workers are isolated into
+their own process groups and the complete group is signalled on timeout or
+cancellation; Windows uses `taskkill /t /f`.
 
 `qa_dispatch` admits one to sixteen registered workers and atomically creates
 the run/lease set plus `QA_RUNNING`. Processes start only after commit.
@@ -127,8 +131,8 @@ The final local CI command was `npm run ci`:
 
 - typecheck: PASS
 - lint: PASS
-- test files: 46 passed
-- tests: 526 passed, 7 skipped
+- test files: 47 passed
+- tests: 527 passed, 7 skipped
 - build: PASS
 
 Additional check:
@@ -147,7 +151,7 @@ The independent reviewer should verify against the exact source head above:
 1. no worker path writes an authoritative job status;
 2. disabled registry initialization and enabled actor validation are correct;
 3. lease verification and `consumed_at` updates are atomic;
-4. process-tree termination is correct on Windows and POSIX;
+4. process-tree/group termination is correct on Windows and POSIX;
 5. concurrent report/cancel/duplicate cases cannot double-settle;
 6. all output, task, parameter, and registry bounds are enforced;
 7. HTTP and stdio expose only the intended actor-specific Phase 6 tools; and
