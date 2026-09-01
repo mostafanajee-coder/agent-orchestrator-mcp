@@ -9,6 +9,7 @@ import {
 import { verifyDatabaseIntegrity } from '../store/integrity.js';
 import { runMigrations } from '../store/migrations.js';
 import { createPersistentTokenResolver, type PersistentTokenResolver } from '../mcp/persistentAuth.js';
+import { recoverOrphanedRuns } from '../domain/recovery.js';
 
 import { AuditWriter, verifyAuditChain } from './audit.js';
 import { validatePhase4State, type Phase4StateReport, type Phase4StateValidationOptions } from './state.js';
@@ -104,6 +105,7 @@ export function openPhase4ManagementRuntime(context: CommandContext): Phase4Mana
 export function openPhase4Runtime(context: CommandContext): Phase4Runtime {
   const management = buildManagementRuntime(context, { requireUsableToken: true });
   try {
+    recoverOrphanedRuns(management.db, management.audit);
     const resolver = createPersistentTokenResolver(management.db, { audit: management.audit });
     return { ...management, resolver };
   } catch (cause) {

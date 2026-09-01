@@ -23,6 +23,7 @@ import type { Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import type { Phase6WorkerToolOptions } from './tools/phase6.js';
 import type { Phase7EvidenceArtifactToolOptions } from './tools/phase7.js';
+import type { Phase8ToolOptions } from './tools/phase8.js';
 
 export const MCP_HTTP_HOST = '127.0.0.1';
 export const MCP_HTTP_PATH = '/mcp';
@@ -43,6 +44,7 @@ export interface HttpServerOptions {
   readonly jobs?: Phase5JobToolOptions;
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
+  readonly phase8?: Phase8ToolOptions;
   /** Fail-closed startup gate; it runs before this server binds. */
   readonly verifyStartup: () => void;
 }
@@ -197,6 +199,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
       ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
       ...(options.workers === undefined ? {} : { workers: options.workers }),
       ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
+      ...(options.phase8 === undefined ? {} : { phase8: options.phase8 }),
     }),
     {
       legacy: 'stateless',

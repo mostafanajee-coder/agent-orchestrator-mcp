@@ -17,8 +17,10 @@ import { readLeaseKey } from './secrets/leaseKey.js';
 import { ProcessRuntime } from './workers/processRuntime.js';
 import type { Phase6WorkerToolOptions } from './mcp/tools/phase6.js';
 import type { Phase7EvidenceArtifactToolOptions } from './mcp/tools/phase7.js';
+import type { Phase8ToolOptions } from './mcp/tools/phase8.js';
 import type { Phase4Runtime } from './authority/runtime.js';
 import { cancelRunsForJob } from './domain/runs.js';
+import { Phase8Lifecycle } from './domain/recovery.js';
 
 export const CLI_NAME = 'agent-orchestrator-mcp';
 export { EXIT_OK, EXIT_INTERNAL, EXIT_SECURITY, EXIT_USAGE } from './errors.js';
@@ -80,16 +82,24 @@ export const defaultCommands: CliCommands = {
       try {
         const phase5Config = loadPhase5Config(commandContext);
         const phase6 = createPhase6Runtime(commandContext, runtime);
+        const phase8 = new Phase8Lifecycle({
+          db: runtime.db,
+          audit: runtime.audit,
+          getOwnedRunIds: () => new Set(phase6.processRuntime.activeRunIds()),
+          onReconciled: (runId, outcome): void => phase6.processRuntime.stopRun(runId, outcome),
+          onReaperError: (message): void => io.err(`${CLI_NAME}: ${message}`),
+        });
+        const phase8Tools: Phase8ToolOptions = { db: runtime.db };
         const phase7: Phase7EvidenceArtifactToolOptions = {
           db: runtime.db,
           audit: runtime.audit,
           artifactsRoot: commandContext.layout.artifacts,
           leaseKey: phase6.options.leaseKey,
         };
-          const authority = {
-            db: runtime.db,
-            audit: runtime.audit,
-            phase7: { artifactsRoot: commandContext.layout.artifacts, platform: commandContext.platform },
+        const authority = {
+          db: runtime.db,
+          audit: runtime.audit,
+          phase7: { artifactsRoot: commandContext.layout.artifacts, platform: commandContext.platform },
           onJobCancelled: (jobId: string, requestId: string): void => {
             phase6.processRuntime.cancelJob(jobId);
             cancelRunsForJob(runtime.db, runtime.audit, jobId, requestId, phase6.options);
@@ -101,20 +111,22 @@ export const defaultCommands: CliCommands = {
           authInfo,
           authority,
           jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
-          workers: phase6.options,
+          workers: { ...phase6.options, acceptingWork: () => !phase8.isShuttingDown() },
           artifacts: phase7,
+          phase8: phase8Tools,
           verifyStartup: () => undefined,
           onerror: () => io.err(`${CLI_NAME}: MCP stdio transport error`),
         });
         const close = handle.close.bind(handle);
         handle.close = async () => {
           try {
-            phase6.processRuntime.close();
+            await phase8.shutdown(phase6.processRuntime);
             await close();
           } finally {
             runtime.close();
           }
         };
+        phase8.start();
       } catch (cause) {
         runtime.close();
         throw cause;
@@ -130,12 +142,24 @@ export const defaultCommands: CliCommands = {
       logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
     };
     let server: ReturnType<typeof startHttpServer>;
+    let phase8Lifecycle: Phase8Lifecycle | undefined;
+    let phase6Runtime: ProcessRuntime | undefined;
     try {
       const phase5Config = loadPhase5Config(commandContext);
       const reportEndpoint = options.port === undefined || options.port === 0
         ? undefined
         : `http://${MCP_HTTP_HOST}:${String(options.port)}${MCP_HTTP_PATH}`;
       const phase6 = createPhase6Runtime(commandContext, runtime, reportEndpoint);
+      phase6Runtime = phase6.processRuntime;
+      const phase8 = new Phase8Lifecycle({
+        db: runtime.db,
+        audit: runtime.audit,
+        getOwnedRunIds: () => new Set(phase6.processRuntime.activeRunIds()),
+        onReconciled: (runId, outcome): void => phase6.processRuntime.stopRun(runId, outcome),
+        onReaperError: (message): void => io.err(`${CLI_NAME}: ${message}`),
+      });
+      phase8Lifecycle = phase8;
+      const phase8Tools: Phase8ToolOptions = { db: runtime.db };
       const phase7: Phase7EvidenceArtifactToolOptions = {
         db: runtime.db,
         audit: runtime.audit,
@@ -155,16 +179,25 @@ export const defaultCommands: CliCommands = {
         ...httpOptions,
         authority,
         jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
-        workers: phase6.options,
+        workers: { ...phase6.options, acceptingWork: () => !phase8.isShuttingDown() },
         artifacts: phase7,
+        phase8: phase8Tools,
         ...(options.port === undefined ? {} : { port: options.port }),
       });
-      server.once('close', phase6.processRuntime.close.bind(phase6.processRuntime));
+      server.once('close', () => {
+        void phase8.shutdown(phase6.processRuntime)
+          .catch(() => undefined)
+          .finally(() => runtime.close());
+      });
+      phase8.start();
     } catch (cause) {
+      if (phase8Lifecycle !== undefined && phase6Runtime !== undefined) {
+        phase6Runtime.close();
+        void phase8Lifecycle.shutdown(phase6Runtime).catch(() => undefined);
+      }
       runtime.close();
       throw cause;
     }
-    server.once('close', runtime.close);
     server.on('listening', () => {
       const address = server.address();
       const port = typeof address === 'object' && address !== null ? address.port : options.port;
@@ -173,7 +206,13 @@ export const defaultCommands: CliCommands = {
       );
     });
     server.on('error', () => {
-      runtime.close();
+      if (phase8Lifecycle !== undefined && phase6Runtime !== undefined) {
+        void phase8Lifecycle.shutdown(phase6Runtime)
+          .catch(() => undefined)
+          .finally(() => runtime.close());
+      } else {
+        runtime.close();
+      }
       io.err(`${CLI_NAME}: MCP HTTP server error`);
       process.exitCode = EXIT_INTERNAL;
     });
@@ -194,7 +233,7 @@ export function renderHelp(version: string): string {
     '  init             Prepare state, initialize schema, and bootstrap Phase 4 authority',
     '  doctor           Report state and DB-file security. Read-only; repairs nothing',
     '  token            Issue, list, or revoke local persistent actor tokens',
-    '  serve            Serve the Phase 5/6/7 MCP spine (--http or --stdio)',
+    '  serve            Serve the Phase 5/6/7/8 MCP spine (--http or --stdio)',
     '',
     'Token options:',
     '  token issue --label LABEL [--expires-at UTC_TIMESTAMP]',
@@ -217,9 +256,9 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 7 implementation branch. Persistent auth, Codex authority, job lifecycle, worker runs, evidence, and artifacts.',
+    '  Phase 8 implementation branch. Persistent auth, Codex authority, job lifecycle, worker runs, evidence, artifacts, and recovery.',
     '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
-    '  Resilience, remote workers, and later phases remain out of scope.',
+    '  Remote workers, Phase 9 hardening, and later phases remain out of scope.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
   ].join('\n');
 }

@@ -14,6 +14,7 @@ import type { Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import type { Phase6WorkerToolOptions } from './tools/phase6.js';
 import type { Phase7EvidenceArtifactToolOptions } from './tools/phase7.js';
+import type { Phase8ToolOptions } from './tools/phase8.js';
 
 interface CommonStdioServerOptions {
   readonly authInfo: ActorAuthInfo;
@@ -25,6 +26,7 @@ interface CommonStdioServerOptions {
   readonly jobs?: Phase5JobToolOptions;
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
+  readonly phase8?: Phase8ToolOptions;
 }
 
 export interface StdioServerOptions extends CommonStdioServerOptions {
@@ -47,6 +49,7 @@ function startVerifiedStdioServer(options: CommonStdioServerOptions): StdioServe
       ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
       ...(options.workers === undefined ? {} : { workers: options.workers }),
       ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
+      ...(options.phase8 === undefined ? {} : { phase8: options.phase8 }),
     }),
     stdioOptions,
   );
@@ -73,6 +76,7 @@ export async function startAuthenticatedStdioServer(options: {
   readonly jobs?: Phase5JobToolOptions;
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
+  readonly phase8?: Phase8ToolOptions;
 }): Promise<StdioServerHandle> {
   options.verifyStartup();
   const authInfo = await options.resolver.verifyAccessToken(options.token);
@@ -85,6 +89,7 @@ export async function startAuthenticatedStdioServer(options: {
     ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
     ...(options.workers === undefined ? {} : { workers: options.workers }),
     ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
+    ...(options.phase8 === undefined ? {} : { phase8: options.phase8 }),
   });
 }
 
@@ -99,6 +104,7 @@ export function startEnvironmentStdioServer(options: {
   readonly jobs?: Phase5JobToolOptions;
   readonly workers?: Phase6WorkerToolOptions;
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
+  readonly phase8?: Phase8ToolOptions;
 }): StdioServerHandle {
   options.verifyStartup();
   const authInfo = authenticateEnvironmentToken(options.environment);
@@ -111,5 +117,6 @@ export function startEnvironmentStdioServer(options: {
     ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
     ...(options.workers === undefined ? {} : { workers: options.workers }),
     ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
+    ...(options.phase8 === undefined ? {} : { phase8: options.phase8 }),
   });
 }

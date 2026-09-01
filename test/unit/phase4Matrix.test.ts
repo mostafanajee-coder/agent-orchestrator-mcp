@@ -41,14 +41,15 @@ describe('Phase 4 matrix traceability', () => {
     }
   });
 
-  it('REG-04 exposes the Phase 5, Phase 6, and Phase 7 names without leaking later tools', () => {
+  it('REG-04 exposes the Phase 5–8 names without leaking later integrations', () => {
     const root = process.cwd();
     const files = sourceFiles(join(root, 'src'));
     const all = files.map((path) => readFileSync(path, 'utf8')).join('\n');
     expect(all).toMatch(/job_create|job_get|job_list|job_start|job_resume/);
     expect(all).toMatch(/qa_dispatch|run_report|run_status/);
     expect(all).toMatch(/evidence_add|artifact_register|evidence_list|artifact_list/);
-    expect(all).not.toMatch(/audit_query|reaper|remote_worker/);
+    expect(all).toMatch(/audit_query|Phase8Lifecycle|reapStaleRuns/);
+    expect(all).not.toMatch(/remote_worker/);
   });
 
   it('AUTH-05 keeps the legacy environment resolver out of the production CLI path', () => {

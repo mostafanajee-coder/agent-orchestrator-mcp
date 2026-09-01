@@ -27,11 +27,13 @@ export const AUDIT_ACTION_VALUES = [
   'run.failed',
   'run.timeout',
   'run.cancelled',
+  'run.orphaned',
   'run.duplicate_rejected',
   'lease.issued',
   'lease.consumed',
   'lease.rejected',
   'system.runs_settled',
+  'system.stall',
   'evidence.add',
   'evidence.rejected',
   'artifact.register',
@@ -423,6 +425,59 @@ function auditTail(db: SqliteDatabase): { readonly seq: number; readonly prevHas
   const expectedHash = createHash('sha256').update(canonicalHashInput(row), 'utf8').digest('hex');
   if (row.hash !== expectedHash) throw new AuditError('The current audit tail hash is invalid.');
   return { seq: currentNext, prevHash: row.hash };
+}
+
+/** Validates one bounded audit range plus its immediate predecessor anchor. */
+export function verifyAuditRange(
+  db: SqliteDatabase,
+  firstSeq: number,
+  lastSeq: number,
+): AuditChainReport {
+  if (!Number.isSafeInteger(firstSeq) || !Number.isSafeInteger(lastSeq)
+    || firstSeq < 1 || lastSeq < firstSeq || lastSeq - firstSeq >= 200) {
+    return { valid: false, firstInvalidSeq: firstSeq };
+  }
+  let previous = AUDIT_GENESIS_HASH;
+  if (firstSeq > 1) {
+    const anchor = db.prepare(
+      'SELECT seq, ts, actor_id, actor_role, session_token_id, request_id, session_hint, action, job_id, cycle, capability, subject_type, subject_id, from_state, to_state, from_auth_status, to_auth_status, result, detail_json, prev_hash, hash FROM audit_log WHERE seq = ?',
+    ).get(firstSeq - 1) as SqlAuditRow | undefined;
+    if (anchor === undefined) return { valid: false, firstInvalidSeq: firstSeq - 1 };
+    const anchorRow = auditRowFromSql(anchor);
+    if (
+      anchorRow.seq !== firstSeq - 1
+      || !HEX_DIGEST.test(anchorRow.prevHash)
+      || !HEX_DIGEST.test(anchorRow.hash)
+      || !(AUDIT_ACTION_VALUES as readonly string[]).includes(anchorRow.action)
+    ) return { valid: false, firstInvalidSeq: firstSeq - 1 };
+    const expectedAnchor = createHash('sha256').update(canonicalHashInput(anchorRow), 'utf8').digest('hex');
+    if (anchorRow.hash !== expectedAnchor) return { valid: false, firstInvalidSeq: firstSeq - 1 };
+    previous = anchorRow.hash;
+  }
+  const rows = db.prepare(
+    'SELECT seq, ts, actor_id, actor_role, session_token_id, request_id, session_hint, action, job_id, cycle, capability, subject_type, subject_id, from_state, to_state, from_auth_status, to_auth_status, result, detail_json, prev_hash, hash FROM audit_log WHERE seq >= ? AND seq <= ? ORDER BY seq',
+  ).all(firstSeq, lastSeq) as SqlAuditRow[];
+  let expectedSequence = firstSeq;
+  for (const raw of rows) {
+    const row = auditRowFromSql(raw);
+    if (
+      row.seq !== expectedSequence
+      || !Number.isSafeInteger(row.seq)
+      || row.seq <= 0
+      || !HEX_DIGEST.test(row.prevHash)
+      || !HEX_DIGEST.test(row.hash)
+      || !(AUDIT_ACTION_VALUES as readonly string[]).includes(row.action)
+      || row.prevHash !== previous
+    ) {
+      return { valid: false, firstInvalidSeq: row.seq };
+    }
+    const expected = createHash('sha256').update(canonicalHashInput(row), 'utf8').digest('hex');
+    if (row.hash !== expected) return { valid: false, firstInvalidSeq: row.seq };
+    previous = row.hash;
+    expectedSequence += 1;
+  }
+  if (expectedSequence !== lastSeq + 1) return { valid: false, firstInvalidSeq: expectedSequence };
+  return { valid: true };
 }
 
 export function verifyAuditChain(db: SqliteDatabase): AuditChainReport {

@@ -52,6 +52,8 @@ interface ActiveRun {
   forceTimer: NodeJS.Timeout | undefined;
   timedOut: boolean;
   cancelled: boolean;
+  shutdownRequested: boolean;
+  recoveryRequested: 'ORPHANED' | 'TIMEOUT' | 'CANCELLED' | undefined;
   settled: boolean;
 }
 
@@ -112,6 +114,7 @@ function redactRuntimeText(value: string): string {
  */
 export class ProcessRuntime {
   private readonly active = new Map<string, ActiveRun>();
+  private shuttingDown = false;
 
   public constructor(private readonly dependencies: ProcessRuntimeDependencies) {}
 
@@ -119,7 +122,13 @@ export class ProcessRuntime {
   public startRuns(
     runs: readonly { readonly run_id: string; readonly lease: string }[],
   ): void {
+    if (this.shuttingDown) return;
     for (const run of runs) void this.startOne(run.run_id, run.lease);
+  }
+
+  /** Returns a stable snapshot of runs currently owned by this process. */
+  public activeRunIds(): readonly string[] {
+    return [...this.active.keys()].sort();
   }
 
   /** Sends controlled cancellation to processes for one job. */
@@ -131,21 +140,56 @@ export class ProcessRuntime {
     }
   }
 
+  /** Stops one owned process after the database has recorded recovery. */
+  public stopRun(runId: string, outcome: 'ORPHANED' | 'TIMEOUT' | 'CANCELLED'): void {
+    const active = this.active.get(runId);
+    if (active === undefined) return;
+    active.recoveryRequested = outcome;
+    active.timedOut = outcome === 'TIMEOUT';
+    this.terminate(active);
+  }
+
   /** Stops active processes during controlled transport shutdown. */
   public close(): void {
+    this.shuttingDown = true;
     for (const active of this.active.values()) {
-      active.cancelled = true;
-      this.terminate(active);
+      active.shutdownRequested = true;
+      this.gracefulTerminate(active);
     }
   }
 
+  /** Waits for owned children to leave the runtime, bounded by the caller. */
+  public waitForIdle(timeoutMs: number): Promise<boolean> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+      return Promise.resolve(this.active.size === 0);
+    }
+    if (this.active.size === 0) return Promise.resolve(true);
+    const deadline = Date.now() + timeoutMs;
+    return new Promise<boolean>((resolve) => {
+      const check = (): void => {
+        if (this.active.size === 0) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve(false);
+          return;
+        }
+        setTimeout(check, 25);
+      };
+      check();
+    });
+  }
+
   private async startOne(runId: string, lease: string): Promise<void> {
+    if (this.shuttingDown) return;
     let loaded: ReturnType<typeof loadRunForRuntime>;
     try {
       loaded = loadRunForRuntime(this.dependencies.db, runId);
     } catch {
       return;
     }
+    if (this.shuttingDown) return;
     const worker = this.dependencies.registry.workers.find(
       (candidate) => candidate.worker_id === loaded.run.worker_id,
     );
@@ -250,9 +294,15 @@ export class ProcessRuntime {
       forceTimer: undefined,
       timedOut: false,
       cancelled: false,
+      shutdownRequested: false,
+      recoveryRequested: undefined,
       settled: false,
     };
     this.active.set(runId, active);
+    if (this.shuttingDown) {
+      active.shutdownRequested = true;
+      this.terminate(active);
+    }
     try {
       if (child.pid !== undefined) setRunPid(this.dependencies.db, runId, child.pid);
     } catch {
@@ -419,15 +469,48 @@ export class ProcessRuntime {
     } catch {
       // The close event still settles the run using the recorded reason.
     }
-    if (active.forceTimer === undefined) {
-      active.forceTimer = setTimeout(() => {
-        try {
-          signalProcessGroup(active.child, 'SIGKILL');
-        } catch {
-          // Process already exited.
-        }
-      }, TERMINATION_GRACE_MS);
+    this.scheduleForceTermination(active);
+  }
+
+  private gracefulTerminate(active: ActiveRun): void {
+    if (active.settled) return;
+    try {
+      if (process.platform === 'win32' && active.child.pid !== undefined) {
+        const killer = spawn('taskkill', ['/pid', String(active.child.pid), '/t'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        killer.on('error', () => {
+          try { active.child.kill('SIGTERM'); } catch { /* Process already exited. */ }
+        });
+      } else {
+        signalProcessGroup(active.child, 'SIGTERM');
+      }
+    } catch {
+      // The close event still lets Phase 8 reconcile the durable run.
     }
+    this.scheduleForceTermination(active);
+  }
+
+  private scheduleForceTermination(active: ActiveRun): void {
+    if (active.forceTimer !== undefined) return;
+    active.forceTimer = setTimeout(() => {
+      try {
+        if (process.platform === 'win32' && active.child.pid !== undefined) {
+          const killer = spawn('taskkill', ['/pid', String(active.child.pid), '/t', '/f'], {
+            stdio: 'ignore',
+            windowsHide: true,
+          });
+          killer.on('error', () => {
+            try { active.child.kill('SIGKILL'); } catch { /* Process already exited. */ }
+          });
+        } else {
+          signalProcessGroup(active.child, 'SIGKILL');
+        }
+      } catch {
+        // Process already exited.
+      }
+    }, TERMINATION_GRACE_MS);
   }
 
   private finish(active: ActiveRun, code: number | null): void {
@@ -437,6 +520,31 @@ export class ProcessRuntime {
     if (active.timeoutTimer !== undefined) clearTimeout(active.timeoutTimer);
     if (active.forceTimer !== undefined) clearTimeout(active.forceTimer);
 
+    if (active.recoveryRequested === 'ORPHANED') return;
+    if (active.recoveryRequested === 'TIMEOUT') {
+      this.settle(active, 'TIMEOUT', 'NONE', 'TIMEOUT', null, code);
+      return;
+    }
+    if (active.recoveryRequested === 'CANCELLED') {
+      this.settle(active, 'CANCELLED', 'NONE', null, null, code);
+      return;
+    }
+    if (active.shutdownRequested) {
+      const terminal = active.terminal;
+      if (code === 0 && active.protocolFailure === undefined && active.buffer.byteLength === 0
+        && terminal?.type === 'result') {
+        this.settle(
+          active,
+          'SUCCEEDED',
+          terminal.verdict,
+          null,
+          terminal.summary,
+          code,
+          terminal.usage,
+        );
+      }
+      return;
+    }
     if (active.timedOut) {
       this.settle(active, 'TIMEOUT', 'NONE', 'TIMEOUT', null, code);
       return;

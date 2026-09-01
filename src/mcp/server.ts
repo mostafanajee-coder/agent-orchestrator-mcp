@@ -9,6 +9,7 @@ import { registerCodexDecide, type Phase4AuthorityToolOptions } from './tools/co
 import { registerJobLifecycle, type Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import { registerPhase6WorkerTools, type Phase6WorkerToolOptions } from './tools/phase6.js';
 import { registerPhase7EvidenceArtifactTools, type Phase7EvidenceArtifactToolOptions } from './tools/phase7.js';
+import { registerPhase8Tools, type Phase8ToolOptions } from './tools/phase8.js';
 import { registerPing, type McpTransportKind, SERVICE_NAME } from './tools/ping.js';
 
 export interface McpServerFactoryOptions {
@@ -24,6 +25,8 @@ export interface McpServerFactoryOptions {
   readonly workers?: Phase6WorkerToolOptions;
   /** Phase 7 evidence/artifact backing; tools are hidden unless auth permits them. */
   readonly artifacts?: Phase7EvidenceArtifactToolOptions;
+  /** Phase 8 read-only audit backing; the surface is visible only to the principal. */
+  readonly phase8?: Phase8ToolOptions;
 }
 
 /** Builds the common compatibility and Phase 4 server surface for one transport/era. */
@@ -48,6 +51,9 @@ export function buildMcpServer(
   }
   if (options.artifacts !== undefined) {
     registerPhase7EvidenceArtifactTools(server, options.artifacts, authInfo);
+  }
+  if (options.phase8 !== undefined) {
+    registerPhase8Tools(server, options.phase8, authInfo);
   }
   return server;
 }

@@ -139,6 +139,8 @@ export interface Phase6RunOptions {
   readonly registry: Phase6WorkerRegistry;
   readonly leaseKey: Buffer;
   readonly clock?: () => number;
+  /** Phase 8 shutdown gate; a false value rejects new dispatches. */
+  readonly acceptingWork?: () => boolean;
   /** Phase 7 artifact staging root; absent for legacy Phase 6 fixtures. */
   readonly artifactsRoot?: string;
 }
@@ -153,6 +155,7 @@ export type RunLifecycleErrorCode =
   | 'IDEMPOTENCY_CONFLICT'
   | 'LEASE_REJECTED'
   | 'RUN_NOT_FOUND'
+  | 'SERVICE_SHUTTING_DOWN'
   | 'INTERNAL_ERROR';
 
 export const RUN_LIFECYCLE_ERROR_CODES = [
@@ -165,6 +168,7 @@ export const RUN_LIFECYCLE_ERROR_CODES = [
   'IDEMPOTENCY_CONFLICT',
   'LEASE_REJECTED',
   'RUN_NOT_FOUND',
+  'SERVICE_SHUTTING_DOWN',
   'INTERNAL_ERROR',
 ] as const satisfies readonly RunLifecycleErrorCode[];
 
@@ -523,6 +527,9 @@ export function dispatchQa(
   options: Phase6RunOptions,
 ): DispatchResult {
   requirePrincipal(actor);
+  if (options.acceptingWork?.() === false) {
+    fail('SERVICE_SHUTTING_DOWN', 'The service is shutting down and is not accepting new dispatches.');
+  }
   const input = parseDispatchInput(rawInput);
   const hash = hashRequest(input);
   return withImmediateTransaction(db, () => {
