@@ -13,8 +13,8 @@ Authoritative base: `main` and `origin/main` at
 `88670743f8a443bbf3b71c9f379199deca42d512`
 Tree: `477235e7474e6930c37afcac9149dcb5f5b4388b`
 Proposed architecture amendment: **Revision 10**
-Current schema: **version 6**
-Proposed schema version: **7**, subject to independent review
+Phase 6 base schema: **version 6**
+Phase 7 implementation schema: **version 7**
 Implementation authorization: **YES — Codex decision recorded on `codex/phase7-implementation`**
 
 ## 0. Governance and authority

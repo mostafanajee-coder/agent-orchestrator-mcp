@@ -1819,8 +1819,9 @@ Revision 10 is derived from the published Phase 6 baseline at
 `88670743f8a443bbf3b71c9f379199deca42d512`. It is governed by
 `docs/PHASE7_PLAN.md` and is intended to activate the existing `evidence` and
 `artifacts` structures in a bounded, attributable, append-only manner. The
-presence of those tables in schema version 6 does not mean their runtime write
-paths are active.
+presence of those tables in the Phase 6 base schema version 6 did not mean their
+runtime write paths were active; the Phase 7 implementation migrates the
+published baseline to schema version 7 and activates the reviewed paths.
 
 ### 25.1 Purpose and ownership
 
