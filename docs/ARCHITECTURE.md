@@ -5,8 +5,8 @@
 > `main` and `origin/main` at `88670743f8a443bbf3b71c9f379199deca42d512`.
 > Revision 10 below is the reviewed Phase 7 implementation baseline. Its
 > separate Codex authorization applies only to `codex/phase7-implementation`;
-> the implementation is merged into local `main` at `035fbb6`; `origin/main`
-> remains at the Phase 6 baseline until a separately authorized Push.
+> the implementation and corrective Windows path fix are published in
+> `main` and `origin/main` at `bf789157619a0ec39486f451405e190ad5209d14`.
 > The Revision 8 proposal also amends the shared design sections §4, §14, §16,
 > and §21 where explicitly identified below.
 
@@ -1810,11 +1810,11 @@ merged fast-forward into `main`, published to `origin/main`, and closed in
 
 ## 25. Revision 10 / Phase 7 evidence and artifact proposal
 
-**Status: Phase 7 implementation is merged into local `main` at
-`035fbb6f3de5588c420b153c6d47497e326340e0`. The implementation handoff is
+**Status: Phase 7 implementation and the corrective Windows path fix are
+published in `main` and `origin/main` at
+`bf789157619a0ec39486f451405e190ad5209d14`. The implementation handoff is
 recorded in `docs/PHASE7_IMPLEMENTATION_REPORT.md`; post-merge closure is
-recorded in `docs/PHASE7_POST_MERGE_CLOSURE.md`. Remote publication remains
-separate.**
+recorded in `docs/PHASE7_POST_MERGE_CLOSURE.md`.**
 
 Revision 10 is derived from the published Phase 6 baseline at
 `88670743f8a443bbf3b71c9f379199deca42d512`. It is governed by

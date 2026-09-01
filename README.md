@@ -32,10 +32,10 @@ protocol, run/lease lifecycle, `qa_dispatch`, `run_report`, and `run_status` sur
 [`docs/PHASE6_POST_MERGE_CLOSURE.md`](docs/PHASE6_POST_MERGE_CLOSURE.md). Evidence/artifact handling,
 recovery loops, remote workers, and all Phase 7+ behavior remain out of scope for Phase 6.
 
-**Phase 7 — Evidence and artifacts (merged into local `main`).** The reviewed implementation at
-`035fbb6f3de5588c420b153c6d47497e326340e0` was fast-forwarded into `main`. The post-merge record is in
-[`docs/PHASE7_POST_MERGE_CLOSURE.md`](docs/PHASE7_POST_MERGE_CLOSURE.md). `origin/main` remains at the
-Phase 6 baseline until a separately authorized Push; Phase 8 has not started.
+**Phase 7 — Evidence and artifacts (merged and published).** The reviewed implementation was fast-forwarded into
+`main`, followed by the Windows path-normalization fix at `bf789157619a0ec39486f451405e190ad5209d14`. Local
+`main` and `origin/main` now match at that fix. The post-merge record is in
+[`docs/PHASE7_POST_MERGE_CLOSURE.md`](docs/PHASE7_POST_MERGE_CLOSURE.md); Phase 8 has not started.
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
