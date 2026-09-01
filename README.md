@@ -43,15 +43,18 @@ the closure commit. The post-merge record is in
 `codex/phase8-implementation` and fast-forwarded into `main` at reviewed head
 `130d6988422ad38dcd5513361e049d0171386613` and published in `main`/`origin/main` at `3f03168c161a941c4f7055629e6f433c636e62a7`. It provides bounded startup recovery, reaping, cancellation
 settlement, graceful shutdown, `STALLED` paths, and the principal-only `audit_query` surface, using schema v7
-without a migration. The implementation is now published in `main` and `origin/main`; Phase 9 has not started. The detailed handoff is in
+without a migration. The implementation is now published in `main` and `origin/main`; the Phase 9 implementation is on its dedicated local branch and is not merged. The detailed handoff is in
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md) and the local closure is in
 [`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md).
 
-**Phase 9 — Hardening and documentation (planning only).** The documentation-only plan is being prepared on
-`codex/phase9-authority-plan` from the published Phase 8 base `3f03168c161a941c4f7055629e6f433c636e62a7`. It covers
-fixed authenticated request admission, redaction classification, the normative V1 worker protocol, root
-`SECURITY.md`, two-session attribution verification, and cross-platform regression evidence. No Phase 9 source,
-migration, MCP business tool, deployment, Push, PR, or implementation authorization exists.
+**Phase 9 — Hardening and documentation (implemented locally; not merged).** The implementation branch
+`codex/phase9-implementation` starts from the reviewed planning snapshot
+`a75ec06542660cd4d3a338bed514186549a381bd` and contains the local implementation at
+`f17ba7788c6b364646eaf7e31c12422bc4d1e20c`. It adds fixed post-authentication per-token request admission
+for HTTP and stdio, centralized redaction/error shaping, lease-aware worker-output redaction, two-session
+attribution coverage, and regression tests. The implementation is limited to Phase 9: no migration, new
+business tool, protocol-version change, deployment, push, PR, or Phase 10 work has been performed. Independent
+implementation review and a separate final merge authorization remain pending.
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
@@ -60,7 +63,7 @@ The approved design and phase plans are in
 [docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md), [docs/PHASE8_PLAN.md](docs/PHASE8_PLAN.md),
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md), and
 [`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md), [docs/PHASE9_PLAN.md](docs/PHASE9_PLAN.md),
-and [SECURITY.md](SECURITY.md).
+[`docs/PHASE9_IMPLEMENTATION_REPORT.md`](docs/PHASE9_IMPLEMENTATION_REPORT.md), and [SECURITY.md](SECURITY.md).
 The empirical Codex/Inspector protocol observation is recorded in
 [docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 

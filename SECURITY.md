@@ -152,11 +152,12 @@ streams, credentials, lease material, or unrestricted detail.
 
 ## 11. Rate-limit boundary
 
-The Phase 9 proposal places a fixed in-memory request limiter after successful
-authentication and before tool/domain execution. Its proposed V1 policy is 30
-credits per verified `token_id`, refilled at one credit per second, with one
+The Phase 9 implementation places a fixed in-memory request limiter after
+successful authentication and before tool/domain execution. Its V1 policy is
+30 credits per verified `token_id`, refilled at one credit per second, with one
 credit per authenticated MCP request. `tools/list` and `ping` count as normal
-requests. Restart resets the limiter.
+requests. Restart resets the limiter. The implementation is currently local
+to `codex/phase9-implementation` and is not yet merged or published.
 
 Rate limiting is transport admission control, not an authority or persistence
 mechanism. A rejection cannot consume an idempotency key, open a decision
@@ -164,8 +165,8 @@ transaction, mutate a job/run/lease/evidence/artifact row, or create an audit
 decision. Unknown credentials remain under the existing authentication and
 loopback protections; no pre-auth global limiter is assumed.
 
-The values and exact shared HTTP/stdio hook require independent Phase 9 review
-before implementation authorization.
+The shared HTTP/stdio hook requires independent implementation review before
+merge. This document does not authorize merge or publication.
 
 ## 12. Data classification and redaction
 

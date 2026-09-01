@@ -1,9 +1,10 @@
 # AOM — Phase 9 Hardening and Documentation Plan
 
-> **Status: documentation-only planning.** This document proposes the Phase 9
-> hardening and normative-documentation scope. It does not authorize source
-> changes, configuration changes, migrations, MCP tool registration, deployment,
-> Push, PR creation, or Merge.
+> **Status: governing planning scope with a locally completed implementation.**
+> This document defines the Phase 9 hardening and normative-documentation
+> boundary. The plan itself did not authorize source changes; a separate Codex
+> decision authorized implementation on the dedicated branch. It still does not
+> authorize deployment, push, PR creation, or merge.
 
 ## 1. Authority and authoritative baseline
 
@@ -18,8 +19,11 @@ from the exact published Phase 8 `main` state:
 | Base tree | `8d34fe5c26d0b0f392cdab750cc8e14d3ab61c80` |
 | Phase 8 implementation | merged and published |
 | Phase 8 CI | passed on Windows and Ubuntu |
-| Phase 9 implementation | not started |
-| Phase 9 implementation authorization | `NO` |
+| Phase 9 implementation branch | `codex/phase9-implementation` |
+| Phase 9 implementation head | `f17ba7788c6b364646eaf7e31c12422bc4d1e20c` |
+| Phase 9 implementation tree | `503ab723ac23abe12ed5a85cae82db0900b2edc6` |
+| Phase 9 implementation | complete locally; not merged or published |
+| Phase 9 implementation authorization | `YES` — local branch only |
 
 The previous planning report proposed a nested security-document path. The
 architecture's repository layout defines `SECURITY.md` at the repository root;
@@ -135,8 +139,9 @@ Proposed fixed V1 policy:
 - internal startup, recovery, reaper, and shutdown operations do not consume an
   MCP request budget.
 
-These values are a planning proposal and require independent architecture
-review before implementation authorization.
+These values are the approved V1 policy used by the local implementation. The
+implementation does not make them runtime-configurable; any change requires a
+separate architecture decision.
 
 ### 5.3 Rejection behavior
 
@@ -150,10 +155,9 @@ bounded `retry_after_ms`. It must:
 - create no decision or authoritative status;
 - expose no credential or internal path.
 
-HTTP may use status 429 where the existing transport contract permits it;
-stdio must use the same semantic error in the MCP response. The exact wire
-shape must be frozen during implementation planning without changing the MCP
-business-tool catalogue.
+HTTP uses status 429 with a bounded `Retry-After` header; stdio uses the same
+semantic error in the MCP response. The exact rejection shape is frozen by the
+implementation without changing the MCP business-tool catalogue.
 
 Unknown or malformed credentials remain governed by the existing authentication,
 loopback, Host/Origin, body, and rejected-auth protections. No pre-auth global
@@ -306,14 +310,14 @@ or recovery semantics may regress.
 | WP6 | Define two-session, platform, regression, and 64-case evidence gates | planning only |
 | WP7 | Freeze documentation snapshot and independent architecture review | required before implementation authorization |
 | WP8 | Codex adjudication, corrections, and targeted re-review if needed | required before implementation authorization |
-| WP9 | Implement shared rate-limit admission | only after explicit authorization |
-| WP10 | Implement redaction/error-shaping corrections | only after explicit authorization |
-| WP11 | Finalize normative documentation without scope expansion | after source contract is frozen |
-| WP12 | Execute two-session and Windows/POSIX regression gates | implementation verification |
+| WP9 | Implement shared rate-limit admission | completed locally under explicit authorization |
+| WP10 | Implement redaction/error-shaping corrections | completed locally under explicit authorization |
+| WP11 | Finalize normative documentation without scope expansion | completed locally; report recorded |
+| WP12 | Execute two-session and Windows/POSIX regression gates | Windows local gates passed; POSIX CI evidence pending |
 | WP13 | Independent implementation review | merge prerequisite |
 | WP14 | Codex final merge gate and post-merge closure | separate authorization |
 
-WP9–WP14 are planned future packages and are not authorized by this document.
+WP13–WP14 remain future packages and are not authorized by this document.
 
 ## 12. Acceptance matrix
 
@@ -425,22 +429,23 @@ RATE 10 + REDACTION 14 + WORKER PROTOCOL 8 + SECURITY DOCUMENTATION 6
 
 ## 13. Risks and unresolved decisions
 
-The following are planning questions, not permission to implement:
+The following record the planning risks and their current disposition:
 
 1. The exact source admission hook for identical HTTP/stdio rate-limit behavior
-   must be selected after source inspection.
-2. The existing sink inventory must identify any redaction gaps before a source
-   correction is scoped.
-3. The fixed 30/1 policy requires review against expected local-session usage;
+   was selected after source inspection and implemented in the local branch.
+2. The sink inventory was checked and the identified redaction gaps were closed
+   in the local branch.
+3. The fixed 30/1 policy remains fixed and is not runtime-configurable in V1;
    tuning is change-controlled and not runtime-configurable in V1.
 4. Root `SECURITY.md` is a new documentation artifact and must not be confused
    with a deployment or security-service integration.
 5. Any requirement for a new index, capability, migration, message, or tool is
    an architecture-plan change and must return to review before implementation.
 
-No item blocks independent review of this documentation plan. The exact source
-hook, sink manifest, and rate-limit behavior are mandatory checks before Codex
-can authorize Phase 9 source implementation.
+No unresolved architecture blocker remains. The source hook, sink manifest, and
+rate-limit behavior are recorded in
+[`docs/PHASE9_IMPLEMENTATION_REPORT.md`](PHASE9_IMPLEMENTATION_REPORT.md) and
+remain subject to independent implementation review before merge.
 
 ## 14. Governance and authorization
 
@@ -468,14 +473,16 @@ The required sequence is:
 12. Obtain independent implementation review and Codex final merge approval.
 13. Perform post-merge Phase 9 closure before any later planning.
 
-At this planning snapshot:
+Current governance state:
 
 ```text
 PHASE 8: COMPLETE, MERGED, PUBLISHED, AND CLOSED
-PHASE 9 PLAN: DOCUMENTATION-ONLY
-PHASE 9 IMPLEMENTATION: NOT STARTED
-PHASE 9 IMPLEMENTATION AUTHORIZED: NO
+PHASE 9 PLAN: GOVERNING BASELINE
+PHASE 9 IMPLEMENTATION: COMPLETE LOCALLY ON codex/phase9-implementation
+PHASE 9 IMPLEMENTATION AUTHORIZED: YES — LOCAL BRANCH ONLY
+PHASE 9 IMPLEMENTATION REVIEW: PENDING
+PHASE 9 MERGE: NOT AUTHORIZED
 PHASE 10: NOT STARTED
 ```
 
-**PHASE 9 ARCHITECTURE PLAN — READY FOR INDEPENDENT REVIEW**
+**PHASE 9 IMPLEMENTATION — READY FOR INDEPENDENT IMPLEMENTATION REVIEW**

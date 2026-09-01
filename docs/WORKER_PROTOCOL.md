@@ -9,7 +9,8 @@ Version: **1**
 Owner: AOM V1 worker-runtime contract
 Repository: `C:\AgentProjects\agent-orchestrator-mcp`
 Governing plans: `docs/PHASE6_PLAN.md`, `docs/PHASE8_PLAN.md`, and `docs/PHASE9_PLAN.md`
-Current implementation: **Phase 8 complete and published; Phase 9 planning only**
+Current implementation: **Phase 8 complete and published; Phase 9 hardening
+implemented locally and not yet merged**
 
 ## 1. Purpose and boundary
 
@@ -432,12 +433,14 @@ PHASE 7 WINDOWS FIX: PUBLISHED AND VERIFIED
 PHASE 8 IMPLEMENTATION AUTHORIZED: YES
 PHASE 8 IMPLEMENTATION: COMPLETE AND MERGED LOCALLY
 PHASE 8 REMOTE PUBLICATION: YES
-PHASE 9 STARTED: NO
+PHASE 9 IMPLEMENTATION: COMPLETE LOCALLY — codex/phase9-implementation
+PHASE 9 MERGE: NOT AUTHORIZED
+PHASE 10 STARTED: NO
 ```
 
 ## 14. Phase 9 hardening boundary
 
-Phase 9 may normalize this document as the AOM V1 Worker Protocol and add
+Phase 9 normalized this document as the AOM V1 Worker Protocol and added
 explicit redaction, diagnostic, and security-documentation requirements. It
 must not change protocol version 1, add a worker message type, broaden the
 private start envelope, expose leases outside their approved worker path, or
