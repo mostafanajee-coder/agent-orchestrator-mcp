@@ -40,7 +40,7 @@ the closure commit. The post-merge record is in
 
 **Phase 8 — Resilience and recovery (merged and published).** The reviewed planning baseline is preserved at
 `809d698c164ad614e2365778e85e40dc65be872b`; the implementation was authorized on
-`codex/phase8-implementation` and merged locally into `main` at reviewed head
+`codex/phase8-implementation` and fast-forwarded into `main` at reviewed head
 `130d6988422ad38dcd5513361e049d0171386613` and published in `main`/`origin/main` at `3f03168c161a941c4f7055629e6f433c636e62a7`. It provides bounded startup recovery, reaping, cancellation
 settlement, graceful shutdown, `STALLED` paths, and the principal-only `audit_query` surface, using schema v7
 without a migration. The implementation is now published in `main` and `origin/main`; Phase 9 has not started. The detailed handoff is in
