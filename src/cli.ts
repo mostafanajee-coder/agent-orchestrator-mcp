@@ -256,7 +256,7 @@ export function renderHelp(version: string): string {
     '  3  security or invariant failure',
     '',
     'Status:',
-    '  Phase 8 implementation branch. Persistent auth, Codex authority, job lifecycle, worker runs, evidence, artifacts, and recovery.',
+    '  Phase 8 implementation branch. Persistent auth, Codex authority, job lifecycle, worker runs, evidence, artifacts, recovery, and audit query.',
     '  Doctor is filesystem-only; init and serve own deep SQLite integrity checks.',
     '  Remote workers, Phase 9 hardening, and later phases remain out of scope.',
     '  See docs/ARCHITECTURE.md for the approved design and phase plan.',
