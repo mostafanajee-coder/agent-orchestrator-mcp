@@ -3,8 +3,9 @@
 > **Status: governing planning scope with a locally completed implementation.**
 > This document defines the Phase 9 hardening and normative-documentation
 > boundary. The plan itself did not authorize source changes; a separate Codex
-> decision authorized implementation on the dedicated branch. It still does not
-> authorize deployment, push, PR creation, or merge.
+> decision authorized implementation on the dedicated branch, followed by a
+> separate local fast-forward after implementation review. It still does not
+> authorize deployment or remote publication.
 
 ## 1. Authority and authoritative baseline
 
@@ -22,8 +23,10 @@ from the exact published Phase 8 `main` state:
 | Phase 9 implementation branch | `codex/phase9-implementation` |
 | Phase 9 implementation head | `f17ba7788c6b364646eaf7e31c12422bc4d1e20c` |
 | Phase 9 implementation tree | `503ab723ac23abe12ed5a85cae82db0900b2edc6` |
-| Phase 9 implementation | complete locally; not merged or published |
-| Phase 9 implementation authorization | `YES` — local branch only |
+| Phase 9 implementation | complete and merged into local `main`; not published remotely |
+| Local `main` after Phase 9 fast-forward | `bea75982ec6c53539a3c13a8260d70f7d0160786` |
+| `origin/main` after Phase 9 work | `3f03168c161a941c4f7055629e6f433c636e62a7` — unchanged |
+| Phase 9 implementation authorization | `YES` — dedicated branch only |
 
 The previous planning report proposed a nested security-document path. The
 architecture's repository layout defines `SECURITY.md` at the repository root;
@@ -315,9 +318,10 @@ or recovery semantics may regress.
 | WP11 | Finalize normative documentation without scope expansion | completed locally; report recorded |
 | WP12 | Execute two-session and Windows/POSIX regression gates | Windows local gates passed; POSIX CI evidence pending |
 | WP13 | Independent implementation review | merge prerequisite |
-| WP14 | Codex final merge gate and post-merge closure | separate authorization |
+| WP14 | Codex final merge gate and post-merge closure | local fast-forward complete; remote publication pending |
 
-WP13–WP14 remain future packages and are not authorized by this document.
+WP13 independent implementation review is complete. WP14 local fast-forward and
+post-merge closure are complete; remote publication remains outside this record.
 
 ## 12. Acceptance matrix
 
@@ -445,7 +449,7 @@ The following record the planning risks and their current disposition:
 No unresolved architecture blocker remains. The source hook, sink manifest, and
 rate-limit behavior are recorded in
 [`docs/PHASE9_IMPLEMENTATION_REPORT.md`](PHASE9_IMPLEMENTATION_REPORT.md) and
-remain subject to independent implementation review before merge.
+were independently implementation-reviewed before the local fast-forward.
 
 ## 14. Governance and authorization
 
@@ -478,10 +482,11 @@ Current governance state:
 ```text
 PHASE 8: COMPLETE, MERGED, PUBLISHED, AND CLOSED
 PHASE 9 PLAN: GOVERNING BASELINE
-PHASE 9 IMPLEMENTATION: COMPLETE LOCALLY ON codex/phase9-implementation
-PHASE 9 IMPLEMENTATION AUTHORIZED: YES — LOCAL BRANCH ONLY
-PHASE 9 IMPLEMENTATION REVIEW: PENDING
-PHASE 9 MERGE: NOT AUTHORIZED
+PHASE 9 IMPLEMENTATION: COMPLETE AND MERGED INTO LOCAL main
+PHASE 9 IMPLEMENTATION AUTHORIZED: YES — DEDICATED BRANCH ONLY
+PHASE 9 IMPLEMENTATION REVIEW: ACCEPTED
+PHASE 9 LOCAL MERGE: COMPLETE — FAST-FORWARD TO bea75982
+PHASE 9 REMOTE PUBLICATION: NOT PERFORMED
 PHASE 10: NOT STARTED
 ```
 

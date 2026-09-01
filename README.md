@@ -47,14 +47,16 @@ without a migration. The implementation is now published in `main` and `origin/m
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md) and the local closure is in
 [`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md).
 
-**Phase 9 — Hardening and documentation (implemented locally; not merged).** The implementation branch
+**Phase 9 — Hardening and documentation (merged locally; not published).** The implementation branch
 `codex/phase9-implementation` starts from the reviewed planning snapshot
 `a75ec06542660cd4d3a338bed514186549a381bd` and contains the local implementation at
 `f17ba7788c6b364646eaf7e31c12422bc4d1e20c`. It adds fixed post-authentication per-token request admission
 for HTTP and stdio, centralized redaction/error shaping, lease-aware worker-output redaction, two-session
 attribution coverage, and regression tests. The implementation is limited to Phase 9: no migration, new
-business tool, protocol-version change, deployment, push, PR, or Phase 10 work has been performed. Independent
-implementation review and a separate final merge authorization remain pending.
+business tool, protocol-version change, deployment, or Phase 10 work has been performed. The accepted
+implementation was fast-forwarded into local `main` at `bea75982ec6c53539a3c13a8260d70f7d0160786`; it has
+not been pushed to `origin/main` and no PR was created. The post-merge record is in
+[`docs/PHASE9_POST_MERGE_CLOSURE.md`](docs/PHASE9_POST_MERGE_CLOSURE.md).
 
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
@@ -63,7 +65,8 @@ The approved design and phase plans are in
 [docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md), [docs/PHASE8_PLAN.md](docs/PHASE8_PLAN.md),
 [`docs/PHASE8_IMPLEMENTATION_REPORT.md`](docs/PHASE8_IMPLEMENTATION_REPORT.md), and
 [`docs/PHASE8_POST_MERGE_CLOSURE.md`](docs/PHASE8_POST_MERGE_CLOSURE.md), [docs/PHASE9_PLAN.md](docs/PHASE9_PLAN.md),
-[`docs/PHASE9_IMPLEMENTATION_REPORT.md`](docs/PHASE9_IMPLEMENTATION_REPORT.md), and [SECURITY.md](SECURITY.md).
+[`docs/PHASE9_IMPLEMENTATION_REPORT.md`](docs/PHASE9_IMPLEMENTATION_REPORT.md),
+[`docs/PHASE9_POST_MERGE_CLOSURE.md`](docs/PHASE9_POST_MERGE_CLOSURE.md), and [SECURITY.md](SECURITY.md).
 The empirical Codex/Inspector protocol observation is recorded in
 [docs/PHASE2_PROTOCOL.md](docs/PHASE2_PROTOCOL.md).
 
