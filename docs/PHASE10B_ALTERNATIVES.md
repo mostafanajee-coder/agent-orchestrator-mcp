@@ -251,3 +251,13 @@ The server-side opaque record is the smallest design that directly closes the
 actual trust-boundary defect while preserving AOM as the final authority. The
 optional proof is deliberately secondary. No alternative is implementation-
 authorized by this document.
+
+## 10.1 Final adjudication status
+
+The focused independent re-review passed with zero new blocking findings. The
+final selection remains Option C as the canonical server-side record, with the
+hybrid identity arrangement of an existing observer token for read hardening
+and a distinct future edge transport identity for request-only issuer
+admission. S3 integration-bound subject binding, finite AOM quotas, mandatory
+full-principal removal before writes, and the restore-epoch procedure are
+accepted planning constraints. No alternative authorizes implementation.

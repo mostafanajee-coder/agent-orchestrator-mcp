@@ -345,3 +345,196 @@ This adjudication updates only the Phase 10B planning documents:
 - `docs/PHASE10B_ALTERNATIVES.md`
 - `docs/PHASE10B_EXTERNAL_REVIEW_PACKET.md`
 - `docs/PHASE10B_REVIEW_ADJUDICATION.md`
+
+## FINAL — Architecture adjudication after focused re-review
+
+### 18. Final re-review decision
+
+The focused independent Opus re-review is acknowledged as `PASS`. Its closure
+claims are accepted: BLK-1 is closed at the architecture level, the C-first
+opaque server-side model is accepted, the restricted edge identity and S3
+integration-bound subject model are accepted, the observer read hardening is
+safe to implement first, and no new blocking finding was introduced.
+
+This is an architecture acceptance and implementation-planning decision. It is
+not source authorization, schema authorization, public-write authorization,
+Gateway authorization, or authority authorization.
+
+### 19. U-1/U-2/U-3 disposition
+
+- **U-1 accepted as a normative invariant:** the edge integration cannot
+  self-provision a new actor, integration identity, or quota domain through any
+  MCP/request path. Actor/integration provisioning remains a separately
+  controlled local administration path. Identity proliferation must not reset
+  quotas.
+- **U-2 accepted as a system assumption:** quota, generation, epoch, and
+  one-use atomicity rely on a single-writer AOM instance. Any future multi-node
+  AOM requires a new review of serialization, quota atomicity,
+  `integration_generation`, authorization epoch, and one-use consumption.
+- **U-3 accepted as deny-by-default:** a future `edge` transport actor is not
+  accepted by any existing authority gate merely because its name or role is
+  present. Each edge gate must explicitly allow only the request-only issuer
+  operation; all principal, worker, system, lifecycle, and decision gates deny
+  it unless separately reviewed.
+
+### 20. Final authorization-epoch direction
+
+Choose **Option A with mandatory Option C procedure**: a small AOM-owned epoch
+state record lives outside the restorable SQLite backup set, with Windows
+current-user/admin ACL protection appropriate to the AOM installation. The
+epoch is an opaque non-secret identifier; it does not require a secret merely
+to name the authorization generation. The backup procedure must explicitly
+exclude this state from the database snapshot.
+
+Every delegation binds to the current epoch. After any point-in-time restore,
+the operator must rotate the epoch before AOM accepts delegation issuance or
+delegated mutation. If the epoch file is missing, unreadable, changed
+unexpectedly, or cannot be reconciled with the active deployment, AOM fails
+closed. A restored database therefore cannot revive a pre-consumption or
+pre-revocation delegation. The exact path/ACL and rotation command are
+implementation-bound decisions; they are not being created here.
+
+### 21. Final restricted-edge identity representation
+
+Choose **Option D — hybrid**:
+
+1. Use the existing `observer` actor/token, with its existing `job:read` only
+   semantics, for `10B.0A` Stage-0 read transport hardening.
+2. Use a separate future non-principal `edge` transport identity for the AOM
+   issuer-request path. It is represented in the AOM identity/audit model so
+   it can be independently revoked and attributed, but it receives only the
+   conceptual `delegation:request` admission capability.
+3. Do not add `delegation:request` to `observer`, and do not create a separate
+   authority system outside AOM actor/policy enforcement.
+
+The current source has no `edge` role or `delegation:request` capability. A
+future source/schema change must add explicit deny-by-default handling and
+prove that the edge identity is rejected by all existing principal, worker,
+system, lifecycle, and `codex_decide` gates.
+
+### 22. Final `delegation:request` semantics
+
+`delegation:request` means only that the authenticated edge integration may
+enter AOM's issuance-policy evaluation path. It never means that the caller
+may receive the requested capability, issue a record, approve a record, choose
+the authority principal, refresh a record, widen caveats, or bypass quotas.
+AOM independently evaluates operation, tier, integration state, resource,
+canonical payload, approval, policy generation, epoch, and quota before it
+creates a delegation.
+
+### 23. Final quota atomicity direction
+
+The likely future persistence design is a durable quota-bucket record keyed by
+registered integration, tier, and a fixed rolling-window bucket, plus the
+delegation active-state records. AOM uses `BEGIN IMMEDIATE` to authenticate the
+request, count the attempt, check the per-tier and active-grant ceilings,
+create the delegation if allowed, and update all quota state as one unit.
+
+The same transaction boundary must prevent two concurrent requests from both
+passing the active limit. Authenticated denied attempts consume the request
+rate budget; successfully issued records consume the active-grant budget. A
+quota-store read/write failure denies issuance and never falls back to a
+principal bearer. This likely requires schema support, but no schema is added
+in this adjudication.
+
+### 24. Milestone-B bypass matrix
+
+Before any public write, implementation evidence must prove the compromised
+Gateway cannot authenticate as the principal through **any** supported path:
+
+| Bypass vector | Required proof |
+| --- | --- |
+| AOM principal bearer in Gateway environment | Variable absent; process inspection and sanitized configuration check show no principal credential. |
+| Principal bearer in durable Gateway state | State inventory contains no principal bearer; encrypted state cannot be used as an edge fallback. |
+| Legacy configuration fallback | Old variable/file names and compatibility branches are absent or hard-fail. |
+| Bootstrap token fallback | Bootstrap/initial token cannot authenticate the public edge path. |
+| Recovery/admin token fallback | Recovery/admin credentials are not accepted by public or issuer routes. |
+| Alternate public transport | HTTP, stdio exposure, and any other supported transport cannot select principal authentication. |
+| Debug/admin route | No debug/admin route can forward or mint principal authority. |
+| Old token still valid | The old principal token is revoked/rotated and a direct use test fails. |
+| Alternate MCP endpoint | Discovery, legacy, and alternate paths cannot bypass the restricted route. |
+| Accidental actor-token fallback | Missing/invalid edge identity never falls back to `codex`. |
+
+Pass condition: a fully compromised Gateway cannot directly authenticate as the
+AOM principal by any supported path. Milestone B must pass before `10B.6`
+public T1 and must not be inferred from a successful read test.
+
+### 25. Accepted residuals
+
+**S3 shared-integration residual:** accepted for the planning baseline and
+future T1 consideration. Multiple ChatGPT conversations/sessions using the
+same integration are not cryptographically isolated by AOM. They share quota
+and revocation domain; attribution is integration-level; Gateway-supplied
+session labels are advisory. This must remain visible in product/security
+documentation and must not later be upgraded to per-session security.
+
+**T1 automatic residual:** accepted for a future separately authorized T1
+stage only. A compromised edge may obtain some automatic T1 grants within the
+finite AOM quota. The worst-case intended effect is a bounded number of inert
+`CREATED` jobs because T1 has no auto-start, worker dispatch, lifecycle
+mutation, evidence/artifact mutation, or authority. Higher tiers require
+separate grants/approval, and Milestone B must already pass. T1 is not
+authorized now.
+
+### 26. Final staging and first candidate
+
+The accepted staged sequence is:
+
+1. `10B.0` — this final adjudication and focused re-review;
+2. `10B.0A` — observer/read-path hardening;
+3. `10B.1` — internal AuthorizationContext and issuance-policy foundations;
+4. `10B.2` — delegation records, issuer boundary, generation, epoch, and
+   quota structures;
+5. `10B.3` — adversarial, security, quota, restore, rollback, and concurrency
+   tests;
+6. `10B.4` — preview-only T1;
+7. `10B.5` — Milestone B full principal-bypass removal;
+8. `10B.6` — bounded public T1 `job_create`;
+9. `10B.7` — T2 lifecycle delegation;
+10. `10B.8` — T3 worker dispatch;
+11. `10B.9` — T4 `codex_decide` core-authority change and high-risk review.
+
+**FIRST IMPLEMENTATION CANDIDATE: `10B.0A`**. It can be implemented
+independently as a read-only credential migration with no public tool change,
+no delegation system, no write, no worker, and no authority change. It still
+requires a separate explicit implementation authorization.
+
+### 27. `10B.0A` rollback and future live test
+
+Before `10B.0A`, preserve the existing Phase 10A/10A.1 Git tags, the Gateway
+baseline, the current Plugin configuration, and the current Funnel hostname.
+Use a reversible configuration/credential cutover. If observer migration or
+validation fails, restore the existing private read connectivity and keep all
+writes blocked. Do not permanently delete the principal credential until
+Milestone B has separately validated and removed every bypass path.
+
+The minimal future live test is the existing ChatGPT Plus Stage-0 Read Plugin
+calling `ping` through the same public endpoint, followed by `job_list` only
+after ping succeeds and is separately allowed. Verify the same four-tool
+surface, no OAuth reconfiguration where avoidable, restricted actor identity
+in Gateway logs, and no principal credential use. No test in this plan
+authorizes the live change.
+
+### 28. Final T4 boundary and implementation governance
+
+No work in `10B.0A` through `10B.8` may silently modify
+`src/domain/decide.ts` or `src/mcp/tools/codexDecide.ts` for delegated authority.
+`10B.9` is the only planned T4 core-authority stage and requires its own
+independent high-risk review. The semantic rule remains a principal act of the
+sole `codex` authority through a verified delegated context, not a second
+authority system.
+
+Architecture acceptance does not authorize implementation. Every stage needs
+an explicit implementation prompt, bounded scope, tests, a commit boundary,
+user authorization, and a stop before the next stage. No automatic continuation
+to the next stage is permitted.
+
+### 29. Final status
+
+- Architecture blockers after focused re-review: **0**.
+- Implementation-bound decisions remain and must be resolved before their
+  relevant later stage, especially epoch storage/rotation, edge identity
+  schema, quota persistence/atomicity, Milestone-B evidence, and T4 approval.
+- First implementation candidate: **10B.0A read-path hardening**.
+- Implementation, public write, authority, Gateway, Funnel, Plugin, push, PR,
+  merge, and deployment: **not authorized**.

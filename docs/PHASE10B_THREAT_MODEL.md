@@ -459,7 +459,9 @@ authority remains subject to a separate approval path.
 The C-first server-side delegation model, with a request-only restricted edge
 identity, finite issuance ceilings, integration-generation revocation, and
 restore/clock guards, addresses the actual confused-deputy root cause more
-directly than an edge-only allowlist or a Gateway-held signing key. It is ready
-for one focused independent re-review of the adjudicated changes. No
-threat-model conclusion in this document authorizes implementation or public
-write access.
+directly than an edge-only allowlist or a Gateway-held signing key. The focused
+independent re-review has passed with zero new blocking findings. U-1 is a
+normative prohibition on edge self-provisioning, U-2 records the single-writer
+AOM assumption, and U-3 requires deny-by-default treatment of future edge
+identities. No threat-model conclusion in this document authorizes
+implementation or public write access.

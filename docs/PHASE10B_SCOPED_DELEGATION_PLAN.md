@@ -1192,10 +1192,12 @@ The eventual implementation review should include at least these categories:
 - `qa_dispatch` still requires its existing principal/lease gates;
 - authority provenance records the verified delegation without exposing it.
 
-## 25. Open questions and blockers for independent review
+## 25. Final review disposition and implementation-bound decisions
 
-The architecture adjudication resolves the previous load-bearing questions as
-follows:
+The focused independent re-review returned `PASS` with zero new blocking
+findings. The architecture is accepted for implementation planning, but the
+following decisions remain implementation-bound and are not source
+authorization.
 
 1. Issuer authentication is a future AOM-issued restricted edge transport
    identity with conceptual `delegation:request` admission only; AOM policy,
@@ -1220,6 +1222,17 @@ choice, and the operational approval procedure for T4. They are not permission
 to begin implementation; the focused re-review must confirm that these
 choices preserve the resolved security properties.
 
+The final authorization-epoch direction is a small AOM-owned non-secret state
+record outside the restorable SQLite backup set, protected by the local
+installation's ACLs, plus mandatory operator rotation after any restore. AOM
+fails closed when the epoch is missing or unverifiable. The final edge-identity
+direction is hybrid: existing observer token for read hardening and a distinct
+future non-principal edge identity for request-only issuer admission. The
+edge cannot self-provision another integration/quota domain; quota, generation,
+epoch, and one-use atomicity assume a single-writer AOM, and any future
+multi-node deployment requires re-review. Unknown edge identities are denied
+by every existing authority gate.
+
 ## 26. Decision summary
 
 - Recommended model: AOM-owned server-side opaque delegation records,
@@ -1233,6 +1246,7 @@ choices preserve the resolved security properties.
   core authority change is the last/highest-risk gate.
 - OAuth revocation is not claimed to be per-session AOM revocation under S3;
   integration-generation revocation is the server-enforced cascade.
+- Focused independent re-review: **PASS**; architecture blockers: **0**.
 - The final ChatGPT runtime-controller goal is preserved.
 - No source, schema, migration, tool, runtime, Funnel, or Plugin change is
   authorized by this document.

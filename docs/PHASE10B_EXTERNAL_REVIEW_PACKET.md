@@ -1,10 +1,10 @@
 # AOM Phase 10B — Focused Independent Architecture/Security Re-Review Packet
 
-Review status: ready for one focused independent re-review after Codex
-adjudication. The prior independent Opus review is recorded outside this
-repository and its findings are summarized in
-`docs/PHASE10B_REVIEW_ADJUDICATION.md`. No re-review is claimed to have
-occurred in this packet.
+Review status: the focused independent re-review has completed with `PASS` and
+zero new blocking findings. This packet remains the bounded historical review
+record; future reviewers must use a newly identified snapshot and a separately
+authorized review request. The prior independent Opus review and re-review are
+summarized in `docs/PHASE10B_REVIEW_ADJUDICATION.md`.
 
 ## 1. Review instruction
 
@@ -118,10 +118,10 @@ read.
 
 ## 6. Governance boundary
 
-This packet requests independent scrutiny only. A favorable review means the
-documents may return to Codex for adjudication. It does not authorize source
-implementation, migration, write-tool exposure, Gateway changes, Funnel
-changes, Plugin configuration, merge, push, or deployment.
+This packet records independent scrutiny only. The favorable re-review returned
+to Codex and was adjudicated. It does not authorize source implementation,
+migration, write-tool exposure, Gateway changes, Funnel changes, Plugin
+configuration, merge, push, or deployment.
 
 ## 7. Required closing statements
 
