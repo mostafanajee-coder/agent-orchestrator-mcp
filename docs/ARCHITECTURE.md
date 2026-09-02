@@ -2137,3 +2137,45 @@ The current external-worker inventory is recorded in
 [`docs/PHASE10_EXTERNAL_WORKER_EVIDENCE.md`](PHASE10_EXTERNAL_WORKER_EVIDENCE.md);
 the exact worker contract remains unverified and implementation remains
 unauthorized.
+
+## 29. Phase 10A — Tailscale Funnel + Edge Gateway Stage-0 Boundary
+
+Phase 10A adds a transport and integration boundary around the existing AOM;
+it does not alter the authority, persistence, worker, or evidence model.
+
+```text
+ChatGPT Plus --OAuth 2.1--> Tailscale Funnel
+                                  |
+                                  v
+                         Edge Gateway (loopback)
+                                  |
+                         AOM HTTP /mcp (loopback)
+```
+
+Tailscale Funnel is transport only. It may expose the Gateway's public HTTPS
+endpoint, but it must never target AOM directly. The Gateway is protocol-aware,
+default-deny, and responsible for external authentication, public tool
+allowlisting, safe projections/redaction, request limits, protocol validation,
+Host/Origin translation, and fixed local routing. It is not AOM authority,
+job state, worker state, database, evidence, or artifact authority.
+
+The Stage-0 Gateway may temporarily use the existing local credential for the
+`codex` principal. AOM currently resolves a valid token to the complete
+principal capability set and has no trusted edge/interior distinction. This
+creates a confused-deputy risk, so Stage 0 is strictly read-only and excludes
+all writes, worker dispatch, and `codex_decide`. The final product goal remains
+ChatGPT as the top-level runtime controller; future write and authority access
+requires server-verified scoped delegation reviewed separately.
+
+The initial public candidate tools are `ping`, `job_list`, `job_get`, and
+`run_status`, exposed only through safe public projections. Paths,
+prompts/context, rationales, session hints, and internal worker identifiers are
+not public fields. `audit_query`, all writes, `qa_dispatch`, and `codex_decide`
+are excluded. Tool annotations are future metadata in the canonical AOM tool
+registrations; they are hints and never replace the Gateway allowlist or AOM
+authorization.
+
+This is a development-only planning boundary. Funnel permission, streamable
+HTTP/SSE behavior, buffering, reconnects, limits, and end-to-end ChatGPT
+connectivity remain empirical gates. No Gateway, Funnel, OAuth infrastructure,
+or Phase 10A implementation is present in this architecture snapshot.

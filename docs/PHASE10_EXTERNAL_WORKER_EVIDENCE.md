@@ -121,3 +121,31 @@ credentials, cookies, private browser state, or raw uncontrolled transcripts.
 Until that evidence exists, no `workers.json` entry, adapter, wrapper, browser
 task implementation, migration, MCP tool, or Phase 10 source change may be
 created.
+
+## 8. Phase 10A transport evidence
+
+The current Windows host was inspected read-only for the Tailscale Funnel
+Stage-0 planning gate:
+
+| Item | Observation | Meaning |
+|---|---|---|
+| Tailscale executable | `C:\Program Files\Tailscale\tailscale.exe` | Installed locally |
+| Client version | `1.102.2` | Funnel command is available in this version |
+| Windows service | Running, Automatic | Tailscale service is active |
+| Tailnet state | Backend running; local node online; node key and current tailnet present | Login/connectivity evidence is present |
+| MagicDNS/certificate state | MagicDNS suffix and certificate domain present | Funnel prerequisites appear locally present |
+| Funnel configuration | Empty/disabled | No public service was exposed |
+| Funnel policy permission | Not verified | Requires policy/admin evidence; enabling was prohibited |
+
+Current Tailscale documentation states that Funnel is available on all plans,
+can forward HTTPS traffic to a local `127.0.0.1` HTTP service, and is limited
+to public HTTPS ports `443`, `8443`, and `10000`. It also documents
+non-configurable bandwidth limits but does not establish numeric body,
+timeout, or MCP/SSE limits. The Personal plan is free for non-commercial use;
+future commercial production requirements must be evaluated separately.
+
+The proposed Stage-0 path is ChatGPT Plus Server URL → Tailscale Funnel →
+protocol-aware Edge Gateway → AOM loopback `/mcp`. AOM itself remains private.
+Streamable HTTP/SSE, buffering, reconnect, Host/Origin, body, timeout, and
+external HTTPS behavior remain unverified empirical gates. This evidence does
+not identify a browser worker and does not authorize Funnel or source work.

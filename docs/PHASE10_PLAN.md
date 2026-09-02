@@ -682,3 +682,116 @@ Codex adjudication is recorded in
 [`docs/PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md`](PHASE10_ARCHITECTURE_REVIEW_ADJUDICATION.md).
 
 **PHASE 10 PLAN ACCEPTED FOR CONTINUED PLANNING — IMPLEMENTATION NOT AUTHORIZED**
+
+## 19. Phase 10A — Tailscale Funnel + Edge Gateway Stage-0 Freeze
+
+This section records the final Codex adjudication for the first, read-only
+ChatGPT connectivity gate. It is a planning and governance record only. It
+does not create a Gateway, enable Tailscale Funnel, add OAuth infrastructure,
+or authorize source implementation.
+
+### 19.1 Adjudicated topology
+
+```text
+ChatGPT Plus
+    |
+    | OAuth 2.1
+    v
+Tailscale Funnel (transport only)
+    |
+    v
+Protocol-aware Edge Gateway
+    |
+    | local authenticated connection
+    v
+AOM loopback HTTP /mcp
+```
+
+The Gateway is a separate edge integration boundary. It is default-deny,
+protocol-aware, batch-safe, responsible for public tool exposure, external
+authentication, safe response projections, Host/Origin translation, bounded
+admission, and fixed loopback routing. It is not an authority layer, job
+state machine, worker authority, database authority, evidence/artifact
+authority, or replacement for AOM authorization.
+
+Tailscale Funnel is replaceable transport. AOM remains loopback-only and must
+never be exposed directly through Funnel. The current local evidence confirms
+Tailscale `1.102.2` is installed and online, but Funnel is disabled and its
+tailnet permission and MCP streaming behavior remain empirical gates.
+
+### 19.2 Stage-0 confused-deputy restriction
+
+A valid token resolving to the existing `codex` principal receives the full
+capability set from the actor row. AOM currently has no per-token capability
+scope, no per-session capability scope, and no trusted edge/interior
+distinction. A compromised Gateway holding that credential would therefore
+have principal-level potential unless its boundary holds.
+
+Stage 0 is accepted only as a temporary read-only containment:
+
+- public Gateway policy is hardcoded, default-deny, and independent of tool
+  annotations;
+- all writes, worker dispatch, and `codex_decide` are excluded;
+- the Gateway rejects excluded tools before forwarding to AOM;
+- the full principal credential remains local;
+- this restriction does not redefine the final product runtime goal.
+
+The final goal remains ChatGPT as the top-level runtime controller. Future
+write and authority access requires a separately reviewed server-verified
+scoped-delegation architecture. Candidate designs remain open: per-token
+scopes, per-session scopes, scoped delegation credentials, and a restricted
+non-principal edge actor for non-authority writes.
+
+### 19.3 Authentication and public tool surface
+
+ChatGPT-to-Gateway authentication is OAuth 2.1. Static bearer/API-key
+authentication supplied by ChatGPT is not a supported design assumption. The
+Gateway may use the existing local AOM bearer credential internally, but must
+never return, log, embed, or forward it as an external credential.
+
+The initial public candidate surface is `ping`, `job_list`, `job_get`, and
+`run_status`. Their public responses are safe projections rather than the full
+internal AOM records: filesystem paths, prompts/context, decision rationales,
+session hints, and internal worker identifiers are excluded. `audit_query` and
+all writes are excluded. `evidence_list` and `artifact_list` remain deferred
+until external projection/redaction is independently verified.
+
+Canonical MCP safety annotations (`readOnlyHint`, `destructiveHint`,
+`idempotentHint`, and `openWorldHint`) belong in AOM registrations as a future
+bounded MCP-surface change. They are metadata hints, never authorization
+controls, and the Gateway allowlist must not trust them.
+
+### 19.4 Stage-0 verification matrix
+
+The frozen sequence is:
+
+1. TEST 0 — local Gateway to AOM `ping`.
+2. TEST 1 — external HTTPS through Funnel to Gateway to AOM `ping`.
+3. TEST 1b — unauthenticated rejection before AOM.
+4. TEST 2 — ChatGPT Plus Server URL to Funnel to Gateway to `ping`, then a
+   bounded `job_list` read.
+5. TEST 2b — `codex_decide` rejected before AOM.
+6. TEST 2c — oversized request rejected before AOM.
+
+The matrix also requires Host/Origin translation, batch-smuggling rejection,
+excluded-tool rejection, filtered `tools/list`, unknown method/tool handling,
+restart and reconnect behavior, clean `502` when AOM is unavailable,
+concurrency, admission exhaustion, future-tool default-deny, bearer
+non-leakage, and malformed MCP/JSON checks. No write test is authorized in
+Stage 0.
+
+### 19.5 Governance state
+
+```text
+PHASE 10A STAGE-0 ARCHITECTURE: APPROVED
+PHASE 10A DOCUMENTATION: FROZEN AFTER THIS COMMIT
+STAGE-0 IMPLEMENTATION: NOT STARTED
+STAGE-0 IMPLEMENTATION AUTHORIZED: NO
+WRITE/AUTHORITY IMPLEMENTATION AUTHORIZED: NO
+CHATGPT-AOM LIVE CONNECTIVITY: NOT VERIFIED
+EXTERNAL BROWSER WORKER: DEFERRED
+```
+
+The prior Phase 10 browser-worker plan remains in force. No browser worker,
+worker registry entry, adapter, or Phase 10 source implementation is included
+in this Stage-0 freeze.

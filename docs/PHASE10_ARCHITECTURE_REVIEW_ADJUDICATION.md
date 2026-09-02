@@ -80,3 +80,59 @@ records:
 ```text
 AUTHORIZE PHASE 10 IMPLEMENTATION: YES
 ```
+
+## 6. Phase 10A Tailscale Funnel + Edge Gateway adjudication
+
+This entry records the current Codex decision for the Stage-0 ChatGPT
+connectivity boundary. It is documentation-only and does not authorize source
+implementation, Funnel activation, Gateway creation, OAuth infrastructure,
+write exposure, worker dispatch, or authority exposure.
+
+The Stage-0 architecture is approved for independent review:
+
+```text
+ChatGPT Plus --OAuth 2.1--> Tailscale Funnel
+                              |
+                              v
+                    protocol-aware Edge Gateway
+                              |
+                    local authenticated AOM /mcp
+```
+
+The Gateway is default-deny and must enforce the public tool allowlist,
+protocol parsing, batch safety, safe response projections, bounded admission,
+and fixed loopback routing. It is not an authority or persistence layer.
+Tailscale is transport only, and AOM remains loopback-only.
+
+The confused-deputy finding is accepted. A valid token for the existing
+`codex` principal receives the complete actor capability set; AOM has no
+per-token scope, per-session scope, or trusted edge/interior distinction.
+Accordingly, the full principal credential may be used only as temporary
+Stage-0 read-only containment behind the Gateway. All writes, worker dispatch,
+and `codex_decide` remain blocked. The final runtime goal remains ChatGPT as
+the top-level controller, with future access requiring server-verified scoped
+delegation.
+
+The authentication finding is accepted with scope clarification: ChatGPT uses
+OAuth 2.1 at the Gateway; the existing AOM bearer token remains local and is
+used only on the interior connection. Static bearer/API-key authentication
+from ChatGPT is not treated as viable.
+
+The current public candidate surface is `ping`, `job_list`, `job_get`, and
+`run_status`, each through a safe public projection. `audit_query`, all writes,
+`qa_dispatch`, and `codex_decide` are excluded. Canonical MCP safety
+annotations remain a future bounded AOM-surface item; annotations are hints,
+not authorization controls.
+
+The current repository state before this freeze contained reviewer scratch
+material as an untracked file. Its contents were preserved outside the
+repository and it is excluded from project history. The resulting freeze
+commit contains only the five planning documents named by the Phase 10A
+correction request. Runtime Funnel, Gateway, OAuth, and browser-worker work
+remain unstarted.
+
+```text
+PHASE 10A STAGE-0 ARCHITECTURE: APPROVED
+STAGE-0 IMPLEMENTATION AUTHORIZED: NO
+WRITE/AUTHORITY IMPLEMENTATION AUTHORIZED: NO
+```

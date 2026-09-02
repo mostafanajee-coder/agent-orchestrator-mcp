@@ -76,6 +76,19 @@ The external-worker inventory remains unresolved and is recorded in
 Chrome is the selected engine candidate, with a dedicated non-personal profile
 policy; the external AOM Worker contract is still unverified.
 
+**Phase 10A — Tailscale Funnel + Edge Gateway (Stage-0 planning).** The
+Codex-adjudicated Stage-0 architecture places a protocol-aware, default-deny
+Edge Gateway between ChatGPT Plus and the loopback-only AOM MCP endpoint.
+ChatGPT authenticates to the Gateway with OAuth 2.1; the Gateway uses the
+existing local AOM bearer credential without exposing it externally. Tailscale
+Funnel is transport only and must never expose AOM directly. Stage 0 is
+read-only: `ping`, `job_list`, `job_get`, and `run_status` may be exposed only
+through safe public projections; writes, worker dispatch, and `codex_decide`
+remain blocked. This is not the final authority architecture: ChatGPT remains
+the intended product runtime controller, with future write and authority access
+requiring separately reviewed server-verified scoped delegation. No Gateway,
+Funnel, OAuth infrastructure, or Phase 10A source implementation has started.
+
 The approved design and phase plans are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE4_PLAN.md](docs/PHASE4_PLAN.md), and
 [docs/PHASE5_PLAN.md](docs/PHASE5_PLAN.md), [docs/PHASE6_PLAN.md](docs/PHASE6_PLAN.md), and
