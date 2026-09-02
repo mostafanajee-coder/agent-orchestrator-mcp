@@ -238,9 +238,11 @@ issue.
    canonicalized request; a Gateway-supplied hash is not authoritative.
 6. **Audience binding:** a proof for one AOM instance/environment is rejected
    by another audience.
-7. **Edge-session binding:** the proof is tied to a verified edge session or
-   an equivalent server-issued subject; a copied proof cannot be moved to a
-   different session without an explicitly designed policy.
+7. **Subject binding:** the adjudicated baseline is integration-bound (S3),
+   because AOM does not independently validate a ChatGPT OAuth artifact. AOM
+   must bind a delegation to the verified registered edge integration identity
+   and must not claim per-ChatGPT-session isolation. A copied grant cannot be
+   moved to another integration.
 8. **Time bounds:** issued/not-before/expiry windows are checked by AOM with a
    defined clock-skew rule and fail closed on invalid timestamps.
 9. **Replay resistance:** one-time operations are atomically consumed; a
@@ -260,6 +262,30 @@ issue.
 16. **Transport independence:** HTTP/stdio differences cannot change the
     delegation semantics or widen authority.
 
+### 6.1 Normative issuance-quota property
+
+**A valid transport identity cannot obtain unbounded delegated authority merely
+by repeatedly requesting valid low-tier grants, including when the Gateway is
+fully compromised.** AOM must enforce a durable, server-side issuance policy
+before creating a delegation. The policy is keyed at least by the registered
+edge integration/transport identity, operation tier, and bounded time window;
+it counts denied as well as accepted issuance attempts so an attacker cannot
+flood the policy with syntactically valid requests.
+
+The hard ceiling includes all of the following:
+
+- per-integration/edge-identity rolling issuance quotas;
+- per-tier rolling quotas and maximum concurrently active grants;
+- maximum TTL and maximum uses per tier;
+- operation-class and resource-specific ceilings;
+- a global emergency issuance disable that is evaluated by AOM;
+- durable counters or equivalent state that do not reset on Gateway restart.
+
+The selected S3 subject model does **not** make a caller-supplied ChatGPT
+session ID a trustworthy quota key. A per-session quota may be added only as
+telemetry or after an S1/S2 subject proof exists; the integration quota remains
+the security ceiling in this baseline.
+
 ## 7. Trust-boundary model
 
 ```text
@@ -271,12 +297,13 @@ issue.
           |
           v
   Edge Gateway
-    - validates edge session
+    - validates the public edge session locally
+    - authenticates to AOM as a restricted edge transport identity
     - applies public allowlist
     - requests/transports delegation
     - MUST NOT mint or widen delegation
           |
-          | loopback request carrying edge identity + AOM-issued delegation
+          | loopback request carrying restricted edge identity + AOM-issued delegation
           v
   AOM authentication and delegation verifier  <--- AOM-owned policy/store
           |
@@ -299,8 +326,9 @@ issue.
   AOM actor/capability model.
 - Gateway policy is a pre-filter. AOM remains the final verifier.
 - AOM's delegation issuer/verifier is inside the AOM trust boundary.
-- The Gateway must not hold an AOM root signing key, database write access, or
-  a credential that AOM interprets as unrestricted `codex` authority.
+- The Gateway must not hold an AOM root signing key, database write access, a
+  full principal bearer after the removal milestone, or a credential that AOM
+  interprets as unrestricted `codex` authority.
 - The AOM system actor remains internal-only and cannot become the subject of
   client-issued authority.
 
@@ -341,21 +369,58 @@ one-time consumption point.
 - It does not allow a worker to request a principal delegation.
 - It does not authorize implementation or public exposure in this phase.
 
+### 8.4 Issuer authentication is request-only
+
+After the principal-bearer removal milestone, the Gateway must authenticate to
+the AOM issuer with a separate AOM-issued **restricted edge transport
+identity**. The identity is not the `codex` principal, has no `job:decide`,
+`job:create`, `job:start`, `job:resume`, `qa:request`, `work:report`, or other
+direct mutation capability, and cannot access a delegation-issue or approval
+primitive.
+
+The conceptual capability `delegation:request` is an admission right to enter
+AOM's issuance-policy evaluation path. It means only:
+
+> “This caller is the registered edge integration and may ask whether a
+> bounded grant is policy-issuable.”
+
+It does not mean:
+
+> “This caller may issue, approve, refresh, widen, or choose any delegation.”
+
+AOM is the only issuer. AOM evaluates the requested operation, tier, resource,
+integration state, quota, approval class, policy generation, and current
+authorization epoch before creating a record. The request credential may be a
+bearer held by the Gateway and therefore remains usable by a compromised
+Gateway; the security boundary is the AOM-only policy and its hard ceilings,
+not an assumption that the Gateway credential is unstealable.
+
+The existing `observer` role is suitable for the earlier read-only Stage-0
+hardening because it is structurally limited to `job:read`. It must not be
+silently given `delegation:request`. A future implementation should use a
+distinct edge transport role/identity (or a separately justified equivalent)
+so read-only observer semantics and issuer admission semantics remain
+separate. The current role/capability source is not changed in this planning
+phase.
+
 ## 9. Delegation lifecycle
 
 ### 9.1 Request and issuance
 
 1. The edge Gateway authenticates the ChatGPT-facing session and applies its
-   public policy.
+   public policy. This is a Gateway-side edge-session fact, not an AOM-verified
+   per-session subject claim.
 2. The Gateway sends AOM a delegation request over the approved local trust
-   path. The request identifies the edge session, intended operation, exact
-   resource, normalized arguments or a server-computable request, audience,
-   purpose, and requested lifetime.
-3. AOM authenticates the issuer path independently of the edge session. A
-   client-supplied string such as `actor_id=codex` is never enough.
-4. AOM evaluates the operation tier, edge-session policy, resource ownership,
-   lifecycle state, requested bounds, approval requirements, and current
-   policy generation.
+   path. The request identifies the authenticated edge integration, intended
+   operation, exact resource, normalized arguments or a server-computable
+   request, audience, purpose, and requested lifetime. A session label may be
+   carried for attribution only and is not a security binding under S3.
+3. AOM authenticates the issuer path as the restricted edge transport identity
+   and checks `delegation:request` admission. A client-supplied string such as
+   `actor_id=codex` is never enough.
+4. AOM evaluates the operation tier, integration policy, resource ownership,
+   lifecycle state, issuance quota, requested bounds, approval requirements,
+   policy generation, and authorization epoch.
 5. AOM rejects anything outside the allowed issuance policy. It records a
    denial without storing secrets.
 6. If approved, AOM creates a unique delegation record in its durable store,
@@ -369,9 +434,10 @@ expired, revoked, or unusable before presentation.
 
 1. The Gateway presents the opaque handle with the exact operation/resource
    request to AOM.
-2. AOM resolves the record and checks status, audience, subject/session,
-   operation/tool, resource, policy generation, not-before/expiry, use count,
-   and lifecycle preconditions.
+2. AOM resolves the record and checks status, audience, integration subject,
+   integration generation, operation/tool, resource, policy generation,
+   authorization epoch, not-before/expiry, use count, and lifecycle
+   preconditions.
 3. AOM parses and validates the actual domain input and computes the canonical
    request hash itself.
 4. AOM rejects any mismatch before invoking the domain mutation.
@@ -394,9 +460,23 @@ Gateway memory.
 
 Expiry is a server-side rejection condition. Expired records remain available
 for bounded audit/forensics retention if policy requires, but retention never
-restores validity. Revocation is also server-side and durable. Revoking a
-session's edge token prevents new delegation issuance; existing delegations
-are independently checked against their status and policy generation.
+restores validity. Revocation is also server-side and durable.
+
+The adjudicated subject model is integration-bound. AOM stores an
+`integration_generation` (or equivalent current-generation record) and binds
+each delegation to the generation observed at issuance. Disabling or revoking
+the edge integration increments that generation. Every delegation check reads
+the current generation transactionally, so all older delegations fail at the
+next AOM authorization check without requiring physical deletion or a mass
+update.
+
+Under S3, AOM does not independently receive or validate an OpenAI OAuth
+session revocation event. OAuth logout/revocation alone therefore cannot be
+claimed to cascade to one individual ChatGPT session. The operator must revoke
+the AOM edge integration/transport identity (or disable issuance) to invalidate
+all bound delegations. Short tiered TTLs and one-use rules bound the residual
+window while the integration-level action is performed. A future S1/S2 proof
+could add per-session cascade, but it is not assumed here.
 
 ### 9.5 Restart and unavailable-store behavior
 
@@ -568,17 +648,22 @@ raw bearer tokens, proofs, and raw request bodies are not recorded.
 - If a policy version is unknown or newer than the verifier understands, deny.
 - Expired/revoked records may be retained for audit but never reactivated by
   a Gateway restart or cache restore.
+- If the current integration generation does not match the delegation, deny.
+- If the authorization epoch cannot be verified after restore or clock guard,
+  deny issuance and delegated mutation.
 
 ## 14. OAuth-to-AOM relationship
 
 OAuth is an edge-session bootstrap mechanism. It proves that the ChatGPT
 integration completed the Gateway's configured client/redirect/PKCE/Owner
 authorization flow. It does not prove that a particular AOM job mutation or
-authority decision is approved.
+authority decision is approved. Under the adjudicated S3 model, AOM does not
+validate the OAuth artifact and therefore makes no per-ChatGPT-session
+authorization claim.
 
 The correct relationship is:
 
-`OAuth edge session -> Gateway policy -> AOM delegation request -> AOM policy -> AOM operation`
+`OAuth edge session -> Gateway policy -> registered edge identity -> AOM issuance policy -> AOM operation`
 
 The following values must remain separate and must never be copied into audit
 or delegation fields as if they were AOM authority:
@@ -591,8 +676,10 @@ or delegation fields as if they were AOM authority:
 - AOM principal bearer.
 
 The eventual design should remove the full principal bearer from the
-internet-facing Gateway. During a migration period, retaining it means the
-confused-deputy risk remains open and no write exposure may be declared safe.
+internet-facing Gateway. This is split into two milestones: read-path
+reduction first, then complete removal before any public write. During a
+migration period, retaining it means the confused-deputy risk remains open and
+no write exposure may be declared safe.
 
 ## 15. Gateway-compromise analysis
 
@@ -611,7 +698,8 @@ After the full-principal bearer is removed, a fully compromised Gateway may:
 
 - observe or replay any currently held edge session material to the extent the
   edge session itself permits;
-- request delegations according to the AOM issuance policy;
+- authenticate as the registered restricted edge integration and request
+  delegations according to the AOM issuance policy and finite quotas;
 - use an unexpired, unrevoked delegation within its exact caveats;
 - cause bounded denial-of-service or repeated rejected requests.
 
@@ -629,11 +717,37 @@ It must not be able to:
 ### 15.3 Residual risks
 
 A compromised Gateway can still spend already-issued bounded delegations and
-can request whatever low-risk policy intentionally permits. Short lifetimes,
-one-time use, exact resource binding, session revocation, and AOM-side rate
-limits reduce but do not eliminate this risk. Phase 10B must state this
-residual risk honestly rather than claiming that delegation makes an
-internet-facing process trusted.
+can request whatever low-risk policy intentionally permits until its durable
+integration/tier quotas are exhausted. Under S3, OAuth revocation by itself
+does not provide AOM-visible per-session invalidation; integration revocation
+does. Short lifetimes, one-time use, exact resource binding, generation
+checks, and AOM-side rate limits reduce but do not eliminate this risk. Phase
+10B must state this residual risk honestly rather than claiming that
+delegation makes an internet-facing process trusted.
+
+### 15.4 Precise post-hardening security property
+
+Assume the Gateway is fully compromised. The attacker can read Gateway
+memory, bypass Gateway allowlists, generate arbitrary local requests, replay
+observed delegation handles, invoke the request-only issuer interface, and lie
+about public request parameters. After Milestone B, the attacker must still be
+unable to:
+
+- authenticate directly as the AOM principal;
+- mint arbitrary delegations or exceed AOM issuance ceilings;
+- widen an issued delegation or change its operation, resource, audience,
+  policy generation, authorization epoch, lifetime, or use count;
+- alter the exact payload for a bound operation;
+- bypass atomic use counts or replay a consumed grant;
+- revive a revoked, expired, restored-invalidated, or policy-invalid grant;
+- invoke T4 without its separate exact authority and approval gate.
+
+The attacker may still spend a currently valid, bounded grant, request grants
+that the integration policy automatically permits until quotas are exhausted,
+and cause denial of service. Because S3 is integration-bound, the attacker
+may also cause actions under the integration's permitted routine policy; the
+design does not claim that it can distinguish individual ChatGPT OAuth
+sessions.
 
 ## 16. Special treatment of `codex_decide`
 
@@ -645,24 +759,35 @@ not be the first delegated write and must not be unlocked by a broad
 The eventual path must require all of the following:
 
 - AOM-verified issuer and subject context;
+- a restricted edge transport identity with request-only admission, not a
+  principal-equivalent credential;
 - exact target `job_id`, cycle, and expected version;
 - exact decision kind and validated payload hash;
 - evidence reference validation at AOM;
 - a single-use delegation or equivalent atomic approval record;
 - explicit approval class that cannot be downgraded by the Gateway;
-- the existing principal/authority invariants or a formally reviewed
-  delegated authority context that preserves them;
+- a formally reviewed delegated-authority context that preserves the existing
+  sole-principal invariant;
 - one immediate transaction covering delegation consumption, decision row,
   job update, idempotency, and audit;
 - append-only attribution of the edge session and delegation ID without
   exposing secrets;
-- independent final review and explicit implementation authorization.
+- independent high-risk review and explicit implementation authorization.
 
-The design must answer before implementation whether a delegated
-`codex_decide` is a genuine act of the sole `codex` authority under an
-approved controlled interface, or a new policy-mediated authority mode. It
-must not silently reinterpret a ChatGPT session as the `codex` actor. If that
-semantic question is unresolved, `codex_decide` remains local-only.
+**Adjudicated semantic rule:** a delegated `codex_decide` is a principal act
+performed through a constrained delegated-authority path. It is not a new
+independent policy-mediated authority mode and does not create a second
+principal. The authority on whose behalf the action executes remains the sole
+`codex` principal; the transport caller is the restricted edge identity. The
+domain choke point in `src/domain/decide.ts` and the MCP gate in
+`src/mcp/tools/codexDecide.ts` must therefore be changed in a later, separately
+reviewed core-authority stage to accept a verified delegated context rather
+than treating `actor_id === 'codex'` as the only possible representation.
+
+That future core change must preserve `decisions.actor_id = codex` for the
+authority attribution while recording the verified transport/delegation
+provenance separately. No delegated `codex_decide` design or exposure is
+authorized in this planning task.
 
 ## 17. Principal identity and authorization context
 
@@ -676,15 +801,18 @@ authentication from a future, explicitly approved server delegation.
 
 ```text
 AuthorizationContext {
-  principalActorId: "codex" | null
+  transportActorId: "codex" | "edge" | "worker" | "observer" | "system"
+  authorityPrincipalId: "codex" | null
   authMode: "local-principal" | "server-delegated"
-  edgeSessionId: string | null
+  edgeIntegrationId: string | null
+  edgeSessionId: string | null // attribution only under S3
   delegationId: string | null
-  role: verified role
+  role: verified role or restricted edge transport role
   capabilities: canonical bounded set
   operation: exact operation
   resource: exact resource binding
   policyVersion: server policy version
+  authorizationEpoch: deployment/restore epoch
   issuedAt: timestamp
   expiresAt: timestamp
   requestId: audit/idempotency identity
@@ -699,12 +827,19 @@ unforgeable by ordinary request input.
 ### 17.2 Context rules
 
 - `authMode=server-delegated` never means “all principal capabilities.”
+- `transportActorId` identifies the caller; `authorityPrincipalId` identifies
+  the sole principal on whose behalf an approved delegated authority act may
+  execute. They must never be silently collapsed.
 - Capabilities are a ceiling checked against the operation policy, not a grant
   selected by the Gateway.
 - A delegated context must carry exact resource and request binding where a
   mutation is possible.
+- Under S3, `edgeSessionId` is optional attribution and cannot authorize,
+  isolate, or supply a per-ChatGPT-session quota.
 - Existing local principal calls continue to use the current V1 checks.
 - System and worker contexts remain disjoint from the delegated edge context.
+- A conceptual `delegation:request` capability admits only policy evaluation;
+  it does not issue or approve a delegation.
 
 ## 18. Design-only schema and migration impact
 
@@ -722,6 +857,7 @@ A future implementation will likely need a durable delegation record with:
 - precondition/purpose/approval metadata;
 - issue/not-before/expiry/consumption/revocation state;
 - bounded use count and lineage depth;
+- immutable integration generation and authorization/restore epoch;
 - creation and audit timestamps.
 
 Indexes should support exact ID lookup, session lookup, resource lookup, active
@@ -738,8 +874,12 @@ choice must preserve existing audit chain behavior and make delegation
 attribution queryable without storing proofs.
 
 Existing `actor_tokens` must not be overloaded to store mutable delegation
-caveats. Actor tokens identify authenticated sessions; delegation records
-represent narrower, operation-specific grants.
+caveats. Actor tokens identify authenticated transport identities; delegation
+records represent narrower, operation-specific grants. The current role and
+capability enums have no `edge` role or `delegation:request` capability. A
+future implementation must either add a separately reviewed restricted edge
+role or prove an equivalent authentication class; it must not grant
+`delegation:request` to all existing observers by accident.
 
 ### 18.3 Database invariants to require
 
@@ -749,10 +889,37 @@ represent narrower, operation-specific grants.
 - expiry is checked against server time;
 - uses cannot underflow or be incremented by a caller;
 - resource/operation/request binding is immutable after issuance;
+- integration generation and authorization epoch are checked on every use;
 - audit provenance cannot be changed to another delegation/session;
 - raw SQL attempts to widen or rewrite delegation authority fail or are
   rejected by the same integrity strategy used for durable AOM rows;
 - migrations preserve the existing single-principal and system-actor gates.
+
+### 18.4 Backup, restore, and clock policy
+
+Delegation expiry is evaluated by AOM using its server UTC wall clock. There is
+no positive expiry grace period: clock skew must never extend a delegation
+beyond its recorded `expires_at`. The permitted skew is zero for expiry and
+mutation authorization. A bounded 30-second tolerance may be used only when
+validating a `not_before` value for local service scheduling, and it must never
+rescue an expired record.
+
+AOM persists a high-water observation of accepted server time. If the current
+clock moves backwards by more than 30 seconds, AOM enters a fail-closed clock
+guard: it stops new issuance and delegated mutations until the operator
+corrects and acknowledges the clock. The verifier must not use a rollback to
+extend validity. Small backward movement may be handled using the persisted
+high-water time for expiry checks; it must not produce a later expiry.
+
+A backup or point-in-time restore is treated as an authorization boundary
+event, not as a way to preserve active grants. A trusted deployment/restore
+epoch, kept outside the restorable database snapshot or explicitly rotated by
+the operator after restore, is required. Every delegation is bound to the
+current epoch; after restore, pre-restore delegations fail closed. If the
+current epoch cannot be verified, AOM denies issuance and delegated mutation.
+This prevents a restore of a pre-consumption or pre-revocation database from
+resurrecting a grant. Preserving active grants across restore would require a
+separate authenticated journal and is outside Phase 10B.
 
 ## 19. Audit and evidence design
 
@@ -774,9 +941,12 @@ with bounded, non-secret events such as:
 - `delegation.session_mismatch`;
 - `delegation.policy_mismatch`.
 
-The exact action enum is a future implementation decision. Each event should
-include verified session/delegation IDs where safe, operation and resource
-classification, request ID, policy version, result, and bounded reason codes.
+The action names and reason codes must be fixed, versioned enums. Free-form
+purpose/reason text is not an authorization input and must not be used as an
+unbounded audit field. Each event should include the verified edge
+integration/delegation IDs where safe, operation and resource classification,
+request ID, policy version, result, and a bounded enum reason code. An optional
+session label is attribution only under S3.
 It must not include:
 
 - bearer tokens or OAuth credentials;
@@ -797,13 +967,44 @@ tier has its own review and authorization gate.
 
 | Tier | Example | Default delegation shape | Phase 10B stance |
 | --- | --- | --- | --- |
-| T0 | Existing read projections | Non-mutating, short-lived or session-bound | Already contained by Stage-0; no expansion here |
-| T1 | Bounded `job_create` | One-time, exact request, fixed workspace policy | Candidate for first future live write |
-| T2 | `job_start` / `job_resume` | One-time, exact job/cycle/version, short TTL | Later, separate review |
-| T3 | `qa_dispatch` | One-time or tightly bounded, exact worker registry and job state | Later; worker side effects require stronger gate |
-| T4 | `codex_decide` | One-time exact payload plus explicit approval and authority review | Last; remains blocked in this phase |
+| T0 | Existing read projections | Existing observer token; no delegated mutation | Already contained by Stage-0; read hardening comes first |
+| T1 | Bounded `job_create` | Automatic only after operator policy bootstrap; TTL <= 5 minutes; one use; max 4 active; 10 issuance attempts per 10-minute rolling integration window | Candidate for first future live write |
+| T2 | `job_start` / `job_resume` | Initial owner approval; TTL <= 2 minutes; one use; max 2 active; 4 attempts per 10-minute rolling integration window | Later, separate review |
+| T3 | `qa_dispatch` | Explicit owner approval; TTL <= 60 seconds; one use; max 1 active; 1 attempt per 30-minute rolling integration window | Later; worker side effects require stronger gate |
+| T4 | `codex_decide` | Never automatically remotely issuable in this baseline; if later approved, owner/authority approval, TTL <= 30 seconds, one use, max 1 active | Last; remains blocked in this phase |
 
 No tier is exposed or implemented by this planning commit.
+
+### 20.1 Quota semantics and rationale
+
+The numeric values above are conservative starting ceilings for a single local
+integration, not user-tunable authority. They are intentionally short and
+finite: T1 permits routine work without an Owner-secret prompt on every task,
+while still limiting a compromised Gateway to a small bounded burst; T2 and T3
+are progressively tighter because they advance lifecycle or start external
+work; T4 is disabled rather than made autonomous. Independent review may lower
+these values, but implementation must not raise the hard maximum without a new
+security decision.
+
+The issuer enforces quotas in AOM using durable, atomically updated buckets or
+an equivalent bounded counter. The quota key includes the registered edge
+integration identity and tier. All attempts, including denied or malformed
+issuance requests after cheap authentication, consume the request-rate budget;
+only successfully issued records consume the active-grant budget. Each
+operation class has a separate ceiling, and one resource/payload tuple cannot
+have more than one active T1 grant. Quota state survives Gateway restart.
+
+The S3 model cannot provide a security-grade per-ChatGPT-session quota because
+AOM cannot verify that session identity. The integration quota is therefore the
+hard ceiling. A per-session counter may be added only after an S1/S2 artifact
+is available and may never weaken the integration ceiling.
+
+Routine T1 issuance is policy-automatic only after an operator explicitly
+bootstraps and enables the T1 policy. It does not require browser Owner-secret
+approval for every routine request. T2/T3 require explicit approval in the
+initial design. T4 is never remotely issuable until its core-authority and
+approval semantics have passed a separate high-risk review. An emergency
+disable overrides every tier, including owner-approved requests.
 
 ## 21. First low-risk future write candidate
 
@@ -813,8 +1014,9 @@ only when all of these are true:
 
 - AOM has issued a one-time delegation for `job_create`, not generic
   `job:create`.
-- The request is bound to the verified edge session and exact normalized
-  title/spec/workspace/max-cycles/deadline/idempotency payload.
+- The request is bound to the AOM-verified edge integration identity and exact
+  normalized title/spec/workspace/max-cycles/deadline/idempotency payload. Any
+  session label is attribution only under S3.
 - Workspace is selected from an AOM-owned allowlist; arbitrary paths are
   rejected.
 - Max cycles, deadline, title/spec sizes, and all other bounds are server-side.
@@ -823,6 +1025,8 @@ only when all of these are true:
 - AOM consumes the delegation and creates the job/idempotency/audit records in
   one immediate transaction.
 - The Gateway has no full principal bearer capable of bypassing this path.
+- The request is subject to the T1 integration rolling quota, active-grant
+  ceiling, one-resource/payload ceiling, and short TTL.
 
 This candidate is safer than `job_start`, QA dispatch, or `codex_decide` because
 it creates a bounded durable object without starting execution or changing
@@ -835,6 +1039,7 @@ The desired long-term path for an authority decision is:
 ```text
 ChatGPT request
   -> Gateway edge-session validation
+  -> restricted edge transport identity
   -> AOM delegation request for one exact approved operation
   -> AOM policy/issuer decision
   -> one-time delegation record
@@ -851,68 +1056,91 @@ ChatGPT request
 
 The final step must remain a single AOM authority choke point. A Gateway
 response of “allowed” is not evidence that AOM committed the decision. AOM
-must return the committed result or a bounded failure.
+must return the committed result or a bounded failure. The authority principal
+for this future path is still `codex`; the edge identity is only the transport
+caller and the delegation is the exact principal authorization context.
 
-If the governance decision is that ChatGPT may operate the sole `codex`
-authority through this controlled interface, that decision must be explicit,
-auditable, and separately approved. Until then, `codex_decide` stays local to
-the existing principal path.
+ChatGPT may eventually operate the sole `codex` authority through this
+controlled interface only after the core authority change, explicit approval,
+and independent high-risk review. Until then, `codex_decide` stays local to the
+existing principal path.
 
 ## 23. Proposed implementation and review stages
 
 These are staged gates, not authorization.
 
-### 10B.0 — Planning and threat model
+### 10B.0 — Architecture adjudication and focused re-review
 
-Deliver this documentation-only snapshot, independent review, Codex
-adjudication, and explicit decision on unresolved authority semantics.
+Record the Opus findings, adopt or reject each one explicitly, and obtain one
+focused independent re-review of the corrected architecture. No source or
+schema work is allowed in this stage.
 
-### 10B.1 — Internal context and policy evaluator
+### 10B.0A — Read transport identity hardening
 
-Design and test an internal authorization context and policy evaluator with
-no public write route. Prove that local principal, worker, system, observer,
-and delegated edge contexts cannot be confused.
+Move the current Stage-0 read path from the `codex` principal bearer to a
+separate existing observer token with `job:read` only. Keep the public surface
+exactly `ping`, `job_list`, `job_get`, and `run_status`. Do not add
+`delegation:request`, writes, authority, or a second principal. This is a
+bounded pre-write hardening stage and requires its own implementation check.
 
-### 10B.2 — Durable delegation records
+### 10B.1 — Internal authorization context and policy model
+
+Specify the restricted edge transport identity, conceptual
+`delegation:request` admission capability, integration-bound subject model,
+quota policy, generation/epoch checks, and delegated-authority context without
+adding a public write route. Prove that principal, edge, worker, system, and
+observer contexts cannot be confused.
+
+### 10B.2 — Durable delegation records and issuer boundary
 
 Only after migration approval: add the minimum AOM persistence and integrity
-constraints for issue, revoke, consume, expiry, and provenance. Do not expose
-a write tool yet.
+constraints for issue, revoke, consume, expiry, quota, integration generation,
+restore epoch, and provenance. Implement the request-only issuer boundary; the
+Gateway must not receive issue/approve authority. Do not expose a write tool.
 
-### 10B.3 — Adversarial and concurrency tests
+### 10B.3 — Adversarial, quota, and concurrency tests
 
-Test canonicalization, cross-resource substitution, replay, concurrent use,
-revocation races, restart durability, unavailable-store fail-closed behavior,
-policy versioning, and raw-SQL integrity. No public write exposure.
+Test canonicalization ambiguity classes, cross-resource substitution, replay,
+concurrent use, issuance flooding, quota reset attempts, revocation races,
+OAuth/integration-generation behavior, backup/restore, clock rollback,
+unavailable-store fail-closed behavior, policy versioning, raw-SQL integrity,
+and HTTP/stdio parity. No public write exposure.
 
-### 10B.4 — First bounded write
+### 10B.4 — Preview-only first-write path
 
-After a separate authorization, expose only the selected T1 `job_create`
-candidate, preferably preview first. Verify HTTP/stdio parity and Gateway
-default-deny behavior.
+After a separate authorization, implement a dry-run/preview for the T1
+`job_create` policy without durable mutation. Verify exact payload binding,
+allowlisted workspace, bounds, quota decisions, and default-deny behavior.
 
-### 10B.5 — Lifecycle writes
+### 10B.5 — Full principal-bearer removal before writes
+
+Remove the full AOM principal bearer from the Gateway entirely, rotate/revoke
+it, and prove the edge process cannot authenticate as `codex`. This is Milestone
+B and an absolute prerequisite for any public write. No exception may use a
+legacy principal fallback.
+
+### 10B.6 — Bounded T1 `job_create` live gate
+
+Only after Milestone B and a separate authorization, expose the one-time,
+short-TTL, quota-bounded `job_create` mutation. It may create `CREATED` only;
+it cannot start, dispatch, add evidence/artifacts, or decide.
+
+### 10B.7 — T2 lifecycle delegation
 
 Review and separately authorize `job_start`/`job_resume`, with exact job,
-cycle, version, and one-time binding.
+cycle, version, payload, one-time binding, and tighter quota/TTL.
 
-### 10B.6 — QA/worker dispatch
+### 10B.8 — T3 worker dispatch
 
 Review and separately authorize `qa_dispatch` only after confirming that
 delegation cannot grant worker authority or bypass lease controls.
 
-### 10B.7 — Authority operation
+### 10B.9 — T4 core-authority change
 
-Conduct an independent high-risk review of the exact `codex_decide` path,
-approval semantics, provenance, and failure behavior. Keep it blocked unless
-the sole-authority question is explicitly resolved.
-
-### 10B.8 — Full-principal removal and final hardening
-
-Remove the full AOM principal bearer from the internet-facing Gateway, rotate
-and verify old credentials are unusable for the edge path, re-run negative
-tests, and close the Stage-0 confused-deputy limitation. This is a required
-security milestone before any claim of complete delegation hardening.
+Conduct an independent high-risk review of the `decide.ts` and
+`codexDecide.ts` authority-gate change, principal-act semantics, approval,
+provenance, and failure behavior. Keep `codex_decide` blocked until this gate
+passes.
 
 Every stage requires its own evidence, review, and authorization. Approval of
 the plan does not authorize the next stage's source changes.
@@ -929,7 +1157,8 @@ The eventual implementation review should include at least these categories:
 - unknown operation, tool, resource, field, or policy version is denied;
 - oversized and ambiguous canonical inputs are denied;
 - request hash is recomputed by AOM;
-- cross-audience and cross-session use is denied.
+- cross-audience and cross-integration use is denied; no per-session claim is
+  made under S3.
 
 ### Lifecycle and transaction
 
@@ -940,11 +1169,14 @@ The eventual implementation review should include at least these categories:
   the rejection is a terminal use;
 - domain mutation, delegation use, idempotency, and audit are atomic;
 - restart preserves all delegation state;
-- unavailable store fails closed.
+- unavailable store fails closed;
+- restore epoch and clock-rollback guard prevent grant resurrection.
 
 ### Gateway compromise and transport
 
 - a compromised Gateway cannot mint or widen a record;
+- compromised-Gateway issuance attempts hit durable per-integration/per-tier
+  quotas and active-grant ceilings;
 - deleting/changing Gateway cache does not restore a delegation;
 - HTTP and stdio cannot select different scopes;
 - no arbitrary downstream URL/path proxy exists;
@@ -962,42 +1194,45 @@ The eventual implementation review should include at least these categories:
 
 ## 25. Open questions and blockers for independent review
 
-These questions must be answered before implementation authorization:
+The architecture adjudication resolves the previous load-bearing questions as
+follows:
 
-1. What exact local AOM-to-Gateway issuer authentication mechanism replaces the
-   full principal bearer without giving the Gateway a minting key?
-2. Is a server-side opaque record sufficient for expected latency, or is an
-   AOM-issued proof needed as an optimization? If a proof is used, where is
-   verification performed and how is its key protected?
-3. What is the formal meaning of a delegated action relative to the sole
-   `codex` authority? Does it execute a pre-approved action by the principal,
-   or introduce a distinct policy-mediated authority mode?
-4. Which edge-session identifier is stable, verified, and safe to retain for
-   revocation and audit without storing ChatGPT credentials?
-5. Which operations may be multi-use, and what is the exact idempotency result
-   for a replay after consumption?
-6. What is the clock-skew and retention policy for issued/expired/revoked
-   records?
-7. What audit schema preserves existing hash-chain and query behavior while
-   attributing delegation use?
-8. What operational procedure removes and verifies invalidation of the legacy
-   full principal bearer?
-9. Which first-write policy is acceptable to the independent security review?
-10. What additional human/owner approval is required for T4 `codex_decide`?
+1. Issuer authentication is a future AOM-issued restricted edge transport
+   identity with conceptual `delegation:request` admission only; AOM policy,
+   not that credential, decides issuance.
+2. Subject binding is S3 integration-bound because AOM does not independently
+   validate an OpenAI OAuth artifact. Per-ChatGPT-session isolation is not
+   claimed.
+3. Integration-generation revocation cascades at the next AOM check. OAuth
+   logout alone is not an AOM-visible revocation event under S3.
+4. Delegated `codex_decide` is a principal act through a constrained path, and
+   requires a core authority change plus a separate T4 review.
+5. Read-path bearer reduction is scheduled first through an observer token;
+   full principal-bearer removal is mandatory before public writes.
+6. Quotas, TTLs, uses, approval classes, and emergency disable are specified
+   in §20; numeric ceilings are hard starting limits subject to independent
+   review, not caller-configurable values.
 
-An independent reviewer may add blockers. This plan must not convert an
-unanswered question into an implementation assumption.
+Remaining implementation-design questions are deliberately narrower: the
+exact local transport for the restricted edge credential, the concrete schema
+for durable quota buckets and restore epoch, audit provenance column/table
+choice, and the operational approval procedure for T4. They are not permission
+to begin implementation; the focused re-review must confirm that these
+choices preserve the resolved security properties.
 
 ## 26. Decision summary
 
 - Recommended model: AOM-owned server-side opaque delegation records,
   C-first, with an optional AOM-issued proof only after separate review.
 - AOM remains the final authority verifier and transaction owner.
-- Gateway is an edge session broker and transport deputy, not an authority
-  issuer.
-- Full principal bearer removal from the Gateway is recommended and required
-  before any meaningful write exposure is considered safe.
-- `codex_decide` remains a separate high-risk gate and is not the first write.
+- Gateway is an edge-session broker using a restricted transport identity and
+  request-only issuer admission, not an authority issuer.
+- Observer-token read reduction is an early hardening milestone; complete full
+  principal-bearer removal is required before any public write.
+- `codex_decide` is a principal act through a reviewed delegated path, but its
+  core authority change is the last/highest-risk gate.
+- OAuth revocation is not claimed to be per-session AOM revocation under S3;
+  integration-generation revocation is the server-enforced cascade.
 - The final ChatGPT runtime-controller goal is preserved.
 - No source, schema, migration, tool, runtime, Funnel, or Plugin change is
   authorized by this document.
@@ -1010,6 +1245,7 @@ This planning snapshot consists of:
 - `docs/PHASE10B_THREAT_MODEL.md` — threats, assets, attack paths, and
   security acceptance properties;
 - `docs/PHASE10B_ALTERNATIVES.md` — architectural comparison and selection;
+- `docs/PHASE10B_REVIEW_ADJUDICATION.md` — finding-by-finding Codex decisions;
 - `docs/PHASE10B_EXTERNAL_REVIEW_PACKET.md` — bounded handoff for an
   independent reviewer.
 

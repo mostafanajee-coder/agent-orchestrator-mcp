@@ -78,6 +78,7 @@ path remain separate trust paths. This model does not redesign them.
 - Gateway configuration, cache, or process memory after compromise;
 - client-supplied actor IDs, capabilities, hashes, session hints, or policy
   versions;
+- a Gateway-asserted ChatGPT OAuth-session identity as an AOM security subject;
 - workers and worker-selected result text;
 - Host/Origin headers as identity proof;
 - OAuth state as a job authorization decision.
@@ -116,7 +117,10 @@ Stage-0's public allowlist is not the final authorization boundary. The
 Gateway holds a full AOM principal bearer and presents that bearer downstream.
 AOM therefore authenticates the stronger principal and cannot cryptographically
 bind each accepted operation to the weaker public edge session or to a narrow
-server-issued request grant.
+server-issued request grant. The adjudicated target replaces the bearer first
+for reads with an observer token, then entirely before writes with a restricted
+edge transport identity whose only special admission is request-only entry to
+AOM's issuance policy.
 
 The current allowlist is still valuable: it blocks normal public attempts to
 reach writes, worker dispatch, and `codex_decide`. But if the Gateway process or
@@ -135,8 +139,10 @@ or altered request to AOM.
 **Current impact:** potentially all authority available to that principal and
 reachable by the process; public allowlist is not a server-side guarantee.
 
-**Target mitigation:** remove the full bearer; require an AOM-owned delegation
-record with exact caveats; reject legacy fallback for delegated writes.
+**Target mitigation:** remove the full bearer; authenticate only as a
+restricted non-principal edge identity; require an AOM-owned delegation record
+with exact caveats and finite issuance quotas; reject legacy fallback for
+delegated writes.
 
 **Residual risk:** a currently valid bounded delegation can still be spent
 within its caveats until expiry/revocation/consumption.
@@ -148,7 +154,8 @@ resource, expiry, or use count.
 
 **Target mitigation:** only AOM creates records; opaque IDs are insufficient
 without an AOM row; any optional proof is issued by AOM and verified by AOM;
-record caveats are immutable.
+record caveats are immutable; a request-only edge identity cannot skip the
+issuer policy or its per-integration/per-tier ceilings.
 
 **Acceptance:** locally generated IDs, edited proof text, and unknown key
 versions all fail closed.
@@ -164,14 +171,19 @@ separate authenticated issuer path and its own policy/actor checks.
 **Acceptance:** OAuth metadata cannot populate a principal actor or capability
 set; no bearer/secret is copied into delegation or audit fields.
 
-### TM-04 — Cross-session replay
+### TM-04 — Cross-integration replay and false session binding
 
-**Path:** steal a delegation from one edge session and present it from another.
+**Path:** steal a delegation from one registered integration and present it
+under another identity, or have a compromised Gateway claim that a request came
+from a particular ChatGPT OAuth session.
 
-**Target mitigation:** server-verified subject binding and exact session check;
-separate session revocation; no reliance on a caller-selected session hint.
+**Target mitigation:** bind the grant to an AOM-verified registered integration
+identity and current integration generation. Under the adjudicated S3 model,
+AOM does not validate the OpenAI OAuth artifact and therefore does not claim
+per-ChatGPT-session isolation. A session label remains attribution only.
 
-**Acceptance:** same delegation under another subject is denied and audited.
+**Acceptance:** cross-integration use is denied and audited; tests do not label
+Gateway-reported session IDs as independently verified.
 
 ### TM-05 — Cross-resource substitution
 
@@ -221,7 +233,9 @@ unless the documented transaction outcome explicitly commits a terminal use.
 being revoked.
 
 **Target mitigation:** durable AOM revocation and a defined serialization rule;
-no Gateway cache authority; policy-generation check inside the use transaction.
+no Gateway cache authority; integration-generation and policy-generation checks
+inside the use transaction. Incrementing the integration generation makes all
+older grants fail at the next AOM check.
 
 **Acceptance:** results are deterministic and never reported successful without
 the corresponding committed record state.
@@ -232,7 +246,9 @@ the corresponding committed record state.
 consumed, or revoked grant.
 
 **Target mitigation:** AOM store owns status; Gateway cache is non-authoritative;
-unknown/store-unavailable state denies; old principal fallback is removed.
+unknown/store-unavailable state denies; old principal fallback is removed;
+restore epoch and clock-rollback guard prevent revalidation of pre-restore or
+time-extended grants.
 
 **Acceptance:** restart cannot reset use count, expiry, revocation, or policy.
 
@@ -252,11 +268,12 @@ remain a ceiling; role compatibility and existing handler checks remain.
 claiming principal identity or generic `job:decide`.
 
 **Target mitigation:** exact one-use payload binding, separate T4 approval class,
-existing authority choke point, and explicit governance decision about whether
-the operation is a principal act or a distinct policy-mediated mode.
+and a separately reviewed core-authority change. The adjudicated semantic rule
+is that the operation remains an act of the sole `codex` principal through a
+constrained delegated path; it is not a second policy-mediated authority.
 
-**Acceptance:** no delegated `codex_decide` route exists until that question is
-resolved and independently reviewed.
+**Acceptance:** no delegated `codex_decide` route exists until the core change,
+principal-act semantics, and T4 approval are independently reviewed.
 
 ### TM-13 — Worker/edge confusion
 
@@ -315,11 +332,26 @@ unknown versions fail closed; global policy generation can revoke old grants.
 **Path:** exhaust delegation rows, transaction locks, or verifier resources so
 operators add a broad fallback or disable checks.
 
-**Target mitigation:** bounded request/record sizes, rate limits, quotas,
-back-pressure, safe 5xx/429 behavior, and an operational rule forbidding
-fallback to the full principal bearer.
+**Target mitigation:** bounded request/record sizes, durable per-integration
+and per-tier issuance quotas, active-grant ceilings, rate limits, back-pressure,
+safe 5xx/429 behavior, and an operational rule forbidding fallback to the full
+principal bearer.
 
 **Acceptance:** resource exhaustion never changes authorization semantics.
+
+### TM-19 — Request-only issuer flooding
+
+**Path:** a compromised Gateway uses its valid restricted edge identity to
+submit a large number of otherwise valid T1 requests, attempting to accumulate
+fresh authority even though it cannot mint records directly.
+
+**Target mitigation:** AOM counts all issuance attempts in durable rolling
+per-integration/per-tier buckets, caps active records and uses, applies
+operation/resource ceilings, and supports a global emergency issuance disable.
+Approval does not bypass the hard global and tier limits.
+
+**Acceptance:** repeated valid requests stop at the documented quota; Gateway
+restart, cache deletion, and subject-label rotation do not reset the quota.
 
 ## 8. Risk matrix
 
@@ -332,6 +364,7 @@ fallback to the full principal bearer.
 | Revocation race | Medium | High | Transaction/policy-generation semantics required |
 | Audit leakage | Medium | High | Redaction and negative tests required |
 | Worker/authority confusion | Medium | Critical | Disjoint contexts and explicit gates |
+| Issuer flooding | High under Gateway compromise | High | Durable finite quotas and active-grant ceilings |
 | AOM host compromise | Out of base model | Critical | Separate host security boundary; not claimed solved |
 | Availability attack | High | Medium/High | Fail closed; no security weakening under pressure |
 
@@ -339,9 +372,9 @@ fallback to the full principal bearer.
 
 | Compromise state | Stage-0 today | Phase 10B target after bearer removal |
 | --- | --- | --- |
-| Normal public read session | Gateway allowlist; AOM sees principal downstream | AOM sees edge/delegated context for permitted read |
-| Gateway process compromised | Can attempt any reachable principal operation using full bearer | Can use only valid bounded grants and cause denial/rejection noise |
-| Delegation stolen | Not applicable as a distinct AOM object | Exact caveats until expiry/revocation/consumption |
+| Normal public read session | Gateway allowlist; AOM sees principal downstream | AOM sees an observer transport identity with `job:read` only |
+| Gateway process compromised | Can attempt any reachable principal operation using full bearer | Can use restricted request-only identity, finite quotas, and valid bounded grants |
+| Delegation stolen | Not applicable as a distinct AOM object | Exact integration-bound caveats until expiry/revocation/consumption |
 | Gateway cache altered | May affect proxy behavior; bearer remains powerful | Cache cannot mint, widen, or resurrect AOM record |
 | `codex_decide` | Hidden by Stage-0 allowlist, but principal bearer is stronger than edge | Separate exact T4 gate; no generic delegation |
 | Worker lease stolen | Existing lease controls apply | Still separate; not accepted as edge/principal authority |
@@ -349,17 +382,27 @@ fallback to the full principal bearer.
 ## 10. Security invariants to verify before any public write
 
 1. AOM is the only issuer and final verifier.
-2. Gateway does not possess a root signing key or full principal bearer.
+2. Gateway does not possess a root signing key or full principal bearer before
+   any public write.
 3. Delegation scope is immutable after issuance.
 4. Every write binds operation, resource, payload, lifecycle version, policy,
-   subject, audience, time, and use count.
+   integration subject, audience, time, epoch, and use count.
 5. One-use consumption and domain mutation are atomic.
 6. Revocation survives AOM/Gateway restarts.
-7. Unknown/invalid/unavailable verification fails closed.
-8. No transport can widen or bypass the same domain checks.
-9. Logs/audit/errors contain no secret material.
-10. `codex_decide` remains separately blocked until its authority semantics are
-    resolved and approved.
+7. Integration-generation revocation invalidates older bound grants at the next
+   AOM check; OAuth logout is not falsely treated as per-session AOM revocation
+   under S3.
+8. Durable per-integration/per-tier issuance quotas, active-grant ceilings,
+   TTLs, and emergency disable prevent unbounded fresh authority.
+9. Unknown/invalid/unavailable verification, unknown epoch, and clock guard
+   state fail closed.
+10. No transport can widen or bypass the same domain checks.
+11. Logs/audit/errors contain no secret material and use fixed reason enums.
+12. `codex_decide` remains blocked until its core authority change, principal-
+    act semantics, and T4 approval pass independent review.
+13. Delegation IDs contain at least 128 bits of CSPRNG entropy.
+14. HTTP and stdio make identical authorization decisions for identical
+    verified contexts.
 
 ## 11. Required test families
 
@@ -377,34 +420,46 @@ fallback to the full principal bearer.
 
 - issuance succeeds only through the approved local issuer path;
 - read, T1, T2, T3, and T4 policy boundaries are distinct;
-- cross-session/audience/resource/payload/cycle/version uses fail;
+- cross-integration/audience/resource/payload/cycle/version uses fail; no
+  per-ChatGPT-session security claim is tested under S3;
 - expiry/not-before/revocation/policy-version failures fail closed;
 - concurrent one-use calls have one winner;
+- issuance attempts hit the documented rolling quotas and active-grant caps;
 - AOM unavailable and Gateway restart do not create a fallback;
-- HTTP/stdio produce identical authorization decisions;
+- HTTP/stdio produce identical authorization decisions for the same context;
 - public route/path/tool probing cannot reach hidden tools.
 
 ### Operational tests
 
 - revoke one record/session/integration and confirm no new use;
+- increment integration generation and confirm every older delegation fails;
 - rotate policy generation and confirm old records are rejected;
 - remove old principal bearer and verify it cannot be found or used by the
   edge process;
 - inspect logs/audit/diagnostics for secret leakage;
-- restore from restart/crash points and confirm consumption/revocation.
+- restore from restart/crash points and confirm consumption/revocation;
+- move the server clock backwards and confirm issuance/delegated mutation enter
+  the clock guard without extending expiry;
+- restore a pre-consumption/pre-revocation backup and confirm the new
+  authorization epoch rejects all pre-restore delegations.
 
 ## 12. Residual-risk statement
 
 Scoped delegation reduces the maximum authority of a compromised Gateway; it
 does not make the Gateway trusted. The Gateway can still request permitted
-low-risk grants, spend an already-issued grant, observe bounded result
-metadata, or deny service. The design is acceptable only if those residual
-risks are explicitly accepted per tier and if high-risk authority remains
-subject to a separate approval path.
+low-risk grants until the integration/tier ceilings are exhausted, spend an
+already-issued integration-bound grant, observe bounded result metadata, or
+deny service. Under S3 it cannot be promised per-ChatGPT-session isolation,
+and OAuth logout alone does not invalidate AOM grants. The design is acceptable
+only if those residual risks are explicitly accepted per tier and if high-risk
+authority remains subject to a separate approval path.
 
 ## 13. Threat-model verdict
 
-The C-first server-side delegation model addresses the actual confused-deputy
-root cause more directly than an edge-only allowlist or a Gateway-held signing
-key. It is ready for independent security/architecture review. No threat-model
-conclusion in this document authorizes implementation or public write access.
+The C-first server-side delegation model, with a request-only restricted edge
+identity, finite issuance ceilings, integration-generation revocation, and
+restore/clock guards, addresses the actual confused-deputy root cause more
+directly than an edge-only allowlist or a Gateway-held signing key. It is ready
+for one focused independent re-review of the adjudicated changes. No
+threat-model conclusion in this document authorizes implementation or public
+write access.

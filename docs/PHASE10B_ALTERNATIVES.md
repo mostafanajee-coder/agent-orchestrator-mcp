@@ -123,7 +123,9 @@ authenticates as that actor.
 
 - AOM sees a distinct identity rather than the principal.
 - Existing role/capability checks can deny `codex_decide` and worker authority.
-- Potentially simpler than per-request records for stable low-risk reads.
+- The existing observer role is already legal for a separate Stage-0 read token.
+- A future edge transport identity can authenticate the issuer-request path
+  without being a principal or receiving direct mutation capability.
 
 ### Risks and limitations
 
@@ -134,14 +136,18 @@ authenticates as that actor.
 - Adds a second transport-facing actor and can blur the single-principal
   architecture.
 - Does not by itself solve replay, resource binding, or TOCTOU.
-- May be suitable for read-only integration but is insufficient for T3/T4
-  writes without a delegation record.
+- The current observer role has only `job:read`; adding `delegation:request` to
+  it would silently change observer semantics and is not acceptable.
+- A future edge role/capability requires a separate source/schema review.
+- It is suitable for the early read-only identity reduction but insufficient
+  for T1–T4 writes without a delegation record and AOM issuance policy.
 
 ### Decision
 
-Not sufficient as the Phase 10B primary model. It may be a carefully bounded
-transport identity underneath Option C, but it must not replace exact
-server-side grants or create a competing authority principal.
+Not sufficient as the Phase 10B primary model. Use the existing observer role
+for the bounded read-path reduction, and use a separately reviewed restricted
+edge transport identity underneath Option C for issuer admission. It must not
+replace exact server-side grants or create a competing authority principal.
 
 ## 6. Option E — Hybrid: server-side record plus AOM-issued proof
 
@@ -196,12 +202,38 @@ Select Option C as the canonical Phase 10B architecture:
 - AOM verifies exact caveats and request binding.
 - AOM consumes one-time grants atomically with mutations.
 - AOM owns revocation and policy invalidation.
+- The Gateway authenticates issuer requests as a restricted non-principal
+  edge identity with conceptual `delegation:request` admission only.
+- AOM applies finite per-integration/per-tier quotas, active-grant ceilings,
+  short tiered TTLs, and a global emergency disable.
 - The Gateway holds no root signing key and, at the hardening milestone, no
   full principal bearer.
+- The default subject binding is integration-level (S3), not a claimed
+  independently verified ChatGPT OAuth session.
 
 Keep Option E as a future optimization path, not a prerequisite. Do not select
 Option A for writes. Do not treat Option D as a substitute for exact
 delegation. Keep Option B conditional on a complete revocation/use design.
+
+The current observer identity is a separate early hardening measure for reads;
+it is not the issuer credential and does not receive `delegation:request`.
+
+## 8.1 Adjudicated trust decisions
+
+- **Issuer authentication:** a future AOM-issued restricted edge transport
+  identity, represented by a separately reviewed edge role/authentication
+  class, authenticates the Gateway to the request-only issuer path. The
+  credential proves registered integration identity only.
+- **Issuance authority:** AOM policy alone decides whether a record is created.
+  The request credential cannot issue, approve, refresh, or widen grants.
+- **Subject binding:** S3 integration-bound is selected because AOM has no
+  independent OpenAI OAuth artifact verifier in the current architecture.
+- **Revocation:** AOM integration-generation revocation invalidates older
+  records at the next check. OAuth logout alone is not asserted to be an
+  AOM-visible per-session cascade under S3.
+- **Authority semantics:** a future delegated `codex_decide` remains an act of
+  the sole `codex` principal through a core-reviewed delegated context, not a
+  second policy-mediated authority system.
 
 ## 9. Decision gates by operation
 
