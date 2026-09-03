@@ -3,11 +3,8 @@ import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
-import {
-  assertRoleCapabilities,
-  canonicalCapabilitiesJson,
-  hasCapability,
-} from '../../authority/capabilities.js';
+import type { AuthorizationContext } from '../../authority/context.js';
+import { actorForRequirement } from '../../authority/policy.js';
 import {
   AUTHORITATIVE_STATUS_VALUES,
   WORKFLOW_STATE_VALUES,
@@ -31,7 +28,7 @@ import {
 import type { AuditWriter } from '../../authority/audit.js';
 import type { SqliteDatabase } from '../../store/db.js';
 import { redactSensitiveText } from '../../security/redaction.js';
-import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
+import type { VerifiedActorAuthInfo } from '../auth.js';
 
 export interface Phase5JobToolOptions extends JobLifecycleOptions {
   readonly db: SqliteDatabase;
@@ -140,52 +137,23 @@ function requestId(): string {
   return randomUUID();
 }
 
-function validCapabilities(authInfo: VerifiedActorAuthInfo): boolean {
-  try {
-    assertRoleCapabilities(authInfo.role, authInfo.capabilities);
-    return canonicalCapabilitiesJson(authInfo.capabilities) === JSON.stringify(authInfo.capabilities);
-  } catch {
-    return false;
-  }
+function lifecycleActor(
+  authorizationContext: AuthorizationContext | undefined,
+): VerifiedActorAuthInfo | undefined {
+  return actorForRequirement(authorizationContext, {
+    capability: 'job:create',
+    allowedRoles: ['principal'],
+    requiredActorId: 'codex',
+  });
 }
 
-function verifiedActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  if (
-    authInfo === undefined
-    || authInfo.actorId === undefined
-    || authInfo.role === undefined
-    || authInfo.capabilities === undefined
-    || authInfo.clientId !== authInfo.actorId
-  ) {
-    return undefined;
-  }
-  const actor = authInfo as VerifiedActorAuthInfo;
-  return validCapabilities(actor) ? actor : undefined;
-}
-
-function lifecycleActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  if (
-    actor === undefined
-    || actor.actorId !== 'codex'
-    || actor.role !== 'principal'
-    || !hasCapability(actor.capabilities, 'job:create')
-  ) {
-    return undefined;
-  }
-  return actor;
-}
-
-function readerActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  if (
-    actor === undefined
-    || (actor.role !== 'principal' && actor.role !== 'observer')
-    || !hasCapability(actor.capabilities, 'job:read')
-  ) {
-    return undefined;
-  }
-  return actor;
+function readerActor(
+  authorizationContext: AuthorizationContext | undefined,
+): VerifiedActorAuthInfo | undefined {
+  return actorForRequirement(authorizationContext, {
+    capability: 'job:read',
+    allowedRoles: ['principal', 'observer'],
+  });
 }
 
 function mutationOutput(job: JobRecord, currentRequestId: string): JobMutationOutputValue {
@@ -233,10 +201,10 @@ function success<T extends JobMutationOutputValue | JobGetOutputValue | JobListO
 export function registerJobLifecycle(
   server: McpServer,
   options: Phase5JobToolOptions,
-  authInfo: ActorAuthInfo | undefined,
+  authorizationContext: AuthorizationContext | undefined,
 ): void {
-  const reader = readerActor(authInfo);
-  const lifecycle = lifecycleActor(authInfo);
+  const reader = readerActor(authorizationContext);
+  const lifecycle = lifecycleActor(authorizationContext);
 
   if (lifecycle !== undefined) {
     server.registerTool(

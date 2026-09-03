@@ -3,12 +3,9 @@ import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
-import {
-  assertRoleCapabilities,
-  canonicalCapabilitiesJson,
-  hasCapability,
-} from '../../authority/capabilities.js';
 import type { AuditWriter } from '../../authority/audit.js';
+import type { AuthorizationContext } from '../../authority/context.js';
+import { actorForRequirement } from '../../authority/policy.js';
 import {
   dispatchQa,
   listRunStatus,
@@ -25,7 +22,7 @@ import {
 } from '../../domain/runs.js';
 import type { SqliteDatabase } from '../../store/db.js';
 import { redactSensitiveText } from '../../security/redaction.js';
-import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
+import type { VerifiedActorAuthInfo } from '../auth.js';
 import type { ProcessRuntime } from '../../workers/processRuntime.js';
 
 export interface Phase6WorkerToolOptions extends Phase6RunOptions {
@@ -98,39 +95,32 @@ function requestId(): string {
   return randomUUID();
 }
 
-function verifiedActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  if (
-    authInfo === undefined
-    || authInfo.actorId === undefined
-    || authInfo.role === undefined
-    || authInfo.capabilities === undefined
-    || authInfo.clientId !== authInfo.actorId
-  ) return undefined;
-  try {
-    assertRoleCapabilities(authInfo.role, authInfo.capabilities);
-    if (canonicalCapabilitiesJson(authInfo.capabilities) !== JSON.stringify(authInfo.capabilities)) return undefined;
-  } catch {
-    return undefined;
-  }
-  return authInfo as VerifiedActorAuthInfo;
+function dispatchActor(
+  authorizationContext: AuthorizationContext | undefined,
+): VerifiedActorAuthInfo | undefined {
+  return actorForRequirement(authorizationContext, {
+    capability: 'qa:request',
+    allowedRoles: ['principal'],
+    requiredActorId: 'codex',
+  });
 }
 
-function dispatchActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  return actor !== undefined && actor.actorId === 'codex' && actor.role === 'principal'
-    && hasCapability(actor.capabilities, 'qa:request') ? actor : undefined;
+function reportActor(
+  authorizationContext: AuthorizationContext | undefined,
+): VerifiedActorAuthInfo | undefined {
+  return actorForRequirement(authorizationContext, {
+    capability: 'work:report',
+    allowedRoles: ['worker'],
+  });
 }
 
-function reportActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  return actor !== undefined && actor.role === 'worker' && hasCapability(actor.capabilities, 'work:report')
-    ? actor : undefined;
-}
-
-function statusActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  return actor !== undefined && (actor.role === 'principal' || actor.role === 'observer')
-    && hasCapability(actor.capabilities, 'job:read') ? actor : undefined;
+function statusActor(
+  authorizationContext: AuthorizationContext | undefined,
+): VerifiedActorAuthInfo | undefined {
+  return actorForRequirement(authorizationContext, {
+    capability: 'job:read',
+    allowedRoles: ['principal', 'observer'],
+  });
 }
 
 function failure(error: unknown, currentRequestId: string): {
@@ -167,11 +157,11 @@ function statusOutput(runs: readonly RunSummary[]): readonly RunSummary[] {
 export function registerPhase6WorkerTools(
   server: McpServer,
   options: Phase6WorkerToolOptions,
-  authInfo: ActorAuthInfo | undefined,
+  authorizationContext: AuthorizationContext | undefined,
 ): void {
-  const principal = dispatchActor(authInfo);
-  const worker = reportActor(authInfo);
-  const reader = statusActor(authInfo);
+  const principal = dispatchActor(authorizationContext);
+  const worker = reportActor(authorizationContext);
+  const reader = statusActor(authorizationContext);
 
   if (principal !== undefined) {
     server.registerTool(

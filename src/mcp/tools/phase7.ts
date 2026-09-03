@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
-import { assertRoleCapabilities, canonicalCapabilitiesJson, hasCapability } from '../../authority/capabilities.js';
 import type { AuditWriter } from '../../authority/audit.js';
+import type { AuthorizationContext } from '../../authority/context.js';
+import { actorForRequirement } from '../../authority/policy.js';
 import {
   addEvidence,
   EvidenceAddInputSchema,
@@ -25,7 +26,7 @@ import {
 } from '../../domain/artifacts.js';
 import type { SqliteDatabase } from '../../store/db.js';
 import { redactSensitiveText } from '../../security/redaction.js';
-import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
+import type { VerifiedActorAuthInfo } from '../auth.js';
 
 export interface Phase7EvidenceArtifactToolOptions {
   readonly db: SqliteDatabase;
@@ -78,32 +79,27 @@ function requestId(): string {
   return randomUUID();
 }
 
-function verifiedActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  if (authInfo === undefined || authInfo.actorId === undefined || authInfo.role === undefined
-    || authInfo.capabilities === undefined || authInfo.clientId !== authInfo.actorId) return undefined;
-  try {
-    assertRoleCapabilities(authInfo.role, authInfo.capabilities);
-    if (canonicalCapabilitiesJson(authInfo.capabilities) !== JSON.stringify(authInfo.capabilities)) return undefined;
-  } catch {
-    return undefined;
-  }
-  return authInfo as VerifiedActorAuthInfo;
-}
-
 function mutationActor(
-  authInfo: ActorAuthInfo | undefined,
   capability: 'evidence:add' | 'artifact:register',
+  authorizationContext: AuthorizationContext | undefined,
 ): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  if (actor === undefined || !hasCapability(actor.capabilities, capability)) return undefined;
-  if (actor.role === 'principal') return actor.actorId === 'codex' ? actor : undefined;
-  return actor.role === 'worker' ? actor : undefined;
+  return actorForRequirement(authorizationContext, {
+    capability,
+    allowedRoles: ['principal'],
+    requiredActorId: 'codex',
+  }) ?? actorForRequirement(authorizationContext, {
+    capability,
+    allowedRoles: ['worker'],
+  });
 }
 
-function readerActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  return actor !== undefined && (actor.role === 'principal' || actor.role === 'observer')
-    && hasCapability(actor.capabilities, 'job:read') ? actor : undefined;
+function readerActor(
+  authorizationContext: AuthorizationContext | undefined,
+): VerifiedActorAuthInfo | undefined {
+  return actorForRequirement(authorizationContext, {
+    capability: 'job:read',
+    allowedRoles: ['principal', 'observer'],
+  });
 }
 
 function evidenceFailure(error: unknown, id: string): z.infer<typeof EvidenceFailure> {
@@ -132,9 +128,9 @@ function success<T>(value: T): { readonly content: [{ readonly type: 'text'; rea
 export function registerPhase7EvidenceArtifactTools(
   server: McpServer,
   options: Phase7EvidenceArtifactToolOptions,
-  authInfo: ActorAuthInfo | undefined,
+  authorizationContext: AuthorizationContext | undefined,
 ): void {
-  const evidenceActor = mutationActor(authInfo, 'evidence:add');
+  const evidenceActor = mutationActor('evidence:add', authorizationContext);
   if (evidenceActor !== undefined) {
     server.registerTool(
       'evidence_add',
@@ -162,7 +158,7 @@ export function registerPhase7EvidenceArtifactTools(
     );
   }
 
-  const artifactActor = mutationActor(authInfo, 'artifact:register');
+  const artifactActor = mutationActor('artifact:register', authorizationContext);
   if (artifactActor !== undefined) {
     server.registerTool(
       'artifact_register',
@@ -190,7 +186,7 @@ export function registerPhase7EvidenceArtifactTools(
     );
   }
 
-  const reader = readerActor(authInfo);
+  const reader = readerActor(authorizationContext);
   if (reader !== undefined) {
     server.registerTool(
       'evidence_list',

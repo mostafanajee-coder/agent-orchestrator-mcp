@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
-import type { ActorAuthInfo } from '../auth.js';
+import type { AuthorizationContext } from '../../authority/context.js';
 
 export const SERVICE_NAME = 'agent-orchestrator-mcp';
 
@@ -21,12 +21,12 @@ export type PingResult = z.infer<typeof PingOutput>;
 export function registerPing(
   server: McpServer,
   transport: McpTransportKind,
-  authInfo: ActorAuthInfo | undefined,
+  authorizationContext: AuthorizationContext | undefined,
   protocolEra: 'legacy' | 'modern',
 ): void {
   // The identity is intentionally accepted by the common factory but never
   // returned by this diagnostic tool; ping must not become an identity oracle.
-  void authInfo;
+  void authorizationContext;
   server.registerTool(
     'ping',
     {

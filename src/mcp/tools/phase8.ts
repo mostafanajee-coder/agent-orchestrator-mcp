@@ -3,11 +3,8 @@ import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod/v4';
 
-import {
-  assertRoleCapabilities,
-  canonicalCapabilitiesJson,
-  hasCapability,
-} from '../../authority/capabilities.js';
+import type { AuthorizationContext } from '../../authority/context.js';
+import { actorForRequirement } from '../../authority/policy.js';
 import {
   AUDIT_QUERY_MAX_LIMIT,
   AuditQueryError,
@@ -17,7 +14,7 @@ import {
 } from '../../domain/auditQuery.js';
 import type { SqliteDatabase } from '../../store/db.js';
 import { redactSensitiveText } from '../../security/redaction.js';
-import type { ActorAuthInfo, VerifiedActorAuthInfo } from '../auth.js';
+import type { VerifiedActorAuthInfo } from '../auth.js';
 
 export interface Phase8ToolOptions {
   readonly db: SqliteDatabase;
@@ -85,26 +82,14 @@ function requestId(): string {
   return randomUUID();
 }
 
-function verifiedActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  if (authInfo === undefined || authInfo.actorId === undefined || authInfo.role === undefined
-    || authInfo.capabilities === undefined || authInfo.clientId !== authInfo.actorId) return undefined;
-  try {
-    assertRoleCapabilities(authInfo.role, authInfo.capabilities);
-    if (canonicalCapabilitiesJson(authInfo.capabilities) !== JSON.stringify(authInfo.capabilities)) return undefined;
-  } catch {
-    return undefined;
-  }
-  return authInfo as VerifiedActorAuthInfo;
-}
-
-function principalActor(authInfo: ActorAuthInfo | undefined): VerifiedActorAuthInfo | undefined {
-  const actor = verifiedActor(authInfo);
-  return actor !== undefined
-    && actor.actorId === 'codex'
-    && actor.role === 'principal'
-    && hasCapability(actor.capabilities, 'job:read')
-    ? actor
-    : undefined;
+function principalActor(
+  authorizationContext: AuthorizationContext | undefined,
+): VerifiedActorAuthInfo | undefined {
+  return actorForRequirement(authorizationContext, {
+    capability: 'job:read',
+    allowedRoles: ['principal'],
+    requiredActorId: 'codex',
+  });
 }
 
 function success(result: AuditQueryResult, id: string): {
@@ -149,9 +134,9 @@ function queryInput(input: z.infer<typeof AuditQueryInputSchema>): AuditQueryInp
 export function registerPhase8Tools(
   server: McpServer,
   options: Phase8ToolOptions,
-  authInfo: ActorAuthInfo | undefined,
+  authorizationContext: AuthorizationContext | undefined,
 ): void {
-  const principal = principalActor(authInfo);
+  const principal = principalActor(authorizationContext);
   if (principal === undefined) return;
 
   server.registerTool(

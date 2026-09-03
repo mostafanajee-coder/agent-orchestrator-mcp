@@ -4,6 +4,11 @@ import {
   type McpServerFactory,
 } from '@modelcontextprotocol/server';
 
+import {
+  actorAuthInfoFromAuthorizationContext,
+  createDirectAuthorizationContext,
+  type AuthorizationContext,
+} from '../authority/context.js';
 import { actorAuthInfoFromSdk, type ActorAuthInfo } from './auth.js';
 import { registerCodexDecide, type Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 import { registerJobLifecycle, type Phase5JobToolOptions } from './tools/jobLifecycle.js';
@@ -33,27 +38,28 @@ export interface McpServerFactoryOptions {
 export function buildMcpServer(
   options: McpServerFactoryOptions,
   context: McpRequestContext,
-  authInfo: ActorAuthInfo | undefined,
+  authorizationContext: AuthorizationContext | undefined,
 ): McpServer {
   const server = new McpServer(
     { name: SERVICE_NAME, version: options.version },
     { capabilities: { tools: {} } },
   );
-  registerPing(server, options.transport, authInfo, context.era);
+  const normalizedActor = actorAuthInfoFromAuthorizationContext(authorizationContext);
+  registerPing(server, options.transport, authorizationContext, context.era);
   if (options.authority !== undefined) {
-    registerCodexDecide(server, options.authority, authInfo);
+    registerCodexDecide(server, options.authority, normalizedActor);
   }
   if (options.jobs !== undefined) {
-    registerJobLifecycle(server, options.jobs, authInfo);
+    registerJobLifecycle(server, options.jobs, authorizationContext);
   }
   if (options.workers !== undefined) {
-    registerPhase6WorkerTools(server, options.workers, authInfo);
+    registerPhase6WorkerTools(server, options.workers, authorizationContext);
   }
   if (options.artifacts !== undefined) {
-    registerPhase7EvidenceArtifactTools(server, options.artifacts, authInfo);
+    registerPhase7EvidenceArtifactTools(server, options.artifacts, authorizationContext);
   }
   if (options.phase8 !== undefined) {
-    registerPhase8Tools(server, options.phase8, authInfo);
+    registerPhase8Tools(server, options.phase8, authorizationContext);
   }
   return server;
 }
@@ -61,9 +67,10 @@ export function buildMcpServer(
 /** One factory shared by HTTP and stdio; no transport-specific tool logic. */
 export function createMcpServerFactory(options: McpServerFactoryOptions): McpServerFactory {
   return (context: McpRequestContext) => {
-    const authInfo =
+    const authenticatedActor =
       options.staticAuthInfo ??
       (context.authInfo === undefined ? undefined : actorAuthInfoFromSdk(context.authInfo));
-    return buildMcpServer(options, context, authInfo);
+    const authorizationContext = createDirectAuthorizationContext(authenticatedActor);
+    return buildMcpServer(options, context, authorizationContext);
   };
 }

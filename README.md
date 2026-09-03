@@ -76,6 +76,14 @@ The external-worker inventory remains unresolved and is recorded in
 Chrome is the selected engine candidate, with a dedicated non-personal profile
 policy; the external AOM Worker contract is still unverified.
 
+**Phase 10B.1 — Internal authorization context foundations (local implementation branch).** The shared MCP
+authentication boundary now produces one immutable, normalized `AuthorizationContext` containing the direct
+authenticated actor, role, effective capabilities, sole `codex` principal projection where applicable, and
+non-secret session provenance. The internal policy boundary reproduces the existing direct role/identity/capability
+rules and denies missing, malformed, unknown, or future delegated contexts by default. Delegation records,
+delegation issuance/redemption, the `edge` role, public writes, Gateway changes, schema/migration changes, and
+`codex_decide` semantic changes remain outside this stage.
+
 **Phase 10A — Tailscale Funnel + Edge Gateway (Stage-0 planning).** The
 Codex-adjudicated Stage-0 architecture places a protocol-aware, default-deny
 Edge Gateway between ChatGPT Plus and the loopback-only AOM MCP endpoint.
