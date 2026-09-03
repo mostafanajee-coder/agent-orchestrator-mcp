@@ -12,7 +12,12 @@ import { loadPhase6WorkerRegistry, validatePhase6WorkerActors } from './config/p
 import { EXIT_INTERNAL, EXIT_OK, EXIT_SECURITY, exitCodeFor, SecurityError, UsageError } from './errors.js';
 import { readEnvironmentToken } from './mcp/auth.js';
 import { openPhase4Runtime } from './authority/runtime.js';
-import { MCP_HTTP_DEFAULT_PORT, MCP_HTTP_HOST, MCP_HTTP_PATH, startHttpServer } from './mcp/http.js';
+import {
+  MCP_HTTP_DEFAULT_PORT,
+  MCP_HTTP_HOST,
+  MCP_HTTP_PATH,
+  listenHttpServer,
+} from './mcp/http.js';
 import { startStdioServer } from './mcp/stdio.js';
 import { readPackageVersion } from './version.js';
 import { readLeaseKey } from './secrets/leaseKey.js';
@@ -21,10 +26,21 @@ import type { Phase6WorkerToolOptions } from './mcp/tools/phase6.js';
 import type { Phase7EvidenceArtifactToolOptions } from './mcp/tools/phase7.js';
 import type { Phase8ToolOptions } from './mcp/tools/phase8.js';
 import type { Phase4Runtime } from './authority/runtime.js';
+import {
+  isAuthorityStateReason,
+  runAuthorityStateCommand,
+  type AuthorityStateCommandOptions,
+  type AuthorityStateCommandResult,
+} from './commands/authorityState.js';
 import { cancelRunsForJob } from './domain/runs.js';
 import { Phase8Lifecycle } from './domain/recovery.js';
 import { RequestRateLimiter } from './mcp/admission.js';
 import { redactSensitiveText } from './security/redaction.js';
+import {
+  acquireCanonicalRuntimeOwnership,
+  CANONICAL_RUNTIME_PORT,
+  type RuntimeOwnership,
+} from './runtime/ownership.js';
 
 export const CLI_NAME = 'agent-orchestrator-mcp';
 export { EXIT_OK, EXIT_INTERNAL, EXIT_SECURITY, EXIT_USAGE } from './errors.js';
@@ -72,7 +88,8 @@ export interface CliCommands {
   readonly doctor: () => DoctorReport;
   readonly actor?: (options: ActorCommandOptions) => ActorCommandResult;
   readonly token?: (options: TokenCommandOptions) => TokenCommandResult;
-  readonly serve?: (options: ServeOptions, io: CliIo) => void;
+  readonly authorityState?: (options: AuthorityStateCommandOptions) => Promise<AuthorityStateCommandResult>;
+  readonly serve?: (options: ServeOptions, io: CliIo) => void | Promise<void>;
 }
 
 export const defaultCommands: CliCommands = {
@@ -80,10 +97,24 @@ export const defaultCommands: CliCommands = {
   doctor: () => runDoctor(createCommandContext()),
   actor: (options) => runActorCommand(createCommandContext(), options),
   token: (options) => runTokenCommand(createCommandContext(), options),
-  serve: (options, io) => {
+  authorityState: (options) => runAuthorityStateCommand(createCommandContext(), options),
+  serve: async (options, io) => {
     const version = readPackageVersion();
     const commandContext = createCommandContext();
-    const runtime = openPhase4Runtime(commandContext);
+    const needsPassiveOwnership = options.mode === 'stdio'
+      || (options.port !== undefined && options.port !== CANONICAL_RUNTIME_PORT);
+    let runtimeOwnership: RuntimeOwnership | undefined;
+    if (needsPassiveOwnership) {
+      runtimeOwnership = await acquireCanonicalRuntimeOwnership();
+    }
+
+    let runtime: Phase4Runtime;
+    try {
+      runtime = openPhase4Runtime(commandContext);
+    } catch (cause) {
+      await runtimeOwnership?.close();
+      throw cause;
+    }
     if (options.mode === 'stdio') {
       try {
         const phase5Config = loadPhase5Config(commandContext);
@@ -134,11 +165,13 @@ export const defaultCommands: CliCommands = {
             await close();
           } finally {
             runtime.close();
+            await runtimeOwnership?.close();
           }
         };
         phase8.start();
       } catch (cause) {
         runtime.close();
+        await runtimeOwnership?.close();
         throw cause;
       }
       return;
@@ -151,7 +184,7 @@ export const defaultCommands: CliCommands = {
       verifyStartup: () => undefined,
       logger: { error: () => io.err(`${CLI_NAME}: MCP HTTP protocol error`) },
     };
-    let server: ReturnType<typeof startHttpServer>;
+    let server: Awaited<ReturnType<typeof listenHttpServer>>;
     let phase8Lifecycle: Phase8Lifecycle | undefined;
     let phase6Runtime: ProcessRuntime | undefined;
     try {
@@ -188,7 +221,7 @@ export const defaultCommands: CliCommands = {
           cancelRunsForJob(runtime.db, runtime.audit, jobId, requestId, phase6.options);
         },
       };
-      server = startHttpServer({
+      server = await listenHttpServer({
         ...httpOptions,
         authority,
         jobs: { ...runtime, ...phase5Config, platform: commandContext.platform },
@@ -201,7 +234,10 @@ export const defaultCommands: CliCommands = {
       server.once('close', () => {
         void phase8.shutdown(phase6.processRuntime)
           .catch(() => undefined)
-          .finally(() => runtime.close());
+          .finally(() => {
+            runtime.close();
+            return runtimeOwnership?.close();
+          });
       });
       phase8.start();
     } catch (cause) {
@@ -210,6 +246,7 @@ export const defaultCommands: CliCommands = {
         void phase8Lifecycle.shutdown(phase6Runtime).catch(() => undefined);
       }
       runtime.close();
+      await runtimeOwnership?.close();
       throw cause;
     }
     server.on('listening', () => {
@@ -227,6 +264,7 @@ export const defaultCommands: CliCommands = {
       } else {
         runtime.close();
       }
+      void runtimeOwnership?.close().catch(() => undefined);
       io.err(`${CLI_NAME}: MCP HTTP server error`);
       process.exitCode = EXIT_INTERNAL;
     });
@@ -248,6 +286,7 @@ export function renderHelp(version: string): string {
     '  doctor           Report state and DB-file security. Read-only; repairs nothing',
     '  actor            Create a local read-only observer actor',
     '  token            Issue, list, or revoke local persistent actor tokens',
+    '  authority-state  Manage the local external epoch and clock state',
     '  serve            Serve the Phase 5/6/7/8 MCP spine (--http or --stdio)',
     '',
     'Token options:',
@@ -257,6 +296,11 @@ export function renderHelp(version: string): string {
     '',
     'Actor options:',
     '  actor create --actor-id ACTOR_ID --role observer',
+    '',
+    'Authority-state options:',
+    '  authority-state init',
+    '  authority-state status',
+    '  authority-state rotate --reason restore|clock_recovery|security_rotation|manual',
     '',
     'Serve options:',
     `  --http           Streamable HTTP on ${MCP_HTTP_HOST} (default port ${String(MCP_HTTP_DEFAULT_PORT)})`,
@@ -413,6 +457,26 @@ function parseActorOptions(args: readonly string[]): ActorCommandOptions {
   return { action: 'create', actorId, role: 'observer' };
 }
 
+function parseAuthorityStateOptions(args: readonly string[]): AuthorityStateCommandOptions {
+  const action = args[0];
+  if (action === 'init' || action === 'status') {
+    if (args.length !== 1) throw new UsageError(`authority-state ${action} does not accept options`);
+    return { action };
+  }
+
+  if (action === 'rotate') {
+    if (args.length !== 3 || args[1] !== '--reason' || args[2] === undefined) {
+      throw new UsageError('authority-state rotate requires --reason <restore|clock_recovery|security_rotation|manual>');
+    }
+    if (!isAuthorityStateReason(args[2])) {
+      throw new UsageError('authority-state rotate received an unsupported reason');
+    }
+    return { action: 'rotate', reason: args[2] };
+  }
+
+  throw new UsageError('authority-state requires init, status, or rotate');
+}
+
 function renderInit(result: InitResult): string[] {
   const lines = [
     `State root:      ${result.stateRoot}`,
@@ -475,6 +539,23 @@ function renderActorResult(result: ActorCommandResult): string[] {
     `Capabilities:   ${result.capabilities.join(', ')}`,
     'actor create complete. No token was created.',
   ];
+}
+
+function renderAuthorityStateResult(result: AuthorityStateCommandResult): string[] {
+  const lines = [
+    `Action:          ${result.action}`,
+    `State file:      ${result.path}`,
+    `Readiness:       ${result.readiness}`,
+    `Epoch fingerprint: ${result.epochFingerprint ?? '[unavailable]'}`,
+    `Clock high-water: ${result.clockHighWaterMs === null ? '[unavailable]' : String(result.clockHighWaterMs)}`,
+    `Effective time:   ${result.effectiveNowMs === null ? '[unavailable]' : String(result.effectiveNowMs)}`,
+  ];
+  if (result.reason !== null) lines.push(`Reason:           ${result.reason}`);
+  if (result.action !== 'status') {
+    lines.push(result.auditRecorded ? 'Audit:           recorded' : 'Audit:           not recorded; state remains effective');
+  }
+  if (result.warning !== null) lines.push(`Warning:         ${result.warning}`);
+  return lines;
 }
 
 function renderDoctor(report: DoctorReport): string[] {
@@ -608,4 +689,45 @@ export function run(
       first.startsWith('-') ? `unknown option '${first}'` : `unknown command '${first}'`,
     ),
   );
+}
+
+/**
+ * Async entry point used by the real executable for ownership-sensitive local
+ * administration and production serve startup. The synchronous `run` API is
+ * retained for existing deterministic command tests and callers.
+ */
+export async function runAsync(
+  argv: readonly string[],
+  io: CliIo,
+  version: string,
+  commands: CliCommands = defaultCommands,
+): Promise<CliResult> {
+  const first = argv[0];
+
+  if (first === 'authority-state') {
+    try {
+      if (commands.authorityState === undefined) {
+        throw new UsageError('authority-state is not available in this command context');
+      }
+      const result = await commands.authorityState(parseAuthorityStateOptions(argv.slice(1)));
+      for (const line of renderAuthorityStateResult(result)) io.out(line);
+      return { exitCode: EXIT_OK };
+    } catch (error) {
+      return reportError(io, error);
+    }
+  }
+
+  if (first === 'serve') {
+    try {
+      if (commands.serve === undefined) {
+        throw new UsageError('serve is not available in this command context');
+      }
+      await commands.serve(parseServeOptions(argv.slice(1)), io);
+      return { exitCode: EXIT_OK };
+    } catch (error) {
+      return reportError(io, error);
+    }
+  }
+
+  return run(argv, io, version, commands);
 }

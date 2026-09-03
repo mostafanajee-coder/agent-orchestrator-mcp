@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { CommandContext } from '../commands/context.js';
 import { runDoctor, type DoctorReport } from '../commands/doctor.js';
 import { SecurityError } from '../errors.js';
@@ -12,12 +14,20 @@ import { createPersistentTokenResolver, type PersistentTokenResolver } from '../
 import { recoverOrphanedRuns } from '../domain/recovery.js';
 
 import { AuditWriter, verifyAuditChain } from './audit.js';
+import {
+  AuthorizationStateManager,
+  inspectAuthorizationState,
+  type AuthorizationStateStatus,
+} from './authorizationState.js';
 import { validatePhase4State, type Phase4StateReport, type Phase4StateValidationOptions } from './state.js';
 
 export interface Phase4ManagementRuntime {
   readonly db: SqliteDatabase;
   readonly audit: AuditWriter;
   readonly state: Phase4StateReport;
+  /** External epoch/clock readiness; never a grant and never a startup gate. */
+  readonly authorizationState: AuthorizationStateManager;
+  readonly authorizationReadiness: AuthorizationStateStatus;
   readonly close: () => void;
 }
 
@@ -35,6 +45,34 @@ function assertDoctorPassed(report: DoctorReport): void {
     'MCP serve refused because Phase 1 security verification failed: ' + failures,
     'Resolve every reported filesystem/security failure and retry serve. No state was repaired automatically.',
   );
+}
+
+function recordAuthorizationReadinessIssue(
+  audit: AuditWriter,
+  status: AuthorizationStateStatus,
+): void {
+  const action = status.readiness === 'CLOCK_ROLLBACK'
+    ? 'authorization.clock_rollback'
+    : status.readiness === 'INVALID'
+      ? 'authorization.state_invalid'
+      : undefined;
+  if (action === undefined) return;
+  try {
+    audit.append({
+      actorId: 'system',
+      actorRole: 'system',
+      requestId: randomUUID(),
+      action,
+      subjectType: 'authorization_state',
+      subjectId: 'authorization-state.v1.json',
+      result: 'error',
+      detail: { readiness: status.readiness },
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    // A readiness diagnostic must never make direct serving fail. The
+    // doctor/status surfaces still report the external-state condition.
+  }
 }
 
 function openVerifiedDatabase(context: CommandContext): SqliteDatabase {
@@ -75,11 +113,27 @@ function buildManagementRuntime(
   try {
     const state = validatePhase4State(db, Date.now(), stateOptions);
     const audit = new AuditWriter(db);
+    // This inspection is deliberately non-throwing. External authorization
+    // state is a future delegated prerequisite, not a dependency of direct
+    // observer or direct principal serving.
+    const authorizationState = new AuthorizationStateManager({
+      path: context.layout.authorizationStateFile,
+      security: context.security,
+      platform: context.platform,
+    });
+    const authorizationReadiness = inspectAuthorizationState({
+      path: context.layout.authorizationStateFile,
+      security: context.security,
+      platform: context.platform,
+    });
+    recordAuthorizationReadinessIssue(audit, authorizationReadiness);
     let closed = false;
     return {
       db,
       audit,
       state,
+      authorizationState,
+      authorizationReadiness,
       close: () => {
         if (closed) return;
         closed = true;

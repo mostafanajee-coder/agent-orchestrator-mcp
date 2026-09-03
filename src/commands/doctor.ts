@@ -6,6 +6,7 @@ import { SecurityError } from '../errors.js';
 import { inspectLeaseKey, LEASE_KEY_BYTES } from '../secrets/leaseKey.js';
 import { inspectPathSafety } from '../security/pathSafety.js';
 import { inspectDatabaseFilesForDoctor } from '../store/doctorFiles.js';
+import { inspectAuthorizationState, type AuthorizationReadiness } from '../authority/authorizationState.js';
 import type { CommandContext } from './context.js';
 
 /** `warn` is advisory: it is reported but never makes doctor fail. */
@@ -43,6 +44,7 @@ export function runDoctor(context: CommandContext): DoctorReport {
   }
 
   checks.push(leaseKeyCheck(context));
+  checks.push(authorizationStateCheck(context));
   checks.push(...legacyRootChecks(context));
   checks.push(...inspectDatabaseFilesForDoctor(context));
 
@@ -155,4 +157,32 @@ function leaseKeyCheck(context: CommandContext): DoctorCheck {
       detail: cause instanceof Error ? cause.message : 'the lease key could not be inspected',
     };
   }
+}
+
+function authorizationStateCheck(context: CommandContext): DoctorCheck {
+  const status = inspectAuthorizationState({
+    path: context.layout.authorizationStateFile,
+    security: context.security,
+    platform: context.platform,
+  });
+  const name = `authorization state ${context.layout.authorizationStateFile}`;
+  const details: Record<AuthorizationReadiness, { readonly status: CheckStatus; readonly detail: string }> = {
+    UNINITIALIZED: {
+      status: 'warn',
+      detail: 'not initialized; delegated readiness is disabled and no automatic state was created',
+    },
+    READY: {
+      status: 'pass',
+      detail: 'valid external epoch/clock prerequisite; this does not grant delegated authority',
+    },
+    INVALID: {
+      status: 'warn',
+      detail: 'invalid or unreadable; delegated readiness is disabled and no automatic repair was performed',
+    },
+    CLOCK_ROLLBACK: {
+      status: 'warn',
+      detail: 'clock rollback detected; delegated readiness is disabled until explicit local recovery',
+    },
+  };
+  return { name, ...details[status.readiness] };
 }

@@ -72,6 +72,7 @@ export interface StateLayout {
   readonly configFile: string;
   readonly workersFile: string;
   readonly leaseKey: string;
+  readonly authorizationStateFile: string;
 }
 
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
@@ -229,6 +230,7 @@ export function stateLayout(root: string, platform: NodeJS.Platform): StateLayou
     configFile: path.join(root, 'config.json'),
     workersFile: path.join(root, 'workers.json'),
     leaseKey: path.join(root, 'secrets', 'lease.key'),
+    authorizationStateFile: path.join(root, 'authorization-state.v1.json'),
   };
 }
 

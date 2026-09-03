@@ -211,6 +211,9 @@ describe('stateLayout: target-platform separators', () => {
     expect(layout.secrets).toBe('C:\\Users\\fixed\\.agent-orchestrator-mcp\\secrets');
     expect(layout.logs).toBe('C:\\Users\\fixed\\.agent-orchestrator-mcp\\logs');
     expect(layout.leaseKey).toBe('C:\\Users\\fixed\\.agent-orchestrator-mcp\\secrets\\lease.key');
+    expect(layout.authorizationStateFile).toBe(
+      'C:\\Users\\fixed\\.agent-orchestrator-mcp\\authorization-state.v1.json',
+    );
 
     for (const value of Object.values(layout)) expectPureWindowsPath(value);
   });
@@ -221,6 +224,9 @@ describe('stateLayout: target-platform separators', () => {
     expect(layout.secrets).toBe('/home/fixed/.local/state/agent-orchestrator-mcp/secrets');
     expect(layout.leaseKey).toBe(
       '/home/fixed/.local/state/agent-orchestrator-mcp/secrets/lease.key',
+    );
+    expect(layout.authorizationStateFile).toBe(
+      '/home/fixed/.local/state/agent-orchestrator-mcp/authorization-state.v1.json',
     );
     for (const value of Object.values(layout)) expect(value).not.toContain('\\');
   });

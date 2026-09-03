@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { run } from './cli.js';
+import { runAsync } from './cli.js';
 import { readPackageVersion } from './version.js';
 
-const result = run(
+const result = await runAsync(
   process.argv.slice(2),
   {
     out: (line: string): void => {

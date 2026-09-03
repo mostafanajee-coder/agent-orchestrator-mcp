@@ -19,6 +19,10 @@ import {
 
 import { createSdkTokenVerifier, type AccessTokenResolver } from './auth.js';
 import { createMcpServerFactory } from './server.js';
+import {
+  CANONICAL_RUNTIME_HOST,
+  CANONICAL_RUNTIME_PORT,
+} from '../runtime/ownership.js';
 import type { Phase4AuthorityToolOptions } from './tools/codexDecide.js';
 import type { Phase5JobToolOptions } from './tools/jobLifecycle.js';
 import type { Phase6WorkerToolOptions } from './tools/phase6.js';
@@ -26,9 +30,9 @@ import type { Phase7EvidenceArtifactToolOptions } from './tools/phase7.js';
 import type { Phase8ToolOptions } from './tools/phase8.js';
 import type { RequestRateLimiter } from './admission.js';
 
-export const MCP_HTTP_HOST = '127.0.0.1';
+export const MCP_HTTP_HOST = CANONICAL_RUNTIME_HOST;
 export const MCP_HTTP_PATH = '/mcp';
-export const MCP_HTTP_DEFAULT_PORT = 4317;
+export const MCP_HTTP_DEFAULT_PORT = CANONICAL_RUNTIME_PORT;
 export const MCP_HTTP_MAX_BODY_BYTES = 1024 * 1024;
 export const MCP_HTTP_REQUEST_TIMEOUT_MS = 15_000;
 

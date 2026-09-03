@@ -120,7 +120,10 @@ describe('runDoctor', () => {
 
     expect(report.ok).toBe(true);
     expect(report.checks.every((check) => check.status !== 'fail')).toBe(true);
-    expect(report.checks).toHaveLength(11);
+    expect(report.checks).toHaveLength(12);
+    expect(
+      report.checks.find((check) => check.name.includes('authorization-state.v1.json'))?.status,
+    ).toBe('warn');
     expect(
       report.checks.find((check) => check.name === 'DB_SQL_INTEGRITY=NOT_CHECKED_BY_DESIGN')?.status,
     ).toBe('warn');
@@ -283,7 +286,9 @@ describe('legacy state root', () => {
     runInit(context({ legacyRoots: [legacy] }));
 
     const report = runDoctor(context({ legacyRoots: [legacy] }));
-    const warning = report.checks.find((check) => check.status === 'warn');
+    const warning = report.checks.find(
+      (check) => check.status === 'warn' && check.name.startsWith('legacy state root'),
+    );
 
     expect(report.ok).toBe(true);
     expect(warning?.name).toContain(legacy);
