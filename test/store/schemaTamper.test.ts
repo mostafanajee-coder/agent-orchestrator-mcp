@@ -112,7 +112,7 @@ describe('START-06/REG-01 serve tamper gate', () => {
       version: '0.0.0-test',
       port: 0,
       verifyStartup: () => assertServeReady(fixture.context),
-    })).toThrow('canonical version 7');
+    })).toThrow('canonical version 8');
   });
 
   it('rejects a tampered same-name T7 trigger before stdio output', () => {
@@ -125,7 +125,7 @@ describe('START-06/REG-01 serve tamper gate', () => {
       environment: { ORCHESTRATOR_ACTOR_TOKEN: 'phase3-test' },
       transport: new StdioServerTransport(input, output),
       verifyStartup: () => assertServeReady(fixture.context),
-    })).toThrow('canonical version 7');
+    })).toThrow('canonical version 8');
     expect(output.readableLength).toBe(0);
     input.destroy();
     output.destroy();

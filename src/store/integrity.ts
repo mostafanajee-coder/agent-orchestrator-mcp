@@ -17,7 +17,7 @@ import {
 
 export interface IntegrityReport {
   readonly schemaVersion: CanonicalSchemaVersion;
-  readonly tableCount: 13;
+  readonly tableCount: number;
   readonly triggerCount: number;
   readonly appliedVersions: readonly number[];
   readonly pragmaPolicy: typeof SQLITE_PRAGMA_POLICY;
@@ -59,6 +59,14 @@ export const EXPECTED_TABLES = [
   'idempotency',
   'audit_log',
 ] as const;
+
+export const EXPECTED_TABLES_BY_VERSION = {
+  4: EXPECTED_TABLES,
+  5: EXPECTED_TABLES,
+  6: EXPECTED_TABLES,
+  7: EXPECTED_TABLES,
+  8: [...EXPECTED_TABLES, 'integrations'],
+} as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
 
 const EXPECTED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   schema_migrations: ['version', 'applied_at'],
@@ -192,6 +200,17 @@ const EXPECTED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+const EXPECTED_COLUMNS_BY_VERSION = {
+  4: EXPECTED_COLUMNS,
+  5: EXPECTED_COLUMNS,
+  6: EXPECTED_COLUMNS,
+  7: EXPECTED_COLUMNS,
+  8: {
+    ...EXPECTED_COLUMNS,
+    integrations: ['integration_id', 'generation', 'enabled', 'created_at', 'updated_at'],
+  },
+} as const satisfies Readonly<Record<CanonicalSchemaVersion, Readonly<Record<string, readonly string[]>>>>;
+
 export const EXPECTED_INDEXES = [
   'ux_actors_single_principal',
   'ix_actor_tokens_actor',
@@ -214,6 +233,11 @@ export const EXPECTED_INDEXES_BY_VERSION = {
   5: EXPECTED_INDEXES,
   6: EXPECTED_INDEXES,
   7: [
+    ...EXPECTED_INDEXES,
+    'ix_evidence_job_cycle_created',
+    'ix_artifacts_job_cycle_created',
+  ],
+  8: [
     ...EXPECTED_INDEXES,
     'ix_evidence_job_cycle_created',
     'ix_artifacts_job_cycle_created',
@@ -265,6 +289,23 @@ export const EXPECTED_TRIGGERS_BY_VERSION = {
     'trg_artifacts_no_replace',
     'trg_artifacts_binding',
   ],
+  8: [
+    ...EXPECTED_TRIGGERS,
+    'trg_actors_identity_immutable',
+    'trg_actor_tokens_binding_immutable',
+    'trg_actor_tokens_no_reenable',
+    'trg_evidence_no_update',
+    'trg_evidence_no_delete',
+    'trg_evidence_no_replace',
+    'trg_evidence_binding',
+    'trg_artifacts_no_update',
+    'trg_artifacts_no_delete',
+    'trg_artifacts_no_replace',
+    'trg_artifacts_binding',
+    'trg_integrations_no_replace',
+    'trg_integrations_identity_immutable',
+    'trg_integrations_generation_monotonic',
+  ],
 } as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
 
 function fail(message: string, remedy = 'Restore the approved schema and retry.'): never {
@@ -299,8 +340,9 @@ function verifyTables(db: SqliteDatabase, version: CanonicalSchemaVersion): void
   const tables = db.prepare(
     "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
   ).all().map((row) => (row as SchemaNameRow).name);
-  if (!equalNames(tables, EXPECTED_TABLES)) {
-    fail('The database does not contain exactly the approved 13-table schema.');
+  const expectedTables = EXPECTED_TABLES_BY_VERSION[version];
+  if (!equalNames(tables, expectedTables)) {
+    fail('The database does not contain exactly the approved ' + String(expectedTables.length) + '-table schema.');
   }
   verifyCanonicalDefinitions(
     db,
@@ -309,8 +351,8 @@ function verifyTables(db: SqliteDatabase, version: CanonicalSchemaVersion): void
   );
 }
 
-function verifyColumns(db: SqliteDatabase): void {
-  for (const [table, expected] of Object.entries(EXPECTED_COLUMNS)) {
+function verifyColumns(db: SqliteDatabase, version: CanonicalSchemaVersion): void {
+  for (const [table, expected] of Object.entries(EXPECTED_COLUMNS_BY_VERSION[version])) {
     const columns = db.prepare("PRAGMA table_info('" + table + "')").all()
       .map((row) => (row as ColumnRow).name);
     if (!equalNames(columns, expected)) {
@@ -446,11 +488,11 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     const ledger = readMigrationLedger(db);
     validateAppliedPrefix(ledger, false, KNOWN_MIGRATION_VERSIONS);
     const schemaVersion = ledger.versions[ledger.versions.length - 1];
-    if (schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7) {
+    if (schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7 && schemaVersion !== 8) {
       fail('The database has an unsupported schema version.');
     }
     verifyTables(db, schemaVersion);
-    verifyColumns(db);
+    verifyColumns(db, schemaVersion);
     verifyIndexes(db, schemaVersion);
     verifyTriggers(db, schemaVersion);
     verifySqlHealth(db);
@@ -458,7 +500,7 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     verifyLeaseRelation(db);
     return {
       schemaVersion,
-      tableCount: EXPECTED_TABLES.length,
+      tableCount: EXPECTED_TABLES_BY_VERSION[schemaVersion].length,
       triggerCount: EXPECTED_TRIGGERS_BY_VERSION[schemaVersion].length,
       appliedVersions: ledger.versions,
       pragmaPolicy: policy,

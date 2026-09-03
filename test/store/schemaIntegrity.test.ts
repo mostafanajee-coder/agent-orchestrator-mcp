@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('Phase 3 schema and integrity', () => {
-  it('creates exactly 13 approved tables and no production authority rows', () => {
+  it('creates exactly 14 approved tables and no production authority rows', () => {
     const tables = fixture.db.prepare(
       "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ).all().map((row) => (row as { readonly name: string }).name);
@@ -33,6 +33,7 @@ describe('Phase 3 schema and integrity', () => {
       'decisions',
       'evidence',
       'idempotency',
+      'integrations',
       'jobs',
       'leases',
       'schema_migrations',
@@ -44,10 +45,10 @@ describe('Phase 3 schema and integrity', () => {
 
   it('reports the current schema and approved PRAGMA policy', () => {
     const report = verifyDatabaseIntegrity(fixture.db);
-    expect(report.schemaVersion).toBe(7);
-    expect(report.tableCount).toBe(13);
-    expect(report.triggerCount).toBe(30);
-    expect(report.appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(report.schemaVersion).toBe(8);
+    expect(report.tableCount).toBe(14);
+    expect(report.triggerCount).toBe(33);
+    expect(report.appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(report.pragmaPolicy).toEqual({
       journalMode: 'wal',
       foreignKeys: 1,
@@ -119,6 +120,6 @@ describe('Phase 3 schema and integrity', () => {
 
   it('rejects an unexpected user table during integrity verification', () => {
     fixture.db.exec('CREATE TABLE unexpected_table (id INTEGER PRIMARY KEY)');
-    expect(() => verifyDatabaseIntegrity(fixture.db)).toThrow('exactly the approved 13-table schema');
+    expect(() => verifyDatabaseIntegrity(fixture.db)).toThrow('exactly the approved 14-table schema');
   });
 });
