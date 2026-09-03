@@ -92,6 +92,19 @@ export interface AuthorizationStateWriteOptions extends AuthorizationStateOption
   readonly replace: boolean;
 }
 
+export type AuthorizationStateFailurePhase = 'pre-commit' | 'post-commit';
+
+/** A bounded classification for operator-safe persistence failure handling. */
+export class AuthorizationStatePersistenceError extends SecurityError {
+  public constructor(
+    public readonly phase: AuthorizationStateFailurePhase,
+    message: string,
+    remedy?: string,
+  ) {
+    super(message, remedy);
+  }
+}
+
 function platformOf(options: AuthorizationStateOptions): NodeJS.Platform {
   return options.platform ?? process.platform;
 }
@@ -374,22 +387,24 @@ export function writeAuthorizationState(
   document: AuthorizationStateDocument,
 ): void {
   const fileSystem = fileSystemOf(options);
-  ensureProtectedParent(options);
-  if (!options.replace && fileSystem.exists(options.path)) {
-    throw new SecurityError(
-      'The authorization state file already exists; initialization refused to overwrite it.',
-      'Use the explicit rotate operation when a new epoch is intended. No state was changed.',
-    );
-  }
-
-  const serialized = Buffer.from(serializeAuthorizationState(document), 'utf8');
-  if (serialized.byteLength > AUTHORIZATION_STATE_MAX_BYTES) {
-    throw new SecurityError('The authorization state document exceeds its size bound.', 'No state was changed.');
-  }
-
-  const temporary = options.path + '.tmp-' + randomUUID();
+  let temporary: string | undefined;
   let descriptor: number | undefined;
+  let committed = false;
   try {
+    ensureProtectedParent(options);
+    if (!options.replace && fileSystem.exists(options.path)) {
+      throw new SecurityError(
+        'The authorization state file already exists; initialization refused to overwrite it.',
+        'Use the explicit rotate operation when a new epoch is intended. No state was changed.',
+      );
+    }
+
+    const serialized = Buffer.from(serializeAuthorizationState(document), 'utf8');
+    if (serialized.byteLength > AUTHORIZATION_STATE_MAX_BYTES) {
+      throw new SecurityError('The authorization state document exceeds its size bound.', 'No state was changed.');
+    }
+
+    temporary = options.path + '.tmp-' + randomUUID();
     descriptor = fileSystem.open(temporary, 'wx', 0o600);
     writeFully(fileSystem, descriptor, serialized);
     fileSystem.fsync(descriptor);
@@ -420,6 +435,7 @@ export function writeAuthorizationState(
     }
 
     fileSystem.rename(temporary, options.path);
+    committed = true;
     // Re-apply the existing protection policy to the final name as well as
     // the temporary file. This is a no-op for an already-correct policy and
     // keeps the post-rename verification meaningful on every platform.
@@ -430,22 +446,35 @@ export function writeAuthorizationState(
     stateDocumentFromFile(options);
   } catch (cause) {
     if (descriptor !== undefined) closeQuietly(fileSystem, descriptor);
-    removeQuietly(fileSystem, temporary);
-    if (cause instanceof SecurityError) throw cause;
+    if (temporary !== undefined) removeQuietly(fileSystem, temporary);
+    if (committed) {
+      throw new AuthorizationStatePersistenceError(
+        'post-commit',
+        'Authorization state replacement may have committed; the new state may already be effective.',
+        'Do not blindly retry. Inspect authority-state status before another mutation.',
+      );
+    }
+    if (cause instanceof AuthorizationStatePersistenceError) throw cause;
+    if (cause instanceof SecurityError) {
+      throw new AuthorizationStatePersistenceError('pre-commit', cause.message, cause.remedy);
+    }
     const code = (cause as NodeJS.ErrnoException).code;
     if (code === 'EEXIST') {
-      throw new SecurityError(
+      throw new AuthorizationStatePersistenceError(
+        'pre-commit',
         'The authorization state temporary path already exists; initialization refused.',
         'Retry the local operation. No state was intentionally overwritten.',
       );
     }
     if (code === 'EPERM' || code === 'EACCES') {
-      throw new SecurityError(
+      throw new AuthorizationStatePersistenceError(
+        'pre-commit',
         'The authorization state replacement was refused by the filesystem.',
         'The previous state was preserved where possible. Do not unlink it before retrying.',
       );
     }
-    throw new SecurityError(
+    throw new AuthorizationStatePersistenceError(
+      'pre-commit',
       'The authorization state could not be persisted safely.',
       'Inspect the state path and retry. No unsafe copy or unlink fallback was used.',
     );

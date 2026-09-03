@@ -24,6 +24,7 @@ import {
   AUTHORIZATION_EPOCH_BYTES,
   AUTHORIZATION_STATE_VERSION,
   AuthorizationStateManager,
+  AuthorizationStatePersistenceError,
   CLOCK_ROLLBACK_TOLERANCE_MS,
   createAuthorizationStateDocument,
   inspectAuthorizationState,
@@ -235,6 +236,89 @@ describe('authorization clock guard', () => {
     const later = await failingManager.persistHighWaterBeforeAuthorityWork(nowMs + 3_000);
     expect(later.readiness).toBe('READY');
     expect(readAuthorizationStateDocument(options).clock_high_water_ms).toBe(nowMs + 3_000);
+  });
+});
+
+describe('authorization-state persistence failure classification', () => {
+  function errorWithCode(code: string): NodeJS.ErrnoException {
+    const error = new Error('simulated filesystem failure') as NodeJS.ErrnoException;
+    error.code = code;
+    return error;
+  }
+
+  it('classifies a failure before rename as pre-commit and preserves the old target', () => {
+    writeInitial(1);
+    const native = realFileSystem();
+    const failingFileSystem: AuthorizationStateFileSystem = {
+      ...native,
+      rename: () => { throw errorWithCode('EPERM'); },
+    };
+
+    let failure: unknown;
+    try {
+      writeAuthorizationState(
+        { ...options, fileSystem: failingFileSystem, replace: true },
+        makeDocument(2, nowMs + 1),
+      );
+    } catch (cause) {
+      failure = cause;
+    }
+
+    expect(failure).toBeInstanceOf(AuthorizationStatePersistenceError);
+    expect((failure as AuthorizationStatePersistenceError).phase).toBe('pre-commit');
+    expect((failure as Error).message).not.toContain('may have committed');
+    expect(JSON.parse(readFileSync(options.path, 'utf8')).authorization_epoch).toBe('01'.repeat(32));
+  });
+
+  it('classifies final validation failure as post-commit and leaves the new target live', () => {
+    writeInitial(1);
+    security.forcedInsecure.add(options.path);
+
+    let failure: unknown;
+    try {
+      writeAuthorizationState(
+        { ...options, replace: true },
+        makeDocument(2, nowMs + 1),
+      );
+    } catch (cause) {
+      failure = cause;
+    }
+
+    expect(failure).toBeInstanceOf(AuthorizationStatePersistenceError);
+    const classified = failure as AuthorizationStatePersistenceError;
+    expect(classified.phase).toBe('post-commit');
+    expect(classified.message).toContain('may have committed');
+    expect(classified.remedy).toContain('Do not blindly retry');
+    expect(classified.remedy).toContain('authority-state status');
+    expect(classified.message).not.toContain('02'.repeat(32));
+    expect(classified.remedy).not.toContain('02'.repeat(32));
+    expect(JSON.parse(readFileSync(options.path, 'utf8')).authorization_epoch).toBe('02'.repeat(32));
+  });
+
+  it('classifies a POSIX directory durability failure as post-commit', () => {
+    writeInitial(1);
+    const native = realFileSystem();
+    const failingFileSystem: AuthorizationStateFileSystem = {
+      ...native,
+      open: (path, flags, mode) => {
+        if (flags === 'r' && path === root) throw errorWithCode('EIO');
+        return native.open(path, flags, mode);
+      },
+    };
+
+    let failure: unknown;
+    try {
+      writeAuthorizationState(
+        { ...options, platform: 'linux', fileSystem: failingFileSystem, replace: true },
+        makeDocument(2, nowMs + 1),
+      );
+    } catch (cause) {
+      failure = cause;
+    }
+
+    expect(failure).toBeInstanceOf(AuthorizationStatePersistenceError);
+    expect((failure as AuthorizationStatePersistenceError).phase).toBe('post-commit');
+    expect((failure as AuthorizationStatePersistenceError).remedy).toContain('status');
   });
 });
 
