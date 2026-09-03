@@ -16,6 +16,7 @@ import type { ActorRole, Capability } from '../../src/authority/capabilities.js'
 import type { ActorAuthInfo } from '../../src/mcp/auth.js';
 import { createMcpServerFactory } from '../../src/mcp/server.js';
 import type { Phase5JobToolOptions } from '../../src/mcp/tools/jobLifecycle.js';
+import type { Phase7EvidenceArtifactToolOptions } from '../../src/mcp/tools/phase7.js';
 
 const PRINCIPAL_CAPABILITIES = [
   'artifact:register',
@@ -239,7 +240,7 @@ describe('Phase 10B.1 authorization context', () => {
     expect(actorForRequirement(undefined, { capability: 'job:decide' })).toBeUndefined();
   });
 
-  it('keeps the same normalized observer policy and visible tools for HTTP and stdio', async () => {
+  it('keeps the same normalized observer policy and denies wired writes for HTTP and stdio', async () => {
     const observerAuth = auth({
       clientId: 'chatgpt_edge_reader',
       actorId: 'chatgpt_edge_reader',
@@ -248,12 +249,25 @@ describe('Phase 10B.1 authorization context', () => {
       capabilities: ['job:read'],
     });
     const jobs = {} as Phase5JobToolOptions;
+    const artifacts = {} as Phase7EvidenceArtifactToolOptions;
     const httpHandler = createMcpHandler(
-      createMcpServerFactory({ transport: 'http', version: '10b1-test', staticAuthInfo: observerAuth, jobs }),
+      createMcpServerFactory({
+        transport: 'http',
+        version: '10b1-test',
+        staticAuthInfo: observerAuth,
+        jobs,
+        artifacts,
+      }),
       { legacy: 'stateless', responseMode: 'json' },
     );
     const stdioHandler = createMcpHandler(
-      createMcpServerFactory({ transport: 'stdio', version: '10b1-test', staticAuthInfo: observerAuth, jobs }),
+      createMcpServerFactory({
+        transport: 'stdio',
+        version: '10b1-test',
+        staticAuthInfo: observerAuth,
+        jobs,
+        artifacts,
+      }),
       { legacy: 'stateless', responseMode: 'json' },
     );
 
@@ -263,7 +277,13 @@ describe('Phase 10B.1 authorization context', () => {
       const stdioPayload = await responsePayload(await stdioHandler.fetch(request(body)));
       const httpTools = (httpPayload.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
       const stdioTools = (stdioPayload.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
-      expect(httpTools).toEqual(['ping', 'job_get', 'job_list']);
+      expect(httpTools).toEqual(['ping', 'job_get', 'job_list', 'evidence_list', 'artifact_list']);
+      expect(httpTools).not.toEqual(expect.arrayContaining([
+        'job_create',
+        'job_start',
+        'job_resume',
+        'artifact_register',
+      ]));
       expect(stdioTools).toEqual(httpTools);
     } finally {
       await httpHandler.close();
