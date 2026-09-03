@@ -3,11 +3,14 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import type { CommandContext } from './context.js';
 import { openPhase4ManagementRuntime } from '../authority/runtime.js';
 import { validatePhase4State } from '../authority/state.js';
+import { assertRoleCapabilities, canonicalCapabilitiesJson, parseCapabilities } from '../authority/capabilities.js';
 import { hashAccessToken } from '../mcp/auth.js';
 import { withImmediateTransaction } from '../store/db.js';
 import { UsageError } from '../errors.js';
 
 const MAX_LABEL_LENGTH = 256;
+const MAX_ACTOR_ID_BYTES = 64;
+const ACTOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const RFC3339_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
 export type TokenCommandOptions =
@@ -15,6 +18,7 @@ export type TokenCommandOptions =
       readonly action: 'issue';
       readonly label: string;
       readonly expiresAt?: string;
+      readonly actorId?: string;
     }
   | {
       readonly action: 'list';
@@ -37,6 +41,7 @@ export interface TokenListItem {
 export interface TokenCommandResult {
   readonly action: TokenCommandOptions['action'];
   readonly tokenId?: string;
+  readonly actorId?: string;
   readonly label?: string;
   readonly expiresAt?: string | null;
   /** The plaintext is returned only to the explicit CLI renderer. */
@@ -65,6 +70,18 @@ function boundedText(value: string, field: string): string {
     throw new UsageError(`${field} must be a non-empty single-line value of at most 256 characters`);
   }
   return trimmed;
+}
+
+function boundedActorId(value: string): string {
+  const actorId = value.trim();
+  if (
+    actorId === ''
+    || Buffer.byteLength(actorId, 'utf8') > MAX_ACTOR_ID_BYTES
+    || !ACTOR_ID_PATTERN.test(actorId)
+  ) {
+    throw new UsageError('actor-id must be a non-empty ASCII identity of at most 64 bytes');
+  }
+  return actorId;
 }
 
 function normalizeExpiry(value: string | undefined, nowMs: number): string | null {
@@ -114,6 +131,7 @@ function issueToken(
   runtime: ReturnType<typeof openPhase4ManagementRuntime>,
   label: string,
   expiresAt: string | null,
+  actorId: string,
   nowMs: number,
 ): TokenCommandResult {
   const token = createToken();
@@ -121,9 +139,33 @@ function issueToken(
   const createdAt = new Date(nowMs).toISOString();
   withImmediateTransaction(runtime.db, () => {
     validatePhase4State(runtime.db, nowMs, { requireUsableToken: false });
+    const actor = runtime.db.prepare(
+      'SELECT actor_id, role, disabled, capabilities_json FROM actors WHERE actor_id = ?',
+    ).get(actorId) as {
+      readonly actor_id?: unknown;
+      readonly role?: unknown;
+      readonly disabled?: unknown;
+      readonly capabilities_json?: unknown;
+    } | undefined;
+    if (actor === undefined || actor.actor_id !== actorId) {
+      throw new UsageError('the requested actor does not exist');
+    }
+    if (actor.disabled !== 0) throw new UsageError('the requested actor is disabled');
+    if (actorId !== 'codex') {
+      if (actor.role !== 'observer' || typeof actor.capabilities_json !== 'string') {
+        throw new UsageError('token issue --actor-id supports only codex or observer actors');
+      }
+      const capabilities = parseCapabilities(actor.capabilities_json);
+      assertRoleCapabilities('observer', capabilities);
+      if (canonicalCapabilitiesJson(capabilities) !== '["job:read"]') {
+        throw new UsageError('the observer actor must have only job:read');
+      }
+    } else if (actor.role !== 'principal') {
+      throw new UsageError('the codex token target is not a principal');
+    }
     runtime.db.prepare(
       'INSERT INTO actor_tokens(token_id, actor_id, token_sha256, label, disabled, expires_at, last_used_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(tokenId, 'codex', token.digest, label, 0, expiresAt, null, createdAt);
+    ).run(tokenId, actorId, token.digest, label, 0, expiresAt, null, createdAt);
     runtime.audit.appendInTransaction({
       actorId: 'system',
       actorRole: 'system',
@@ -132,7 +174,7 @@ function issueToken(
       subjectType: 'actor_token',
       subjectId: tokenId,
       result: 'ok',
-      detail: { token_id: tokenId, label, expires_at: expiresAt },
+      detail: { token_id: tokenId, actor_id: actorId, label, expires_at: expiresAt },
       timestamp: createdAt,
     });
     validatePhase4State(runtime.db, nowMs, { requireUsableToken: false });
@@ -140,6 +182,7 @@ function issueToken(
   return {
     action: 'issue',
     tokenId,
+    actorId,
     label,
     expiresAt,
     plaintext: token.plaintext,
@@ -210,9 +253,10 @@ export function runTokenCommand(
   if (options.action === 'issue') {
     const label = boundedText(options.label, 'label');
     const expiresAt = normalizeExpiry(options.expiresAt, nowMs);
+    const actorId = options.actorId === undefined ? 'codex' : boundedActorId(options.actorId);
     const runtime = openPhase4ManagementRuntime(context);
     try {
-      return issueToken(runtime, label, expiresAt, nowMs);
+      return issueToken(runtime, label, expiresAt, actorId, nowMs);
     } finally {
       runtime.close();
     }

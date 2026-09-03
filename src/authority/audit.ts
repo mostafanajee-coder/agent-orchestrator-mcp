@@ -15,6 +15,7 @@ const HEX_DIGEST = /^[0-9a-f]{64}$/;
 const RFC3339_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 export const AUDIT_ACTION_VALUES = [
   'bootstrap.completed',
+  'actor.created',
   'token.issued',
   'token.revoked',
   'auth.rejected',

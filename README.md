@@ -124,7 +124,7 @@ node dist/index.js init
 ```
 
 Prepares the state root, creates the database only on the explicit init path, applies owner-only
-protection, verifies it, applies the exact numbered migration set `[1, 2, 3, 4, 5, 6]`, and runs the deep
+protection, verifies it, applies the exact numbered migration set `[1, 2, 3, 4, 5, 6, 7]`, and runs the deep
 structural/canonical integrity gate. A fresh database atomically creates the `codex` principal, internal
 `system` actor, and digest-only initial token; the plaintext token is printed once after commit. Re-running
 init preserves the lease key and does not print another token. Existing ambiguous authority state fails
@@ -140,6 +140,22 @@ node dist/index.js token revoke --token-id <token_id>
 
 `token list` returns metadata only. Revocation is one-way; expiry and revoked rows remain retained for
 attribution and audit history.
+
+The Phase 10B.0A read-transport actor is provisioned through a separate local,
+operator-only path:
+
+```bash
+node dist/index.js actor create --actor-id chatgpt_edge_reader --role observer
+node dist/index.js token issue --actor-id chatgpt_edge_reader --label chatgpt-edge-reader
+```
+
+The actor command supports only the existing `observer` role and derives its
+single `job:read` capability from the canonical role policy. `token issue
+--actor-id` accepts `codex` or an existing observer only; there is no arbitrary
+capability flag, MCP administration route, or principal fallback. The token is
+shown once by the local CLI, stored only as a digest by AOM, and must be handed
+to the Gateway through its protected local secret mechanism; it must not be
+committed, logged, or placed in ChatGPT/Funnel configuration.
 
 ```bash
 node dist/index.js doctor

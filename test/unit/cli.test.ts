@@ -259,6 +259,59 @@ describe('run: token', () => {
     expect(invoked).toBe(false);
     expect(err.join('\n')).toContain('requires --token-id');
   });
+
+  it('parses an observer actor selector without changing the default codex form', () => {
+    const { io, out, err } = capture();
+    let received: unknown;
+    const result = run(
+      ['token', 'issue', '--actor-id', 'chatgpt_edge_reader', '--label', 'reader'],
+      io,
+      VERSION,
+      commands({
+        token: (options) => {
+          received = options;
+          return { action: 'issue', actorId: 'chatgpt_edge_reader', tokenId: 'token-reader', label: 'reader', plaintext: 'x'.repeat(43) };
+        },
+      }),
+    );
+    expect(result.exitCode).toBe(EXIT_OK);
+    expect(received).toEqual({ action: 'issue', actorId: 'chatgpt_edge_reader', label: 'reader' });
+    expect(out.join('\n')).toContain('Actor ID:       chatgpt_edge_reader');
+    expect(err).toEqual([]);
+  });
+});
+
+describe('run: actor', () => {
+  it('parses the narrow observer-create command', () => {
+    const { io, out, err } = capture();
+    let received: unknown;
+    const result = run(
+      ['actor', 'create', '--actor-id', 'chatgpt_edge_reader', '--role', 'observer'],
+      io,
+      VERSION,
+      commands({
+        actor: (options) => {
+          received = options;
+          return { action: 'create', actorId: 'chatgpt_edge_reader', role: 'observer', capabilities: ['job:read'] };
+        },
+      }),
+    );
+    expect(result.exitCode).toBe(EXIT_OK);
+    expect(received).toEqual({ action: 'create', actorId: 'chatgpt_edge_reader', role: 'observer' });
+    expect(out.join('\n')).toContain('Capabilities:   job:read');
+    expect(err).toEqual([]);
+  });
+
+  it('rejects non-observer roles and arbitrary capability flags before invocation', () => {
+    const { io, err } = capture();
+    let invoked = false;
+    const actorCommands = commands({ actor: () => { invoked = true; return { action: 'create', actorId: 'x', role: 'observer', capabilities: ['job:read'] }; } });
+    expect(run(['actor', 'create', '--actor-id', 'x', '--role', 'principal'], io, VERSION, actorCommands).exitCode).toBe(EXIT_USAGE);
+    expect(run(['actor', 'create', '--actor-id', 'x', '--role', 'observer', '--capability', 'job:decide'], io, VERSION, actorCommands).exitCode).toBe(EXIT_USAGE);
+    expect(invoked).toBe(false);
+    expect(err.join('\n')).toContain('only the observer role');
+    expect(err.join('\n')).toContain('unexpected actor create argument');
+  });
 });
 
 describe('renderHelp', () => {
@@ -281,6 +334,7 @@ describe('renderHelp', () => {
     expect(help).toContain('Phase 4');
     expect(help).toContain('later phases');
     expect(help).toContain('token issue');
+    expect(help).toContain('actor create');
     expect(help).not.toContain('Phase 5 tools');
   });
 });

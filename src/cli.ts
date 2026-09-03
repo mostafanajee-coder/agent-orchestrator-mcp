@@ -1,5 +1,7 @@
 import type { DoctorReport } from './commands/doctor.js';
 import { runDoctor } from './commands/doctor.js';
+import type { ActorCommandOptions, ActorCommandResult } from './commands/actors.js';
+import { runActorCommand } from './commands/actors.js';
 import type { InitResult } from './commands/init.js';
 import { runInit } from './commands/init.js';
 import type { TokenCommandOptions, TokenCommandResult } from './commands/tokens.js';
@@ -68,6 +70,7 @@ function createPhase6Runtime(
 export interface CliCommands {
   readonly init: () => InitResult;
   readonly doctor: () => DoctorReport;
+  readonly actor?: (options: ActorCommandOptions) => ActorCommandResult;
   readonly token?: (options: TokenCommandOptions) => TokenCommandResult;
   readonly serve?: (options: ServeOptions, io: CliIo) => void;
 }
@@ -75,6 +78,7 @@ export interface CliCommands {
 export const defaultCommands: CliCommands = {
   init: () => runInit(createCommandContext()),
   doctor: () => runDoctor(createCommandContext()),
+  actor: (options) => runActorCommand(createCommandContext(), options),
   token: (options) => runTokenCommand(createCommandContext(), options),
   serve: (options, io) => {
     const version = readPackageVersion();
@@ -242,13 +246,17 @@ export function renderHelp(version: string): string {
     'Commands:',
     '  init             Prepare state, initialize schema, and bootstrap Phase 4 authority',
     '  doctor           Report state and DB-file security. Read-only; repairs nothing',
+    '  actor            Create a local read-only observer actor',
     '  token            Issue, list, or revoke local persistent actor tokens',
     '  serve            Serve the Phase 5/6/7/8 MCP spine (--http or --stdio)',
     '',
     'Token options:',
-    '  token issue --label LABEL [--expires-at UTC_TIMESTAMP]',
+    '  token issue --label LABEL [--actor-id ACTOR_ID] [--expires-at UTC_TIMESTAMP]',
     '  token list',
     '  token revoke --token-id TOKEN_ID',
+    '',
+    'Actor options:',
+    '  actor create --actor-id ACTOR_ID --role observer',
     '',
     'Serve options:',
     `  --http           Streamable HTTP on ${MCP_HTTP_HOST} (default port ${String(MCP_HTTP_DEFAULT_PORT)})`,
@@ -320,6 +328,7 @@ function parseTokenOptions(args: readonly string[]): TokenCommandOptions {
   if (action === 'issue') {
     let label: string | undefined;
     let expiresAt: string | undefined;
+    let actorId: string | undefined;
     for (let index = 1; index < args.length; index += 1) {
       const argument = args[index];
       if (argument === '--label') {
@@ -338,10 +347,21 @@ function parseTokenOptions(args: readonly string[]): TokenCommandOptions {
         index += 1;
         continue;
       }
+      if (argument === '--actor-id') {
+        if (actorId !== undefined) throw new UsageError('--actor-id may be specified only once');
+        const value = args[index + 1];
+        if (value === undefined) throw new UsageError('--actor-id requires a value');
+        actorId = value;
+        index += 1;
+        continue;
+      }
       throw new UsageError(`unexpected token issue argument '${String(argument)}'`);
     }
     if (label === undefined) throw new UsageError('token issue requires --label');
-    return expiresAt === undefined ? { action: 'issue', label } : { action: 'issue', label, expiresAt };
+    if (actorId === undefined && expiresAt === undefined) return { action: 'issue', label };
+    if (actorId === undefined) return { action: 'issue', label, expiresAt: expiresAt as string };
+    if (expiresAt === undefined) return { action: 'issue', label, actorId };
+    return { action: 'issue', label, actorId, expiresAt };
   }
 
   if (action === 'revoke') {
@@ -362,6 +382,35 @@ function parseTokenOptions(args: readonly string[]): TokenCommandOptions {
   }
 
   throw new UsageError('token requires issue, list, or revoke');
+}
+
+function parseActorOptions(args: readonly string[]): ActorCommandOptions {
+  if (args[0] !== 'create') throw new UsageError('actor requires create');
+  let actorId: string | undefined;
+  let role: string | undefined;
+  for (let index = 1; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--actor-id') {
+      if (actorId !== undefined) throw new UsageError('--actor-id may be specified only once');
+      const value = args[index + 1];
+      if (value === undefined) throw new UsageError('--actor-id requires a value');
+      actorId = value;
+      index += 1;
+      continue;
+    }
+    if (argument === '--role') {
+      if (role !== undefined) throw new UsageError('--role may be specified only once');
+      const value = args[index + 1];
+      if (value === undefined) throw new UsageError('--role requires a value');
+      role = value;
+      index += 1;
+      continue;
+    }
+    throw new UsageError(`unexpected actor create argument '${String(argument)}'`);
+  }
+  if (actorId === undefined) throw new UsageError('actor create requires --actor-id');
+  if (role !== 'observer') throw new UsageError('actor create supports only the observer role');
+  return { action: 'create', actorId, role: 'observer' };
 }
 
 function renderInit(result: InitResult): string[] {
@@ -401,6 +450,7 @@ function renderTokenResult(result: TokenCommandResult): string[] {
   if (result.action === 'issue') {
     return [
       `Token ID:       ${result.tokenId ?? 'unknown'}`,
+      `Actor ID:       ${result.actorId ?? 'codex'}`,
       `Label:          ${result.label ?? 'unknown'}`,
       `Expires at:     ${result.expiresAt ?? 'never'}`,
       `Token:          ${result.plaintext ?? '[unavailable]'} (print once; not stored)`,
@@ -416,6 +466,15 @@ function renderTokenResult(result: TokenCommandResult): string[] {
   const tokens = result.tokens ?? [];
   if (tokens.length === 0) return ['No actor tokens.'];
   return tokens.map((token) => JSON.stringify(token));
+}
+
+function renderActorResult(result: ActorCommandResult): string[] {
+  return [
+    `Actor ID:       ${result.actorId}`,
+    `Role:           ${result.role}`,
+    `Capabilities:   ${result.capabilities.join(', ')}`,
+    'actor create complete. No token was created.',
+  ];
 }
 
 function renderDoctor(report: DoctorReport): string[] {
@@ -502,6 +561,20 @@ export function run(
         throw new UsageError('token is not available in this command context');
       }
       for (const line of renderTokenResult(commands.token(parseTokenOptions(argv.slice(1))))) {
+        io.out(line);
+      }
+      return { exitCode: EXIT_OK };
+    } catch (error) {
+      return reportError(io, error);
+    }
+  }
+
+  if (first === 'actor') {
+    try {
+      if (commands.actor === undefined) {
+        throw new UsageError('actor is not available in this command context');
+      }
+      for (const line of renderActorResult(commands.actor(parseActorOptions(argv.slice(1))))) {
         io.out(line);
       }
       return { exitCode: EXIT_OK };
