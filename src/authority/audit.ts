@@ -6,6 +6,10 @@ import { redactSensitiveDetail, redactSensitiveText } from '../security/redactio
 
 import { CAPABILITY_VALUES } from './capabilities.js';
 import type { ActorRole, Capability } from './capabilities.js';
+import {
+  EDGE_ADMISSION_DENIAL_REASONS,
+  type EdgeAdmissionDenialReason,
+} from './policy.js';
 
 export const AUDIT_DETAIL_MAX_BYTES = 65_536;
 export const AUDIT_REJECTED_AUTH_WINDOW_MS = 60_000;
@@ -48,8 +52,12 @@ export const AUDIT_ACTION_VALUES = [
   'artifact.hash_mismatch',
   'artifact.quota_rejected',
   'codex.decide',
+  'edge.admission_denied',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
+
+export { EDGE_ADMISSION_DENIAL_REASONS };
+export type { EdgeAdmissionDenialReason };
 
 export type AuditResult = 'ok' | 'denied' | 'error';
 
@@ -270,6 +278,7 @@ export class AuditWriter {
       && input.actorRole !== 'worker'
       && input.actorRole !== 'observer'
       && input.actorRole !== 'system'
+      && input.actorRole !== 'edge'
     ) {
       throw new AuditError('actorRole is invalid.');
     }
@@ -341,6 +350,33 @@ export class AuditWriter {
       throw new AuditError('The audit sequence changed unexpectedly.');
     }
     return complete;
+  }
+
+  /** Records a fixed, redacted edge-admission denial without granting authority. */
+  public appendEdgeAdmissionDenied(input: {
+    readonly actorId: string;
+    readonly sessionTokenId?: string | null;
+    readonly integrationId?: string | null;
+    readonly requestId: string;
+    readonly reason: EdgeAdmissionDenialReason;
+    readonly timestamp?: string;
+  }): AuditRow {
+    if (!(EDGE_ADMISSION_DENIAL_REASONS as readonly string[]).includes(input.reason)) {
+      throw new AuditError('The edge admission denial reason is not approved.');
+    }
+    return this.append({
+      actorId: input.actorId,
+      actorRole: 'edge',
+      ...(input.sessionTokenId === undefined ? {} : { sessionTokenId: input.sessionTokenId }),
+      requestId: input.requestId,
+      action: 'edge.admission_denied',
+      capability: 'delegation:request',
+      subjectType: 'integration',
+      ...(input.integrationId === undefined ? {} : { subjectId: input.integrationId }),
+      result: 'denied',
+      detail: { reason: input.reason },
+      timestamp: input.timestamp ?? new Date(this.clock()).toISOString(),
+    });
   }
 
   /** Records bounded metadata for an unauthenticated/rejected request. */

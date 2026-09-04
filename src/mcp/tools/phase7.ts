@@ -98,7 +98,7 @@ function readerActor(
 ): VerifiedActorAuthInfo | undefined {
   return actorForRequirement(authorizationContext, {
     capability: 'job:read',
-    allowedRoles: ['principal', 'observer'],
+    allowedRoles: ['principal'],
   });
 }
 

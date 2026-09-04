@@ -12,7 +12,7 @@ import {
   fingerprintSchemaSql,
 } from './schemaDefinitions.js';
 
-export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+export const KNOWN_MIGRATION_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 export interface Migration {
   readonly version: number;
@@ -104,7 +104,7 @@ function validateMigrationSet(migrations: readonly Migration[]): void {
     versions.some((version, index) => version !== KNOWN_MIGRATION_VERSIONS[index])
   ) {
     fail(
-      'The binary migration set is not exactly the approved known set [1,2,3,4,5,6,7,8].',
+      'The binary migration set is not exactly the approved known set [1,2,3,4,5,6,7,8,9].',
       'Remove unknown, missing, or future migration files before serving.',
     );
   }
@@ -351,6 +351,25 @@ function verifyMigrationFiveInsideTransaction(db: SqliteDatabase): void {
   }
 }
 
+function applyMigrationInsideTransaction(
+  db: SqliteDatabase,
+  migration: Migration,
+): void {
+  db.exec(migration.sql);
+  if (!tableExists(db, 'schema_migrations')) {
+    fail('Migration 001 did not create schema_migrations.');
+  }
+  if (migration.version === 2) verifyMigrationTwoInsideTransaction(db);
+  if (migration.version === 3) verifyMigrationThreeInsideTransaction(db);
+  if (migration.version === 4) verifyMigrationFourInsideTransaction(db);
+  if (migration.version === 5) verifyMigrationFiveInsideTransaction(db);
+  if (migration.version >= 4) verifyCanonicalDefinitionsForVersion(db, migration.version);
+
+  db.prepare(
+    'INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)',
+  ).run(migration.version, new Date().toISOString());
+}
+
 export function runMigrations(
   db: SqliteDatabase,
   options: MigrationRunOptions,
@@ -360,7 +379,7 @@ export function runMigrations(
 
   let migrated = false;
   for (;;) {
-    const appliedOne = withImmediateTransaction(db, () => {
+    const step = withImmediateTransaction(db, () => {
       const ledger = readMigrationLedgerInternal(db);
       validateAppliedPrefix(ledger, options.fresh);
       const currentVersion = ledger.versions[ledger.versions.length - 1];
@@ -368,30 +387,51 @@ export function runMigrations(
         verifyCanonicalDefinitionsForVersion(db, currentVersion);
       }
       const next = migrations.find((migration) => !ledger.versions.includes(migration.version));
-      if (next === undefined) return false;
+      if (next === undefined) return 'done' as const;
+      if (next.version === 9) return 'rebuild' as const;
 
       const expectedNext = ledger.versions.length + 1;
       if (next.version !== expectedNext) {
         fail('The next migration is not the next contiguous version.');
       }
-
-      db.exec(next.sql);
-      if (!tableExists(db, 'schema_migrations')) {
-        fail('Migration 001 did not create schema_migrations.');
-      }
-      if (next.version === 2) verifyMigrationTwoInsideTransaction(db);
-      if (next.version === 3) verifyMigrationThreeInsideTransaction(db);
-      if (next.version === 4) verifyMigrationFourInsideTransaction(db);
-      if (next.version === 5) verifyMigrationFiveInsideTransaction(db);
-      if (next.version >= 4) verifyCanonicalDefinitionsForVersion(db, next.version);
-
-      db.prepare(
-        'INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)',
-      ).run(next.version, new Date().toISOString());
+      applyMigrationInsideTransaction(db, next);
       migrated = true;
-      return true;
+      return 'applied' as const;
     });
-    if (!appliedOne) break;
+    if (step === 'done') break;
+    if (step === 'applied') continue;
+
+    if (db.inTransaction) fail('Migration 009 cannot begin inside an existing transaction.');
+    const foreignKeysBefore = Number(db.pragma('foreign_keys', { simple: true }));
+    const legacyAlterTableBefore = Number(db.pragma('legacy_alter_table', { simple: true }));
+    if (foreignKeysBefore !== 1) {
+      fail('Migration 009 requires the approved foreign-key PRAGMA before table rebuild.');
+    }
+    db.pragma('foreign_keys = OFF');
+    db.pragma('legacy_alter_table = ON');
+    try {
+      withImmediateTransaction(db, () => {
+        const ledger = readMigrationLedgerInternal(db);
+        validateAppliedPrefix(ledger, options.fresh);
+        const currentVersion = ledger.versions[ledger.versions.length - 1];
+        if (currentVersion !== undefined && currentVersion >= 4) {
+          verifyCanonicalDefinitionsForVersion(db, currentVersion);
+        }
+        const next = migrations.find((migration) => !ledger.versions.includes(migration.version));
+        if (next === undefined || next.version !== 9) {
+          fail('The migration ledger changed before Migration 009 acquired its lock.');
+        }
+        const expectedNext = ledger.versions.length + 1;
+        if (next.version !== expectedNext) {
+          fail('The next migration is not the next contiguous version.');
+        }
+        applyMigrationInsideTransaction(db, next);
+        migrated = true;
+      });
+    } finally {
+      db.pragma(`legacy_alter_table = ${legacyAlterTableBefore}`);
+      db.pragma(`foreign_keys = ${foreignKeysBefore}`);
+    }
   }
 
   const finalLedger = readMigrationLedgerInternal(db);

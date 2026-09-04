@@ -13,7 +13,7 @@ import { bootstrapProduction, type BootstrapResult } from '../authority/bootstra
 
 export interface DatabaseInitResult {
   readonly created: boolean;
-  readonly schemaVersion: 4 | 5 | 6 | 7 | 8;
+  readonly schemaVersion: 4 | 5 | 6 | 7 | 8 | 9;
   readonly appliedVersions: readonly number[];
   readonly bootstrap?: BootstrapResult;
 }
@@ -43,9 +43,9 @@ export function initializeDatabaseForInit(
     };
     runMigrations(opened.db, migrationOptions);
     const integrity = verifyDatabaseIntegrity(opened.db);
-    if (dependencies.phase4Bootstrap === true && integrity.schemaVersion !== 8) {
+    if (dependencies.phase4Bootstrap === true && integrity.schemaVersion !== 9) {
       throw new SecurityError(
-        'Phase 10B.2 implementation requires schema version 8.',
+        'Phase 10B.4 implementation requires schema version 9.',
         'Apply the complete approved migration set before bootstrapping authority.',
       );
     }

@@ -20,6 +20,12 @@ import {
   type AuthorizationStateStatus,
 } from './authorizationState.js';
 import { validatePhase4State, type Phase4StateReport, type Phase4StateValidationOptions } from './state.js';
+import {
+  evaluateEdgeAdmission as evaluateEdgeAdmissionPolicy,
+  type EdgeAdmissionDecision,
+  type EdgeAdmissionFacts,
+} from './policy.js';
+import { isTrustedAuthorizationContext, type AuthorizationContext } from './context.js';
 
 export interface Phase4ManagementRuntime {
   readonly db: SqliteDatabase;
@@ -81,10 +87,10 @@ function openVerifiedDatabase(context: CommandContext): SqliteDatabase {
   try {
     runMigrations(opened.db, { fresh: false });
     const integrity = verifyDatabaseIntegrity(opened.db);
-    if (integrity.schemaVersion !== 8) {
+    if (integrity.schemaVersion !== 9) {
       throw new SecurityError(
-        'Phase 10B.2 requires the database to reach schema version 8 before serving.',
-        'Run the approved Phase 10B.2 migration path and retry serve.',
+        'Phase 10B.4 requires the database to reach schema version 9 before serving.',
+        'Run the approved Phase 10B.4 migration path and retry serve.',
       );
     }
     const chain = verifyAuditChain(opened.db);
@@ -175,4 +181,91 @@ export function openPhase4Runtime(context: CommandContext): Phase4Runtime {
 export function assertPhase4Ready(context: CommandContext): void {
   const runtime = openPhase4Runtime(context);
   runtime.close();
+}
+
+interface EdgeBindingSqlRow {
+  readonly edge_actor_id: unknown;
+  readonly integration_id: unknown;
+  readonly enabled: unknown;
+  readonly current_integration_id: unknown;
+  readonly integration_generation: unknown;
+  readonly integration_enabled: unknown;
+}
+
+function edgeAdmissionFacts(
+  runtime: Phase4ManagementRuntime,
+  context: AuthorizationContext | undefined,
+): EdgeAdmissionFacts {
+  if (context?.transportRole !== 'edge') {
+    return {
+      readiness: runtime.authorizationReadiness.readiness,
+      bindingExists: false,
+      bindingEnabled: false,
+      boundIntegrationId: null,
+      integrationExists: false,
+      integrationEnabled: false,
+      currentIntegrationId: null,
+      currentIntegrationGeneration: null,
+    };
+  }
+
+  const bindingTable = runtime.db.prepare(
+    "SELECT 1 AS present FROM sqlite_schema WHERE type = 'table' AND name = 'edge_transport_bindings'",
+  ).get() as { readonly present?: unknown } | undefined;
+  if (bindingTable?.present !== 1) {
+    return {
+      readiness: runtime.authorizationReadiness.readiness,
+      bindingExists: false,
+      bindingEnabled: false,
+      boundIntegrationId: null,
+      integrationExists: false,
+      integrationEnabled: false,
+      currentIntegrationId: null,
+      currentIntegrationGeneration: null,
+    };
+  }
+
+  const row = runtime.db.prepare(
+    'SELECT b.edge_actor_id, b.integration_id, b.enabled, i.integration_id AS current_integration_id, i.generation AS integration_generation, i.enabled AS integration_enabled FROM edge_transport_bindings b LEFT JOIN integrations i ON i.integration_id = b.integration_id WHERE b.edge_actor_id = ?',
+  ).get(context.transportActorId) as EdgeBindingSqlRow | undefined;
+  return {
+    readiness: runtime.authorizationReadiness.readiness,
+    bindingExists: row !== undefined,
+    bindingEnabled: row?.enabled === 1,
+    boundIntegrationId: typeof row?.integration_id === 'string' ? row.integration_id : null,
+    integrationExists: typeof row?.current_integration_id === 'string',
+    integrationEnabled: row?.integration_enabled === 1,
+    currentIntegrationId: typeof row?.current_integration_id === 'string'
+      ? row.current_integration_id
+      : null,
+    currentIntegrationGeneration: Number.isSafeInteger(row?.integration_generation)
+      ? row?.integration_generation as number
+      : null,
+  };
+}
+
+/** Evaluates and audits the internal deny-only edge admission boundary. */
+export function evaluateEdgeAdmission(
+  runtime: Phase4ManagementRuntime,
+  context: AuthorizationContext | undefined,
+  requestId: string = randomUUID(),
+): EdgeAdmissionDecision {
+  const decision = evaluateEdgeAdmissionPolicy(context, edgeAdmissionFacts(runtime, context));
+  if (context === undefined
+    || !isTrustedAuthorizationContext(context)
+    || context.transportRole !== 'edge') {
+    return decision;
+  }
+  try {
+    runtime.audit.appendEdgeAdmissionDenied({
+      actorId: context.transportActorId,
+      sessionTokenId: context.provenance.sessionTokenId,
+      integrationId: context.integrationId,
+      requestId,
+      reason: decision.reason,
+    });
+  } catch {
+    return { allowed: false, reason: 'audit_failure' };
+  }
+  return decision;
 }

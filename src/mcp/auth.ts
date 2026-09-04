@@ -26,6 +26,9 @@ export interface ActorAuthInfo {
   readonly actorId?: string;
   readonly role?: ActorRole;
   readonly capabilities?: readonly Capability[];
+  /** Present only for a verified edge identity resolved from AOM state. */
+  readonly integrationId?: string;
+  readonly integrationGeneration?: number;
 }
 
 export interface VerifiedActorAuthInfo extends ActorAuthInfo {
@@ -252,6 +255,10 @@ export function createSdkTokenVerifier(resolver: AccessTokenResolver): OAuthToke
           ...(auth.actorId === undefined ? {} : { actorId: auth.actorId }),
           ...(auth.role === undefined ? {} : { role: auth.role }),
           ...(auth.capabilities === undefined ? {} : { capabilities: [...auth.capabilities] }),
+          ...(auth.integrationId === undefined ? {} : { integrationId: auth.integrationId }),
+          ...(auth.integrationGeneration === undefined
+            ? {}
+            : { integrationGeneration: auth.integrationGeneration }),
         },
       };
     },
@@ -271,7 +278,7 @@ export function actorAuthInfoFromSdk(auth: SdkAuthInfo): ActorAuthInfo {
   const actorId = typeof extra['actorId'] === 'string' ? extra['actorId'] : undefined;
   const role = extra['role'];
   const parsedRole =
-    role === 'principal' || role === 'worker' || role === 'observer' || role === 'system'
+    role === 'principal' || role === 'worker' || role === 'observer' || role === 'system' || role === 'edge'
       ? role
       : undefined;
   const rawCapabilities = extra['capabilities'];
@@ -296,6 +303,15 @@ export function actorAuthInfoFromSdk(auth: SdkAuthInfo): ActorAuthInfo {
       capabilities = undefined;
     }
   }
+  const integrationId = typeof extra['integrationId'] === 'string'
+    && extra['integrationId'].trim() !== ''
+    ? extra['integrationId']
+    : undefined;
+  const integrationGeneration = typeof extra['integrationGeneration'] === 'number'
+    && Number.isSafeInteger(extra['integrationGeneration'])
+    && extra['integrationGeneration'] >= 0
+    ? extra['integrationGeneration']
+    : undefined;
   return {
     clientId: auth.clientId,
     scopes: [...auth.scopes],
@@ -305,5 +321,7 @@ export function actorAuthInfoFromSdk(auth: SdkAuthInfo): ActorAuthInfo {
     ...(actorId === undefined ? {} : { actorId }),
     ...(parsedRole === undefined ? {} : { role: parsedRole }),
     ...(capabilities === undefined ? {} : { capabilities }),
+    ...(integrationId === undefined ? {} : { integrationId }),
+    ...(integrationGeneration === undefined ? {} : { integrationGeneration }),
   };
 }

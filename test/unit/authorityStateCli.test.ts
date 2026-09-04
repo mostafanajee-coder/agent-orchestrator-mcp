@@ -10,7 +10,7 @@ const initResult: InitResult = {
   createdDirectories: [],
   leaseKeyCreated: false,
   securityModel: 'test',
-  database: { created: false, schemaVersion: 8, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8] },
+  database: { created: false, schemaVersion: 9, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
 };
 
 const doctorResult: DoctorReport = {

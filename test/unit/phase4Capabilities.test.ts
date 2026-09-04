@@ -8,7 +8,7 @@ import {
 } from '../../src/authority/capabilities.js';
 
 describe('Phase 4 capability catalogue', () => {
-  it('CAP-01 keeps the reviewed seven-value catalogue and canonical ordering', () => {
+  it('CAP-01 keeps the reviewed catalogue and canonical ordering', () => {
     expect(CAPABILITY_VALUES).toEqual([
       'job:create',
       'job:read',
@@ -17,6 +17,7 @@ describe('Phase 4 capability catalogue', () => {
       'work:report',
       'evidence:add',
       'artifact:register',
+      'delegation:request',
     ]);
     expect(parseCapabilities('["job:decide","job:read"]')).toEqual(['job:decide', 'job:read']);
     expect(canonicalCapabilitiesJson(['job:read', 'job:decide'])).toBe('["job:decide","job:read"]');
@@ -29,5 +30,8 @@ describe('Phase 4 capability catalogue', () => {
     expect(() => assertRoleCapabilities('worker', ['job:decide'])).toThrow('incompatible');
     expect(() => assertRoleCapabilities('principal', [])).toThrow('job:decide');
     expect(() => assertRoleCapabilities('system', ['job:read'])).toThrow('incompatible');
+    expect(() => assertRoleCapabilities('edge', ['job:read'])).toThrow('incompatible');
+    expect(() => assertRoleCapabilities('edge', [])).toThrow('only delegation:request');
+    expect(() => assertRoleCapabilities('edge', ['delegation:request', 'job:read'])).toThrow('incompatible');
   });
 });

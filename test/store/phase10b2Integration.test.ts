@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AuditWriter } from '../../src/authority/audit.js';
+import { AuditWriter, verifyAuditChain } from '../../src/authority/audit.js';
 import { bootstrapProduction } from '../../src/authority/bootstrap.js';
 import {
   discoverMigrations,
@@ -92,6 +92,15 @@ function insertRepresentativeV7Data(database: Database.Database): void {
     '2026-09-03T00:00:00Z',
     '2026-09-03T00:00:00Z',
   );
+  new AuditWriter(database, () => Date.parse('2026-09-03T00:00:00Z')).append({
+    actorId: 'codex',
+    actorRole: 'principal',
+    requestId: 'audit-v7-fixture',
+    action: 'auth.rejected',
+    result: 'denied',
+    detail: { reason: 'fixture' },
+    timestamp: '2026-09-03T00:00:00Z',
+  });
 }
 
 beforeEach(() => {
@@ -116,24 +125,26 @@ describe('Phase 10B.2 schema foundation', () => {
     expect(verifyDatabaseIntegrity(migrated).schemaVersion).toBe(7);
     insertRepresentativeV7Data(migrated);
     const beforeData = dataSnapshot(migrated);
+    expect(verifyAuditChain(migrated)).toEqual({ valid: true });
 
     const result = runMigrations(migrated, { fresh: false });
     expect(result).toEqual({
-      appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+      appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
       migrated: true,
     });
     expect(verifyDatabaseIntegrity(fresh)).toMatchObject({
-      schemaVersion: 8,
-      tableCount: 14,
-      appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+      schemaVersion: 9,
+      tableCount: 15,
+      appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     });
     expect(verifyDatabaseIntegrity(migrated)).toMatchObject({
-      schemaVersion: 8,
-      tableCount: 14,
-      appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+      schemaVersion: 9,
+      tableCount: 15,
+      appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     });
     expect(schemaObjects(migrated)).toEqual(schemaObjects(fresh));
     expect(dataSnapshot(migrated)).toEqual(beforeData);
+    expect(verifyAuditChain(migrated)).toEqual({ valid: true });
     expect(migrated.pragma('quick_check', { simple: true })).toBe('ok');
     expect(migrated.pragma('foreign_key_check')).toEqual([]);
     expect(migrated.prepare('SELECT count(*) AS count FROM integrations').get()).toEqual({ count: 0 });
@@ -142,7 +153,7 @@ describe('Phase 10B.2 schema foundation', () => {
     ).get()).toBeUndefined();
   });
 
-  it('keeps the v8 table inert and preserves bootstrap authority semantics', () => {
+  it('keeps the v8 generation table inert and preserves bootstrap authority semantics', () => {
     const database = openDatabase();
     runMigrations(database, { fresh: true });
 
@@ -208,9 +219,9 @@ describe('Phase 10B.2 schema foundation', () => {
     databases.push(reopened);
     expect(reopened.prepare('SELECT integration_id FROM integrations').get()).toEqual({ integration_id: 'persistent-fixture' });
 
-    reopened.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(9, '2026-09-03T00:00:00Z');
+    reopened.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(10, '2026-09-03T00:00:00Z');
     expect(() => runMigrations(reopened, { fresh: false })).toThrow('unknown or future version');
-    reopened.prepare('DELETE FROM schema_migrations WHERE version = 9').run();
+    reopened.prepare('DELETE FROM schema_migrations WHERE version = 10').run();
     reopened.exec('DROP TRIGGER trg_integrations_generation_monotonic');
     expect(() => verifyDatabaseIntegrity(reopened)).toThrow('trigger set');
   });

@@ -61,7 +61,7 @@ export type CanonicalSchemaDefinitions = {
   readonly indexes: Readonly<Record<string, string>>;
   readonly triggers: Readonly<Record<string, string>>;
 };
-export type CanonicalSchemaVersion = 4 | 5 | 6 | 7 | 8;
+export type CanonicalSchemaVersion = 4 | 5 | 6 | 7 | 8 | 9;
 
 /**
  * Canonical definitions are keyed by the schema version that owns them.
@@ -141,6 +141,43 @@ export const CANONICAL_SCHEMA_DEFINITIONS_BY_VERSION = {
       trg_integrations_no_replace: 'cbfbb7c9f9dae2a2551e1df27e2db04df8950fdd2ed6b24c98aaf2bc950e5db6',
       trg_integrations_identity_immutable: '8b25e0f08cde0490202c463f655aebba72a3324d8402879d8f7dc0d500d23ea3',
       trg_integrations_generation_monotonic: '07a33cc11936c754fd71501d7e065b1354cdbdadae60f8e2877696d05dae029d',
+    },
+  },
+  9: {
+    tables: {
+      ...CANONICAL_SCHEMA_DEFINITIONS.tables,
+      actors: '0637612dde9b702107cd55546b1229298f9b8f9e389c5f8138e22a83bfd7b93c',
+      audit_log: 'cf81c019ecad3c651f5912574a20cb3e2f06a32d87f691a9e79165993b83737a',
+      integrations: '49cc1a08469ec5f54ee4ff54cf7b7118741a0be0bbfe0ead9894575358be7d5f',
+      edge_transport_bindings: 'c7cb7d85004c0ec51d29236b2d46baad2557db0fb8a720f8e301adfb616e1e15',
+    },
+    indexes: {
+      ...CANONICAL_SCHEMA_DEFINITIONS.indexes,
+      ix_evidence_job_cycle_created: '0ff4e34be1371768f83b70341d4e7650c2e6e95a7f0370ec5edaa8e130e66d96',
+      ix_artifacts_job_cycle_created: '154103807760ff486703ae17e4ab5c942cf876eb0b1f7ebb655618c616488950',
+      ux_edge_transport_bindings_integration: 'e0bbd0bb499ec06a17839b8e4dcd4f28e13ce93e4add88d73d9793892d41857a',
+    },
+    triggers: {
+      ...CANONICAL_SCHEMA_DEFINITIONS.triggers,
+      trg_audit_no_replace: '3b7713e0b36f80004fdccfdb61a87d9796335d0ef8995086e9b65ab997f3cd16',
+      trg_actors_identity_immutable: '9a804024f94c19d20c8b115c86ef07f4dde325c7a6c7d769d5b3ba6f1a89e27b',
+      trg_actor_tokens_binding_immutable: '5de07e243a0a6040c2b6e800aefea55962a0b347a0c43ab28c08641fc59c50a7',
+      trg_actor_tokens_no_reenable: '401f1de1a03eed9a78351301c9505b04ee3bc3b3bec3953338f667467c7fb5e4',
+      trg_evidence_no_update: '378fd1495244af4bbbf8d57bf038a53b6dc6efae8d4ae4175bc1547a17c1644a',
+      trg_evidence_no_delete: '9d8ec4b96c0c89674a813aea1dbabb775276d37a65889e8c2c5efa87cafa5fbb',
+      trg_evidence_no_replace: '4c0df031155224bae0e9717a3d56c87fc31adb3da6dd441385f3eb3c41189db4',
+      trg_evidence_binding: '5ceb39be6977df1915269e941edbe5254d8e9a9f18f750bc17d8627a834bac0b',
+      trg_artifacts_no_update: '0023da1ce3fe1bba9760ce7a307d7dee3f30a0274eee42e349f8fbbc9b787e23',
+      trg_artifacts_no_delete: '69ecb2b2329af36b245bc13539461ee1119b5e8e2f8b2840e27f56fe50198669',
+      trg_artifacts_no_replace: '267ec78b321b6a95e980917b42ad755ecf8e2f2203a4f7eeda9cf9f6b472ffc7',
+      trg_artifacts_binding: '770b82049eeb8f4a8049ed838222a914477fa5e5a12a24b999bc8c8dfbae256e',
+      trg_integrations_no_replace: 'cbfbb7c9f9dae2a2551e1df27e2db04df8950fdd2ed6b24c98aaf2bc950e5db6',
+      trg_integrations_identity_immutable: '8b25e0f08cde0490202c463f655aebba72a3324d8402879d8f7dc0d500d23ea3',
+      trg_integrations_generation_monotonic: '07a33cc11936c754fd71501d7e065b1354cdbdadae60f8e2877696d05dae029d',
+      trg_edge_bindings_no_replace: 'c8c0ec4bb2fda06f62b2ee73bc6b172c369494486d20796c9f638f076aaaabe2',
+      trg_edge_bindings_identity_immutable: 'eef6f781502ca7e7993dcf4b0ddb0f5a9458bab4ed5a32ac5061066335b33a26',
+      trg_edge_bindings_no_delete: 'bef7bffd0658a9841f582c0bc9f7d75e554793d24c05263580af1d4645c73fc1',
+      trg_edge_bindings_actor_role: '82202642f01e9251b42f88181f839317468b95a32326c68cc4a55906b5f55cfa',
     },
   },
 } as const satisfies Readonly<Record<CanonicalSchemaVersion, CanonicalSchemaDefinitions>>;

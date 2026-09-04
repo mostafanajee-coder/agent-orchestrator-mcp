@@ -19,6 +19,14 @@ export interface AuthorizationProvenance {
   readonly sessionTokenId: string;
   readonly sessionLabel: string;
   readonly authorizationSource: AuthorizationSource;
+  readonly integrationId?: string;
+  readonly integrationGeneration?: number;
+}
+
+/** Internal metadata attached by the persistent resolver for edge actors. */
+export interface EdgeAuthenticationInfo {
+  readonly integrationId?: string;
+  readonly integrationGeneration?: number;
 }
 
 const AUTHORIZATION_CONTEXT_BRAND = Symbol('AuthorizationContext');
@@ -41,6 +49,8 @@ export interface AuthorizationContext {
   readonly authorizationSource: AuthorizationSource;
   readonly provenance: AuthorizationProvenance;
   readonly expiresAt: number;
+  readonly integrationId: string | null;
+  readonly integrationGeneration: number | null;
 }
 
 function boundedText(value: unknown): value is string {
@@ -52,7 +62,11 @@ function boundedText(value: unknown): value is string {
 }
 
 function isActorRole(value: unknown): value is ActorRole {
-  return value === 'principal' || value === 'worker' || value === 'observer' || value === 'system';
+  return value === 'principal'
+    || value === 'worker'
+    || value === 'observer'
+    || value === 'system'
+    || value === 'edge';
 }
 
 function isCapability(value: unknown): value is Capability {
@@ -79,6 +93,17 @@ function validPrincipalProjection(
   return effectivePrincipalId === expected;
 }
 
+function validEdgeMetadata(
+  role: ActorRole,
+  integrationId: unknown,
+  integrationGeneration: unknown,
+): boolean {
+  if (role !== 'edge') return integrationId === null && integrationGeneration === null;
+  return boundedText(integrationId)
+    && Number.isSafeInteger(integrationGeneration)
+    && (integrationGeneration as number) >= 0;
+}
+
 /**
  * Checks the runtime invariants of a context created by this module. A
  * delegated-shaped value is never accepted as a trusted direct context; the
@@ -99,6 +124,11 @@ export function isTrustedAuthorizationContext(value: unknown): value is Authoriz
     || candidate.authorizationSource !== 'authenticated-actor'
     || !Number.isFinite(candidate.expiresAt)
     || (candidate.expiresAt as number) <= 0
+    || !validEdgeMetadata(
+      candidate.transportRole,
+      candidate.integrationId,
+      candidate.integrationGeneration,
+    )
     || !validPrincipalProjection(
       candidate.transportActorId,
       candidate.transportRole,
@@ -114,7 +144,10 @@ export function isTrustedAuthorizationContext(value: unknown): value is Authoriz
     && provenance.transportActorId === candidate.transportActorId
     && boundedText(provenance.sessionTokenId)
     && boundedText(provenance.sessionLabel)
-    && provenance.authorizationSource === 'authenticated-actor';
+    && provenance.authorizationSource === 'authenticated-actor'
+    && (candidate.transportRole !== 'edge'
+      || (provenance.integrationId === candidate.integrationId
+        && provenance.integrationGeneration === candidate.integrationGeneration));
 }
 
 /**
@@ -125,6 +158,11 @@ export function isTrustedAuthorizationContext(value: unknown): value is Authoriz
 export function createDirectAuthorizationContext(
   authInfo: ActorAuthInfo | undefined,
 ): AuthorizationContext | undefined {
+  const edgeInfo = authInfo as (ActorAuthInfo & EdgeAuthenticationInfo) | undefined;
+  const integrationId = authInfo?.role === 'edge' ? edgeInfo?.integrationId ?? null : null;
+  const integrationGeneration = authInfo?.role === 'edge'
+    ? edgeInfo?.integrationGeneration ?? null
+    : null;
   if (authInfo === undefined
     || !boundedText(authInfo.clientId)
     || !boundedText(authInfo.actorId)
@@ -134,7 +172,8 @@ export function createDirectAuthorizationContext(
     || !boundedText(authInfo.sessionLabel)
     || !Number.isFinite(authInfo.expiresAt)
     || authInfo.expiresAt <= 0
-    || !validCapabilitySet(authInfo.role, authInfo.capabilities)) {
+    || !validCapabilitySet(authInfo.role, authInfo.capabilities)
+    || !validEdgeMetadata(authInfo.role, integrationId, integrationGeneration)) {
     return undefined;
   }
 
@@ -144,6 +183,12 @@ export function createDirectAuthorizationContext(
     sessionTokenId: authInfo.tokenId,
     sessionLabel: authInfo.sessionLabel,
     authorizationSource: 'authenticated-actor' as const,
+    ...(authInfo.role === 'edge'
+      ? {
+        integrationId: integrationId as string,
+        integrationGeneration: integrationGeneration as number,
+      }
+      : {}),
   });
   const context: AuthorizationContext = {
     [AUTHORIZATION_CONTEXT_BRAND]: true,
@@ -157,6 +202,8 @@ export function createDirectAuthorizationContext(
     authorizationSource: 'authenticated-actor',
     provenance,
     expiresAt: authInfo.expiresAt,
+    integrationId,
+    integrationGeneration,
   };
   const frozenContext = Object.freeze(context);
   TRUSTED_CONTEXTS.add(frozenContext);

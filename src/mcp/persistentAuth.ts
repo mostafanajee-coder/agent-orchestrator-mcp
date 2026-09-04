@@ -12,6 +12,7 @@ import {
   type ActorRole,
   type Capability,
 } from '../authority/capabilities.js';
+import type { EdgeAuthenticationInfo } from '../authority/context.js';
 import type { AuditWriter } from '../authority/audit.js';
 import type { SqliteDatabase } from '../store/db.js';
 import { withImmediateTransaction } from '../store/db.js';
@@ -32,6 +33,12 @@ interface PersistentTokenRow {
   readonly actor_disabled: unknown;
   readonly role: unknown;
   readonly capabilities_json: unknown;
+  readonly binding_actor_id: unknown;
+  readonly binding_integration_id: unknown;
+  readonly binding_enabled: unknown;
+  readonly current_integration_id: unknown;
+  readonly integration_generation: unknown;
+  readonly integration_enabled: unknown;
 }
 
 export interface PersistentTokenResolverOptions {
@@ -48,9 +55,20 @@ function text(value: unknown): string | undefined {
 }
 
 function role(value: unknown): ActorRole | undefined {
-  return value === 'principal' || value === 'worker' || value === 'observer' || value === 'system'
+  return value === 'principal'
+    || value === 'worker'
+    || value === 'observer'
+    || value === 'system'
+    || value === 'edge'
     ? value
     : undefined;
+}
+
+function hasTable(db: SqliteDatabase, table: string): boolean {
+  const row = db.prepare(
+    'SELECT 1 AS present FROM sqlite_schema WHERE type = ? AND name = ?',
+  ).get('table', table) as { readonly present?: unknown } | undefined;
+  return row?.present === 1;
 }
 
 function validExpiry(value: unknown, nowMs: number): number {
@@ -97,9 +115,13 @@ export class PersistentTokenResolver implements AccessTokenResolver {
       if (typeof token !== 'string' || token.trim() === '' || /\s/.test(token)) invalidToken();
       const digest = hashAccessToken(token);
       return withImmediateTransaction(this.db, () => {
-        const row = this.db.prepare(
-          'SELECT t.token_id, t.actor_id, t.token_sha256, t.label, t.disabled AS token_disabled, t.expires_at, a.disabled AS actor_disabled, a.role, a.capabilities_json FROM actor_tokens t JOIN actors a ON a.actor_id = t.actor_id WHERE lower(t.token_sha256) = ?',
-        ).get(digest) as PersistentTokenRow | undefined;
+        const row = hasTable(this.db, 'edge_transport_bindings')
+          ? this.db.prepare(
+            'SELECT t.token_id, t.actor_id, t.token_sha256, t.label, t.disabled AS token_disabled, t.expires_at, a.disabled AS actor_disabled, a.role, a.capabilities_json, b.edge_actor_id AS binding_actor_id, b.integration_id AS binding_integration_id, b.enabled AS binding_enabled, i.integration_id AS current_integration_id, i.generation AS integration_generation, i.enabled AS integration_enabled FROM actor_tokens t JOIN actors a ON a.actor_id = t.actor_id LEFT JOIN edge_transport_bindings b ON b.edge_actor_id = a.actor_id LEFT JOIN integrations i ON i.integration_id = b.integration_id WHERE lower(t.token_sha256) = ?',
+          ).get(digest) as PersistentTokenRow | undefined
+          : this.db.prepare(
+            'SELECT t.token_id, t.actor_id, t.token_sha256, t.label, t.disabled AS token_disabled, t.expires_at, a.disabled AS actor_disabled, a.role, a.capabilities_json, NULL AS binding_actor_id, NULL AS binding_integration_id, NULL AS binding_enabled, NULL AS current_integration_id, NULL AS integration_generation, NULL AS integration_enabled FROM actor_tokens t JOIN actors a ON a.actor_id = t.actor_id WHERE lower(t.token_sha256) = ?',
+          ).get(digest) as PersistentTokenRow | undefined;
         if (row === undefined) invalidToken();
 
         const actorId = text(row.actor_id);
@@ -135,13 +157,32 @@ export class PersistentTokenResolver implements AccessTokenResolver {
         }
         if (canonicalCapabilitiesJson(capabilities) !== rawCapabilities) invalidToken();
         const expiresAt = validExpiry(row.expires_at, nowMs);
+        let edgeInfo: EdgeAuthenticationInfo | undefined;
+        if (actorRole === 'edge') {
+          if (
+            row.binding_actor_id !== actorId
+            || typeof row.binding_integration_id !== 'string'
+            || row.binding_integration_id.trim() === ''
+            || row.binding_enabled !== 1
+            || row.current_integration_id !== row.binding_integration_id
+            || row.integration_enabled !== 1
+            || !Number.isSafeInteger(row.integration_generation)
+            || (row.integration_generation as number) < 0
+          ) {
+            invalidToken();
+          }
+          edgeInfo = {
+            integrationId: row.binding_integration_id,
+            integrationGeneration: row.integration_generation as number,
+          };
+        }
         const lastUsedAt = new Date(nowMs).toISOString();
         const updated = this.db.prepare(
           'UPDATE actor_tokens SET last_used_at = ? WHERE token_id = ? AND disabled = 0',
         ).run(lastUsedAt, tokenId);
         if (updated.changes !== 1) invalidToken();
 
-        return {
+        const verified: VerifiedActorAuthInfo & EdgeAuthenticationInfo = {
           clientId: actorId,
           actorId,
           role: actorRole,
@@ -152,7 +193,9 @@ export class PersistentTokenResolver implements AccessTokenResolver {
           tokenId,
           sessionLabel: label,
           expiresAt,
+          ...(edgeInfo === undefined ? {} : edgeInfo),
         };
+        return verified;
       });
     } catch (cause) {
       if (cause instanceof OAuthError) {

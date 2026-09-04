@@ -45,7 +45,9 @@ export function buildMcpServer(
     { capabilities: { tools: {} } },
   );
   const normalizedActor = actorAuthInfoFromAuthorizationContext(authorizationContext);
-  registerPing(server, options.transport, authorizationContext, context.era);
+  if (authorizationContext?.transportRole !== 'edge') {
+    registerPing(server, options.transport, authorizationContext, context.era);
+  }
   if (options.authority !== undefined) {
     registerCodexDecide(server, options.authority, normalizedActor);
   }

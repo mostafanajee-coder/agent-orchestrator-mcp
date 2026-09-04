@@ -37,6 +37,7 @@ describe('migration build assets', () => {
       '006_actor_token_immutability.sql',
       '007_evidence_artifact_integrity.sql',
       '008_integration_generation_foundation.sql',
+      '009_edge_transport_identity.sql',
     ]);
   });
 });

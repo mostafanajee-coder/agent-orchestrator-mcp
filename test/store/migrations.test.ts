@@ -18,7 +18,7 @@ import { verifyDatabaseIntegrity } from '../../src/store/integrity.js';
 
 let directory: string;
 let db: Database.Database;
-const APPROVED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+const APPROVED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 function openTestDatabase(): void {
   directory = mkdtempSync(join(tmpdir(), 'aom-phase3-migrations-'));

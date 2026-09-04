@@ -57,7 +57,13 @@ function asText(value: unknown, field: string): string {
 }
 
 function asRole(value: unknown): ActorRole {
-  if (value !== 'principal' && value !== 'worker' && value !== 'observer' && value !== 'system') {
+  if (
+    value !== 'principal'
+    && value !== 'worker'
+    && value !== 'observer'
+    && value !== 'system'
+    && value !== 'edge'
+  ) {
     fail('Invalid actor role in the authority state.');
   }
   return value;
@@ -116,6 +122,61 @@ function validateActorRows(db: SqliteDatabase): Map<string, ActorSqlRow> {
   return actors;
 }
 
+interface EdgeBindingSqlRow {
+  readonly edge_actor_id: unknown;
+  readonly integration_id: unknown;
+  readonly enabled: unknown;
+  readonly created_at: unknown;
+  readonly updated_at: unknown;
+}
+
+function tableExists(db: SqliteDatabase, table: string): boolean {
+  const row = db.prepare(
+    'SELECT 1 AS present FROM sqlite_schema WHERE type = ? AND name = ?',
+  ).get('table', table) as { readonly present?: unknown } | undefined;
+  return row?.present === 1;
+}
+
+function validateEdgeBindings(
+  db: SqliteDatabase,
+  actors: ReadonlyMap<string, ActorSqlRow>,
+): void {
+  const edgeActorIds = [...actors.entries()]
+    .filter(([, actor]) => actor.role === 'edge')
+    .map(([actorId]) => actorId);
+  if (!tableExists(db, 'edge_transport_bindings')) {
+    if (edgeActorIds.length !== 0) fail('The authority state has an edge actor without binding storage.');
+    return;
+  }
+
+  const rows = db.prepare(
+    'SELECT edge_actor_id, integration_id, enabled, created_at, updated_at FROM edge_transport_bindings ORDER BY edge_actor_id',
+  ).all() as EdgeBindingSqlRow[];
+  const boundActors = new Set<string>();
+  for (const row of rows) {
+    const actorId = asText(row.edge_actor_id, 'edge actor_id');
+    const integrationId = asText(row.integration_id, 'edge integration_id');
+    if (boundActors.has(actorId)) fail('The authority state contains duplicate edge bindings.');
+    boundActors.add(actorId);
+    if (row.enabled !== 0 && row.enabled !== 1) fail('Invalid edge binding enabled state.');
+    assertTimestamp(row.created_at, 'edge binding creation timestamp');
+    assertTimestamp(row.updated_at, 'edge binding update timestamp');
+    if (actors.get(actorId)?.role !== 'edge') {
+      fail('An edge binding references a non-edge actor.');
+    }
+    const integration = db.prepare(
+      'SELECT integration_id FROM integrations WHERE integration_id = ?',
+    ).get(integrationId) as { readonly integration_id?: unknown } | undefined;
+    if (integration?.integration_id !== integrationId) {
+      fail('An edge binding references a missing integration.');
+    }
+  }
+
+  if (boundActors.size !== edgeActorIds.length || edgeActorIds.some((actorId) => !boundActors.has(actorId))) {
+    fail('Every edge actor must have exactly one edge transport binding.');
+  }
+}
+
 function validateTokenRows(
   db: SqliteDatabase,
   actors: ReadonlyMap<string, ActorSqlRow>,
@@ -160,6 +221,7 @@ export function validatePhase4State(
   options: Phase4StateValidationOptions = {},
 ): Phase4StateReport {
   const actors = validateActorRows(db);
+  validateEdgeBindings(db, actors);
   return {
     principalActorId: 'codex',
     usableTokenCount: validateTokenRows(

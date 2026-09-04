@@ -66,6 +66,7 @@ export const EXPECTED_TABLES_BY_VERSION = {
   6: EXPECTED_TABLES,
   7: EXPECTED_TABLES,
   8: [...EXPECTED_TABLES, 'integrations'],
+  9: [...EXPECTED_TABLES, 'integrations', 'edge_transport_bindings'],
 } as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
 
 const EXPECTED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
@@ -209,6 +210,17 @@ const EXPECTED_COLUMNS_BY_VERSION = {
     ...EXPECTED_COLUMNS,
     integrations: ['integration_id', 'generation', 'enabled', 'created_at', 'updated_at'],
   },
+  9: {
+    ...EXPECTED_COLUMNS,
+    integrations: ['integration_id', 'generation', 'enabled', 'created_at', 'updated_at'],
+    edge_transport_bindings: [
+      'edge_actor_id',
+      'integration_id',
+      'enabled',
+      'created_at',
+      'updated_at',
+    ],
+  },
 } as const satisfies Readonly<Record<CanonicalSchemaVersion, Readonly<Record<string, readonly string[]>>>>;
 
 export const EXPECTED_INDEXES = [
@@ -241,6 +253,12 @@ export const EXPECTED_INDEXES_BY_VERSION = {
     ...EXPECTED_INDEXES,
     'ix_evidence_job_cycle_created',
     'ix_artifacts_job_cycle_created',
+  ],
+  9: [
+    ...EXPECTED_INDEXES,
+    'ix_evidence_job_cycle_created',
+    'ix_artifacts_job_cycle_created',
+    'ux_edge_transport_bindings_integration',
   ],
 } as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
 
@@ -305,6 +323,27 @@ export const EXPECTED_TRIGGERS_BY_VERSION = {
     'trg_integrations_no_replace',
     'trg_integrations_identity_immutable',
     'trg_integrations_generation_monotonic',
+  ],
+  9: [
+    ...EXPECTED_TRIGGERS,
+    'trg_actors_identity_immutable',
+    'trg_actor_tokens_binding_immutable',
+    'trg_actor_tokens_no_reenable',
+    'trg_evidence_no_update',
+    'trg_evidence_no_delete',
+    'trg_evidence_no_replace',
+    'trg_evidence_binding',
+    'trg_artifacts_no_update',
+    'trg_artifacts_no_delete',
+    'trg_artifacts_no_replace',
+    'trg_artifacts_binding',
+    'trg_integrations_no_replace',
+    'trg_integrations_identity_immutable',
+    'trg_integrations_generation_monotonic',
+    'trg_edge_bindings_no_replace',
+    'trg_edge_bindings_identity_immutable',
+    'trg_edge_bindings_no_delete',
+    'trg_edge_bindings_actor_role',
   ],
 } as const satisfies Readonly<Record<CanonicalSchemaVersion, readonly string[]>>;
 
@@ -397,6 +436,16 @@ function verifyIndexes(db: SqliteDatabase, version: CanonicalSchemaVersion): voi
       fail('The security-sensitive index ' + indexName + ' is not uniquely defined as approved.');
     }
   }
+  if (version >= 9) {
+    const edgeIndex = (db.pragma("index_list('edge_transport_bindings')") as Array<{
+      readonly name: string;
+      readonly unique: number;
+      readonly partial: number;
+    }>).find((entry) => entry.name === 'ux_edge_transport_bindings_integration');
+    if (edgeIndex?.unique !== 1 || edgeIndex.partial !== 0) {
+      fail('The edge transport integration binding index is not uniquely defined as approved.');
+    }
+  }
 }
 
 function verifyTriggers(db: SqliteDatabase, version: CanonicalSchemaVersion): void {
@@ -472,6 +521,65 @@ function verifyLeaseRelation(db: SqliteDatabase): void {
   }
 }
 
+interface EdgeBindingRow {
+  readonly edge_actor_id: unknown;
+  readonly integration_id: unknown;
+  readonly enabled: unknown;
+  readonly created_at: unknown;
+  readonly updated_at: unknown;
+}
+
+function verifyEdgeBindings(db: SqliteDatabase, version: CanonicalSchemaVersion): void {
+  if (version < 9) return;
+
+  const edgeActors = db.prepare(
+    "SELECT actor_id FROM actors WHERE role = 'edge' ORDER BY actor_id",
+  ).all() as Array<{ readonly actor_id: unknown }>;
+  const bindings = db.prepare(
+    'SELECT edge_actor_id, integration_id, enabled, created_at, updated_at FROM edge_transport_bindings ORDER BY edge_actor_id',
+  ).all() as EdgeBindingRow[];
+  const boundActors = new Set<string>();
+  for (const binding of bindings) {
+    if (
+      typeof binding.edge_actor_id !== 'string'
+      || binding.edge_actor_id.trim() === ''
+      || typeof binding.integration_id !== 'string'
+      || binding.integration_id.trim() === ''
+      || (binding.enabled !== 0 && binding.enabled !== 1)
+      || typeof binding.created_at !== 'string'
+      || binding.created_at.trim() === ''
+      || typeof binding.updated_at !== 'string'
+      || binding.updated_at.trim() === ''
+    ) {
+      fail('The edge transport binding contains malformed fields.');
+    }
+    if (boundActors.has(binding.edge_actor_id)) {
+      fail('The edge transport binding contains a duplicate actor identity.');
+    }
+    boundActors.add(binding.edge_actor_id);
+    const actor = db.prepare(
+      'SELECT role FROM actors WHERE actor_id = ?',
+    ).get(binding.edge_actor_id) as { readonly role?: unknown } | undefined;
+    if (actor?.role !== 'edge') {
+      fail('Every edge transport binding must reference an edge actor.');
+    }
+    const integration = db.prepare(
+      'SELECT integration_id FROM integrations WHERE integration_id = ?',
+    ).get(binding.integration_id) as { readonly integration_id?: unknown } | undefined;
+    if (integration?.integration_id !== binding.integration_id) {
+      fail('Every edge transport binding must reference an existing integration.');
+    }
+  }
+
+  const edgeActorIds = edgeActors.map((row) => row.actor_id);
+  if (
+    edgeActorIds.some((actorId) => typeof actorId !== 'string' || !boundActors.has(actorId))
+    || boundActors.size !== edgeActorIds.length
+  ) {
+    fail('Every edge actor must have exactly one edge transport binding.');
+  }
+}
+
 function verifySqlHealth(db: SqliteDatabase): void {
   const quickCheck = db.pragma('quick_check', { simple: true });
   if (String(quickCheck).toLowerCase() !== 'ok') {
@@ -488,7 +596,7 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     const ledger = readMigrationLedger(db);
     validateAppliedPrefix(ledger, false, KNOWN_MIGRATION_VERSIONS);
     const schemaVersion = ledger.versions[ledger.versions.length - 1];
-    if (schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7 && schemaVersion !== 8) {
+    if (schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6 && schemaVersion !== 7 && schemaVersion !== 8 && schemaVersion !== 9) {
       fail('The database has an unsupported schema version.');
     }
     verifyTables(db, schemaVersion);
@@ -498,6 +606,7 @@ export function verifyDatabaseIntegrity(db: SqliteDatabase): IntegrityReport {
     verifySqlHealth(db);
     verifySeeds(db);
     verifyLeaseRelation(db);
+    verifyEdgeBindings(db, schemaVersion);
     return {
       schemaVersion,
       tableCount: EXPECTED_TABLES_BY_VERSION[schemaVersion].length,

@@ -277,7 +277,7 @@ describe('Phase 10B.1 authorization context', () => {
       const stdioPayload = await responsePayload(await stdioHandler.fetch(request(body)));
       const httpTools = (httpPayload.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
       const stdioTools = (stdioPayload.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
-      expect(httpTools).toEqual(['ping', 'job_get', 'job_list', 'evidence_list', 'artifact_list']);
+      expect(httpTools).toEqual(['ping', 'job_get', 'job_list']);
       expect(httpTools).not.toEqual(expect.arrayContaining([
         'job_create',
         'job_start',

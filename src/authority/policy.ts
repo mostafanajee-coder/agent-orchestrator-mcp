@@ -1,4 +1,5 @@
 import type { VerifiedActorAuthInfo } from '../mcp/auth.js';
+import type { AuthorizationReadiness } from './authorizationState.js';
 
 import {
   actorAuthInfoFromAuthorizationContext,
@@ -23,6 +24,39 @@ export const AUTHORIZATION_DECISION_REASONS = [
   'capability_not_granted',
 ] as const;
 export type AuthorizationDecisionReason = (typeof AUTHORIZATION_DECISION_REASONS)[number];
+
+export const EDGE_ADMISSION_DENIAL_REASONS = [
+  'issuance_not_enabled',
+  'edge_not_bound',
+  'binding_disabled',
+  'integration_disabled',
+  'generation_mismatch',
+  'authorization_state_unready',
+  'invalid_context',
+  'audit_failure',
+] as const;
+export type EdgeAdmissionDenialReason = (typeof EDGE_ADMISSION_DENIAL_REASONS)[number];
+
+export const EDGE_ADMISSION_REQUIREMENT: AuthorizationRequirement = Object.freeze({
+  capability: 'delegation:request',
+  allowedRoles: Object.freeze(['edge'] as const),
+});
+
+export interface EdgeAdmissionFacts {
+  readonly readiness: AuthorizationReadiness;
+  readonly bindingExists: boolean;
+  readonly bindingEnabled: boolean;
+  readonly boundIntegrationId: string | null;
+  readonly integrationExists: boolean;
+  readonly integrationEnabled: boolean;
+  readonly currentIntegrationId: string | null;
+  readonly currentIntegrationGeneration: number | null;
+}
+
+export interface EdgeAdmissionDecision {
+  readonly allowed: false;
+  readonly reason: EdgeAdmissionDenialReason;
+}
 
 /** A server-authored operation requirement, never MCP caller input. */
 export interface AuthorizationRequirement {
@@ -49,7 +83,11 @@ function isCapability(value: unknown): value is Capability {
 }
 
 function isRole(value: unknown): value is ActorRole {
-  return value === 'principal' || value === 'worker' || value === 'observer' || value === 'system';
+  return value === 'principal'
+    || value === 'worker'
+    || value === 'observer'
+    || value === 'system'
+    || value === 'edge';
 }
 
 function validRequirement(value: unknown): value is AuthorizationRequirement {
@@ -109,6 +147,49 @@ export function evaluateAuthorization(
 export const authorizationPolicy: AuthorizationPolicy = Object.freeze({
   evaluate: evaluateAuthorization,
 });
+
+function validEdgeFacts(facts: EdgeAdmissionFacts): boolean {
+  return typeof facts.bindingExists === 'boolean'
+    && typeof facts.bindingEnabled === 'boolean'
+    && (facts.boundIntegrationId === null || typeof facts.boundIntegrationId === 'string')
+    && typeof facts.integrationExists === 'boolean'
+    && typeof facts.integrationEnabled === 'boolean'
+    && (facts.currentIntegrationId === null || typeof facts.currentIntegrationId === 'string')
+    && (facts.currentIntegrationGeneration === null
+      || (Number.isSafeInteger(facts.currentIntegrationGeneration)
+        && facts.currentIntegrationGeneration >= 0));
+}
+
+/** Evaluates the request-only edge boundary. It is permanently deny-only here. */
+export function evaluateEdgeAdmission(
+  context: AuthorizationContext | undefined,
+  facts: EdgeAdmissionFacts,
+): EdgeAdmissionDecision {
+  if (!validEdgeFacts(facts)) return { allowed: false, reason: 'invalid_context' };
+  const authorization = authorizationPolicy.evaluate(context, EDGE_ADMISSION_REQUIREMENT);
+  if (!authorization.allowed) return { allowed: false, reason: 'invalid_context' };
+  if (facts.readiness !== 'READY') {
+    return { allowed: false, reason: 'authorization_state_unready' };
+  }
+  if (!facts.bindingExists || facts.boundIntegrationId === null) {
+    return { allowed: false, reason: 'edge_not_bound' };
+  }
+  if (!facts.bindingEnabled) return { allowed: false, reason: 'binding_disabled' };
+  if (!facts.integrationExists || facts.currentIntegrationId === null) {
+    return { allowed: false, reason: 'edge_not_bound' };
+  }
+  if (!facts.integrationEnabled) return { allowed: false, reason: 'integration_disabled' };
+  if (
+    context?.integrationId !== facts.boundIntegrationId
+    || facts.currentIntegrationId !== facts.boundIntegrationId
+    || context.integrationGeneration === null
+    || facts.currentIntegrationGeneration === null
+    || context.integrationGeneration !== facts.currentIntegrationGeneration
+  ) {
+    return { allowed: false, reason: 'generation_mismatch' };
+  }
+  return { allowed: false, reason: 'issuance_not_enabled' };
+}
 
 /**
  * Returns the normalized legacy actor projection only after the policy allows

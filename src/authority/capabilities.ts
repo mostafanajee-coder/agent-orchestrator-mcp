@@ -8,11 +8,12 @@ export const CAPABILITY_VALUES = [
   'work:report',
   'evidence:add',
   'artifact:register',
+  'delegation:request',
 ] as const;
 
 export type Capability = (typeof CAPABILITY_VALUES)[number];
 
-export const ActorRoleSchema = z.enum(['principal', 'worker', 'observer', 'system']);
+export const ActorRoleSchema = z.enum(['principal', 'worker', 'observer', 'system', 'edge']);
 export type ActorRole = z.infer<typeof ActorRoleSchema>;
 
 const CapabilitySchema = z.enum(CAPABILITY_VALUES);
@@ -45,6 +46,7 @@ const ALLOWED_BY_ROLE: Readonly<Record<ActorRole, ReadonlySet<Capability>>> = {
   worker: new Set(['job:read', 'work:report', 'evidence:add', 'artifact:register']),
   observer: new Set(['job:read']),
   system: new Set(),
+  edge: new Set(['delegation:request']),
 };
 
 function parseJson(value: string): unknown {
@@ -84,6 +86,10 @@ export function assertRoleCapabilities(
   }
   if (role === 'system' && capabilities.length !== 0) {
     throw new AuthorityConfigurationError('The system actor must have no public capabilities.');
+  }
+  if (role === 'edge'
+    && (capabilities.length !== 1 || !capabilities.includes('delegation:request'))) {
+    throw new AuthorityConfigurationError('The edge actor must have only delegation:request.');
   }
 }
 
